@@ -1,0 +1,198 @@
+/* ============================================================
+   秉笔工作台 · 设计令牌
+   my-wordediter — src/styles/tokens.css
+   ------------------------------------------------------------
+   规则（实现时必须遵守）：
+   1. 组件样式一律通过 var(--token) 取色，禁止写死颜色字面量。
+   2. 禁止在 @media / [data-theme] 块内定义组件样式，只在其中重定义令牌。
+   3. --paper-* 是"纸张"令牌组，两个主题下保持一致（文档预览沿用
+      Word/Acrobat 惯例：暗色 UI 中纸张仍为浅色），自成一套，
+      纸上的任何颜色只能取 --paper-* 令牌。
+   4. 朱红 --danger 是语义色，仅用于 error / 待核实 / 红头，
+      不得当作装饰色或强调色使用。交互强调色只有 --accent。
+   ============================================================ */
+
+:root {
+  /* —— 底色与层次 —— */
+  --ground:      #eef1f5;   /* 应用底 */
+  --surface:     #ffffff;   /* 面板 */
+  --surface-2:   #f5f7fa;   /* 面板内嵌区 */
+  --surface-3:   #e9edf3;   /* 输入框 / 轨道 */
+
+  /* —— 墨（蓝偏中性，非纯灰）—— */
+  --ink:         #141821;   /* 主文字 */
+  --ink-2:       #4c5666;   /* 次要文字 */
+  --ink-3:       #7a8595;   /* 弱化 / 占位 */
+
+  /* —— 线 —— */
+  --line:        #d9dfe8;
+  --line-soft:   #e8ecf2;
+  --line-strong: #b9c3d1;
+
+  /* —— 交互强调（石青，全站唯一）—— */
+  --accent:      #1b5e7e;
+  --accent-hi:   #17506c;   /* hover */
+  --accent-ink:  #ffffff;   /* 强调底上的文字 */
+  --accent-soft: #e2eef4;   /* 浅色底 */
+  --accent-line: #a9cddd;
+
+  /* —— 语义色 —— */
+  --danger:      #b8362c;   /* 朱：错误 / 待核实 / 红头 */
+  --danger-soft: #fbe9e7;
+  --danger-line: #eab6b0;
+  --warn:        #96690f;   /* 赭：警告 */
+  --warn-soft:   #fbf1dc;
+  --warn-line:   #e3cd9a;
+  --ok:          #3a6e4c;   /* 松绿：通过 */
+  --ok-soft:     #e4f0e8;
+  --ok-line:     #a8ccb5;
+  --info:        #4c5666;
+  --info-soft:   #eceff4;
+
+  /* —— 纸（主题稳定，见规则 3）—— */
+  --paper:       #fcfcfa;
+  --paper-ink:   #17171a;
+  --paper-line:  #d8d6cf;
+  --paper-grid:  rgba(27,94,126,.10);
+  --paper-seal:  #c8362b;   /* 红头 / 分隔线 */
+  --paper-shade: rgba(20,24,33,.16);
+
+  /* —— 字体栈 —— */
+  --font-ui:    "PingFang SC","Microsoft YaHei","Source Han Sans SC","Noto Sans CJK SC",
+                -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  --font-mono:  ui-monospace,"SF Mono","JetBrains Mono","IBM Plex Mono",Menlo,Consolas,monospace;
+  /* 公文正文：国标要求的字体，缺失时逐级降级，UI 需检测并告警 */
+  --font-doc:   "仿宋_GB2312","FangSong_GB2312",FangSong,STFangsong,
+                "Noto Serif CJK SC","Source Han Serif SC",serif;
+  --font-title: "方正小标宋简体",STZhongsong,"Songti SC",SimSun,
+                "Noto Serif CJK SC",serif;
+  --font-hei:   "黑体",SimHei,"Heiti SC","Source Han Sans SC",sans-serif;
+  --font-kai:   "楷体_GB2312",KaiTi,STKaiti,"Kaiti SC",serif;
+
+  /* —— 字号阶（工具型界面，偏紧凑）—— */
+  --fs-micro: 10.5px;
+  --fs-xs:    11.5px;
+  --fs-sm:    12.5px;
+  --fs-base:  13.5px;
+  --fs-md:    15px;
+  --fs-lg:    18px;
+  --fs-xl:    23px;
+  --fs-2xl:   30px;
+
+  /* —— 间距阶（4 的倍数）—— */
+  --sp-1: 4px;  --sp-2: 8px;  --sp-3: 12px; --sp-4: 16px;
+  --sp-5: 20px; --sp-6: 24px; --sp-8: 32px; --sp-10: 40px;
+
+  /* —— 圆角：工具型界面克制，最大 8px —— */
+  --r-sm: 3px; --r-md: 5px; --r-lg: 8px; --r-pill: 999px;
+
+  /* —— 阴影：极轻，靠边框分层 —— */
+  --shadow-1: 0 1px 2px rgba(20,24,33,.06);
+  --shadow-2: 0 4px 14px rgba(20,24,33,.10);
+  --shadow-paper: 0 2px 6px rgba(20,24,33,.10), 0 12px 32px rgba(20,24,33,.08);
+
+  --focus: 0 0 0 2px var(--ground), 0 0 0 4px var(--accent);
+}
+
+/* 系统暗色（未显式指定主题时生效）；显式选亮色时不生效 */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground:      #0f1319;
+    --surface:     #161b23;
+    --surface-2:   #1c222c;
+    --surface-3:   #232b36;
+
+    --ink:         #e6eaf0;
+    --ink-2:       #a2aebe;
+    --ink-3:       #6e7a8b;
+
+    --line:        #2a323d;
+    --line-soft:   #222932;
+    --line-strong: #3c4653;
+
+    --accent:      #5aa7c4;
+    --accent-hi:   #74bad5;
+    --accent-ink:  #0d1a20;
+    --accent-soft: #142c37;
+    --accent-line: #2c5568;
+
+    --danger:      #e0685c;
+    --danger-soft: #2e1a18;
+    --danger-line: #59302b;
+    --warn:        #d2a03f;
+    --warn-soft:   #2b2317;
+    --warn-line:   #56462a;
+    --ok:          #6fb183;
+    --ok-soft:     #172519;
+    --ok-line:     #2f4a37;
+    --info:        #a2aebe;
+    --info-soft:   #1e242e;
+
+    --paper-shade: rgba(0,0,0,.5);
+    --shadow-1: 0 1px 2px rgba(0,0,0,.4);
+    --shadow-2: 0 4px 14px rgba(0,0,0,.45);
+    --shadow-paper: 0 2px 6px rgba(0,0,0,.5), 0 14px 40px rgba(0,0,0,.4);
+  }
+}
+
+/* 显式暗色（用户在应用内切换）*/
+:root[data-theme="dark"] {
+  --ground:      #0f1319;
+  --surface:     #161b23;
+  --surface-2:   #1c222c;
+  --surface-3:   #232b36;
+
+  --ink:         #e6eaf0;
+  --ink-2:       #a2aebe;
+  --ink-3:       #6e7a8b;
+
+  --line:        #2a323d;
+  --line-soft:   #222932;
+  --line-strong: #3c4653;
+
+  --accent:      #5aa7c4;
+  --accent-hi:   #74bad5;
+  --accent-ink:  #0d1a20;
+  --accent-soft: #142c37;
+  --accent-line: #2c5568;
+
+  --danger:      #e0685c;
+  --danger-soft: #2e1a18;
+  --danger-line: #59302b;
+  --warn:        #d2a03f;
+  --warn-soft:   #2b2317;
+  --warn-line:   #56462a;
+  --ok:          #6fb183;
+  --ok-soft:     #172519;
+  --ok-line:     #2f4a37;
+  --info:        #a2aebe;
+  --info-soft:   #1e242e;
+
+  --paper-shade: rgba(0,0,0,.5);
+  --shadow-1: 0 1px 2px rgba(0,0,0,.4);
+  --shadow-2: 0 4px 14px rgba(0,0,0,.45);
+  --shadow-paper: 0 2px 6px rgba(0,0,0,.5), 0 14px 40px rgba(0,0,0,.4);
+}
+
+/* ============================================================
+   GB/T 9704-2012 版面常量
+   排版引擎（odoc-export）与预览（preview）共用同一组数值。
+   预览用 CSS 变量，导出用 packs/gb9704-format/style/gb9704.toml，
+   两处数值必须一致。
+   ============================================================ */
+:root {
+  --gb-page-w:    210;   /* mm */
+  --gb-page-h:    297;
+  --gb-margin-t:  37;    /* 天头 */
+  --gb-margin-l:  28;    /* 订口 */
+  --gb-body-w:    156;   /* 版心 */
+  --gb-body-h:    225;
+  --gb-lines:     22;    /* 每面行数 */
+  --gb-chars:     28;    /* 每行字数 */
+  --gb-leading:   28;    /* 固定行距 pt */
+
+  /* 号 → pt */
+  --gb-size-2:    22pt;  /* 2 号：标题 */
+  --gb-size-3:    16pt;  /* 3 号：正文及各级标题 */
+  --gb-size-4:    14pt;
+}

@@ -1,0 +1,961 @@
+<title>秉笔工作台</title>
+
+<style>
+/* ============================================================
+   秉笔工作台 · 界面设计
+   令牌与 src/styles/tokens.css 同源，改动需两处同步
+   ============================================================ */
+
+:root{
+  --ground:#eef1f5; --surface:#fff; --surface-2:#f5f7fa; --surface-3:#e9edf3;
+  --ink:#141821; --ink-2:#4c5666; --ink-3:#7a8595;
+  --line:#d9dfe8; --line-soft:#e8ecf2; --line-strong:#b9c3d1;
+  --accent:#1b5e7e; --accent-hi:#17506c; --accent-ink:#fff;
+  --accent-soft:#e2eef4; --accent-line:#a9cddd;
+  --danger:#b8362c; --danger-soft:#fbe9e7; --danger-line:#eab6b0;
+  --warn:#96690f;  --warn-soft:#fbf1dc;  --warn-line:#e3cd9a;
+  --ok:#3a6e4c;    --ok-soft:#e4f0e8;    --ok-line:#a8ccb5;
+  --info:#4c5666;  --info-soft:#eceff4;
+
+  --paper:#fcfcfa; --paper-ink:#17171a; --paper-line:#d8d6cf;
+  --paper-grid:rgba(27,94,126,.10); --paper-seal:#c8362b;
+
+  --font-ui:"PingFang SC","Microsoft YaHei","Source Han Sans SC","Noto Sans CJK SC",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  --font-mono:ui-monospace,"SF Mono","JetBrains Mono","IBM Plex Mono",Menlo,Consolas,monospace;
+  --font-doc:"仿宋_GB2312","FangSong_GB2312",FangSong,STFangsong,"Noto Serif CJK SC",serif;
+  --font-title:"方正小标宋简体",STZhongsong,"Songti SC",SimSun,"Noto Serif CJK SC",serif;
+  --font-hei:"黑体",SimHei,"Heiti SC","Source Han Sans SC",sans-serif;
+  --font-kai:"楷体_GB2312",KaiTi,STKaiti,"Kaiti SC",serif;
+
+  --shadow-1:0 1px 2px rgba(20,24,33,.06);
+  --shadow-2:0 4px 14px rgba(20,24,33,.10);
+  --shadow-paper:0 2px 6px rgba(20,24,33,.10),0 12px 32px rgba(20,24,33,.08);
+  --focus:0 0 0 2px var(--surface),0 0 0 4px var(--accent);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --ground:#0f1319; --surface:#161b23; --surface-2:#1c222c; --surface-3:#232b36;
+    --ink:#e6eaf0; --ink-2:#a2aebe; --ink-3:#6e7a8b;
+    --line:#2a323d; --line-soft:#222932; --line-strong:#3c4653;
+    --accent:#5aa7c4; --accent-hi:#74bad5; --accent-ink:#0d1a20;
+    --accent-soft:#142c37; --accent-line:#2c5568;
+    --danger:#e0685c; --danger-soft:#2e1a18; --danger-line:#59302b;
+    --warn:#d2a03f;  --warn-soft:#2b2317;  --warn-line:#56462a;
+    --ok:#6fb183;    --ok-soft:#172519;    --ok-line:#2f4a37;
+    --info:#a2aebe;  --info-soft:#1e242e;
+    --shadow-1:0 1px 2px rgba(0,0,0,.4);
+    --shadow-2:0 4px 14px rgba(0,0,0,.45);
+    --shadow-paper:0 2px 6px rgba(0,0,0,.5),0 14px 40px rgba(0,0,0,.4);
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#0f1319; --surface:#161b23; --surface-2:#1c222c; --surface-3:#232b36;
+  --ink:#e6eaf0; --ink-2:#a2aebe; --ink-3:#6e7a8b;
+  --line:#2a323d; --line-soft:#222932; --line-strong:#3c4653;
+  --accent:#5aa7c4; --accent-hi:#74bad5; --accent-ink:#0d1a20;
+  --accent-soft:#142c37; --accent-line:#2c5568;
+  --danger:#e0685c; --danger-soft:#2e1a18; --danger-line:#59302b;
+  --warn:#d2a03f;  --warn-soft:#2b2317;  --warn-line:#56462a;
+  --ok:#6fb183;    --ok-soft:#172519;    --ok-line:#2f4a37;
+  --info:#a2aebe;  --info-soft:#1e242e;
+  --shadow-1:0 1px 2px rgba(0,0,0,.4);
+  --shadow-2:0 4px 14px rgba(0,0,0,.45);
+  --shadow-paper:0 2px 6px rgba(0,0,0,.5),0 14px 40px rgba(0,0,0,.4);
+}
+
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--ground); color:var(--ink);
+  font-family:var(--font-ui); font-size:13.5px; line-height:1.65;
+  -webkit-font-smoothing:antialiased;
+}
+h1,h2,h3{margin:0; text-wrap:balance; font-weight:600; letter-spacing:-.01em}
+p{margin:0}
+.wrap{max-width:1240px; margin:0 auto; padding:0 24px}
+
+/* ── 页头 ───────────────────────────────────────────── */
+.masthead{padding:56px 0 34px}
+.brandline{display:flex; align-items:baseline; gap:14px; flex-wrap:wrap}
+.brandmark{
+  font-family:var(--font-title); font-size:34px; letter-spacing:.14em;
+  color:var(--ink); line-height:1;
+}
+.brandmark .seal{color:var(--paper-seal)}
+.brandsub{font-size:12px; color:var(--ink-3); letter-spacing:.22em}
+.masthead p{margin-top:14px; max-width:60ch; color:var(--ink-2); font-size:14.5px}
+.rule{height:1px; background:var(--line); border:0; margin:0}
+
+/* ── 章节 ───────────────────────────────────────────── */
+.sec{padding:44px 0}
+.sec-head{display:flex; align-items:baseline; gap:12px; margin-bottom:18px}
+.sec-head h2{font-size:16px}
+.sec-head .note{font-size:12px; color:var(--ink-3)}
+
+/* ── 应用外壳 ────────────────────────────────────────── */
+.appscroll{overflow-x:auto; padding-bottom:8px}
+.app{
+  min-width:1020px; background:var(--surface);
+  border:1px solid var(--line); border-radius:9px;
+  box-shadow:var(--shadow-2); overflow:hidden;
+}
+
+/* 标题栏 */
+.titlebar{
+  display:flex; align-items:center; gap:16px;
+  padding:9px 14px; background:var(--surface-2);
+  border-bottom:1px solid var(--line);
+}
+.tb-brand{
+  font-family:var(--font-title); font-size:15px; letter-spacing:.1em;
+  color:var(--ink); padding-right:14px; border-right:1px solid var(--line);
+  white-space:nowrap;
+}
+.tb-doc{display:flex; align-items:center; gap:9px; min-width:0}
+.tb-title{font-size:13px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.tb-actions{margin-left:auto; display:flex; gap:8px; align-items:center}
+
+/* 流水线 */
+.pipe{display:flex; align-items:center; gap:0; margin-left:6px}
+.stage{
+  position:relative; display:flex; align-items:center; gap:5px;
+  padding:3px 9px 3px 8px; font-size:11px; color:var(--ink-3);
+  white-space:nowrap;
+}
+.stage::after{
+  content:""; width:5px; height:5px; margin-left:3px; border-radius:50%;
+  background:var(--line-strong);
+}
+.stage:last-child::after{display:none}
+.stage .dot{width:6px; height:6px; border-radius:50%; background:var(--line-strong); flex:none}
+.stage.done{color:var(--ink-2)}
+.stage.done .dot{background:var(--ok)}
+.stage.active{
+  color:var(--accent); font-weight:600;
+  background:var(--accent-soft); border-radius:var(--r-pill,999px);
+}
+.stage.active .dot{background:var(--accent); animation:pulse 1.6s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+@media (prefers-reduced-motion:reduce){.stage.active .dot{animation:none}}
+
+/* 工作区三栏 */
+.workspace{display:grid; grid-template-columns:246px 1fr 292px; min-height:634px}
+.rail{border-right:1px solid var(--line); background:var(--surface); display:flex; flex-direction:column}
+.inspect{border-left:1px solid var(--line); background:var(--surface); display:flex; flex-direction:column}
+.center{background:var(--surface-2); display:flex; flex-direction:column; min-width:0}
+
+.panel-h{
+  display:flex; align-items:center; gap:8px;
+  padding:10px 13px 8px; font-size:11px; letter-spacing:.09em;
+  color:var(--ink-3); text-transform:uppercase; font-weight:600;
+  border-bottom:1px solid var(--line-soft);
+}
+.panel-h .count{
+  margin-left:auto; font-family:var(--font-mono); font-size:10.5px;
+  letter-spacing:0; color:var(--ink-3); font-variant-numeric:tabular-nums;
+}
+.panel-b{padding:12px 13px}
+
+/* 要素字段 */
+.fields{display:grid; gap:9px}
+.field{display:grid; grid-template-columns:56px 1fr; align-items:center; gap:9px}
+.field label{font-size:11.5px; color:var(--ink-3)}
+.control{
+  background:var(--surface-3); border:1px solid transparent; border-radius:var(--r-md,5px);
+  padding:4px 8px; font-size:12.5px; color:var(--ink); font-family:inherit;
+  display:flex; align-items:center; justify-content:space-between; gap:6px;
+}
+.control .caret{color:var(--ink-3); font-size:9px}
+.control.is-locked{background:transparent; border-color:var(--line); color:var(--ink-2)}
+
+/* 素材条目 */
+.hits{display:grid; gap:2px; padding:6px 7px 12px}
+.hit{
+  padding:8px 8px; border-radius:var(--r-md,5px); cursor:default;
+  border:1px solid transparent; transition:background .12s ease;
+}
+.hit:hover{background:var(--surface-2); border-color:var(--line-soft)}
+.hit-t{font-size:12.5px; font-weight:600; line-height:1.4; margin-bottom:3px}
+.hit-p{
+  font-family:var(--font-mono); font-size:10.5px; color:var(--ink-3);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.hit-m{display:flex; align-items:center; gap:6px; margin-top:6px}
+.score{
+  font-family:var(--font-mono); font-size:10px; color:var(--accent);
+  font-variant-numeric:tabular-nums;
+}
+.bar{flex:1; height:2px; background:var(--surface-3); border-radius:2px; overflow:hidden}
+.bar i{display:block; height:100%; background:var(--accent)}
+
+/* 中央：标签栏 */
+.tabs{
+  display:flex; align-items:center; gap:2px; padding:7px 12px;
+  border-bottom:1px solid var(--line); background:var(--surface);
+}
+.tab{
+  appearance:none; background:none; border:0; font-family:inherit;
+  font-size:12.5px; color:var(--ink-3); padding:5px 11px;
+  border-radius:var(--r-md,5px); cursor:pointer;
+}
+.tab:hover{color:var(--ink-2); background:var(--surface-2)}
+.tab[aria-selected="true"]{background:var(--accent-soft); color:var(--accent); font-weight:600}
+.tab:focus-visible{outline:none; box-shadow:var(--focus)}
+.tabs-r{margin-left:auto; display:flex; align-items:center; gap:8px}
+.zoom{
+  font-family:var(--font-mono); font-size:11px; color:var(--ink-3);
+  font-variant-numeric:tabular-nums;
+}
+
+/* 画布 */
+.canvas{flex:1; padding:26px 20px; display:flex; justify-content:center; align-items:flex-start; overflow:hidden}
+.view[hidden]{display:none}
+
+/* ── A4 纸 ──────────────────────────────────────────── */
+.sheet{
+  --w:428px;
+  width:var(--w); aspect-ratio:210/297; position:relative; flex:none;
+  background:var(--paper); box-shadow:var(--shadow-paper);
+  color:var(--paper-ink); font-family:var(--font-doc);
+}
+/* 版心：天头37 订口28 版心156×225（mm，按国标）*/
+.banxin{
+  position:absolute; left:13.333%; top:12.458%;
+  width:74.286%; height:75.758%;
+  font-size:calc(var(--w) * 5.6448 / 210);   /* 3号 = 16pt */
+  line-height:calc(var(--w) * 9.8784 / 210); /* 固定行距 28pt */
+}
+.sheet.grid .banxin{
+  background-image:
+    repeating-linear-gradient(to right,var(--paper-grid) 0 1px,transparent 1px calc(100%/28)),
+    repeating-linear-gradient(to bottom,var(--paper-grid) 0 1px,transparent 1px calc(100%/22));
+  background-size:calc(100%/28) 100%,100% calc(100%/22);
+}
+/* 红头 */
+.hongtou{text-align:center; padding-top:.2em}
+.org-mark{
+  font-family:var(--font-title); color:var(--paper-seal);
+  font-size:calc(var(--w) * 9.5 / 210); letter-spacing:.16em; line-height:1.25;
+}
+.wenhao{
+  display:flex; justify-content:space-between; align-items:flex-end;
+  margin-top:1.1em; font-size:calc(var(--w) * 5.2 / 210);
+}
+.sep-line{height:1.6px; background:var(--paper-seal); margin-top:.35em}
+/* 标题与正文 */
+.doc-title{
+  font-family:var(--font-title); text-align:center;
+  font-size:calc(var(--w) * 7.7616 / 210);  /* 2号 = 22pt */
+  line-height:1.5; margin:1.5em 1.2em .9em; letter-spacing:.02em;
+}
+.recipient{margin-bottom:.2em}
+.p{text-indent:2em; margin:0}
+.h1{font-family:var(--font-hei); text-indent:2em; margin:.15em 0}
+.h2{font-family:var(--font-kai); text-indent:2em; margin:.1em 0}
+.closing{text-indent:2em; margin-top:.3em}
+.signoff{margin-top:1.1em; text-align:right; padding-right:2.2em; line-height:1.7}
+/* 版记 */
+.banji{
+  position:absolute; left:13.333%; right:12.381%; bottom:5.4%;
+  font-size:calc(var(--w) * 4.6 / 210); color:var(--paper-ink);
+}
+.banji-line{height:1px; background:var(--paper-line)}
+.banji-row{display:flex; justify-content:space-between; padding:.35em 0}
+/* 待核实标记 */
+.unverified{
+  color:var(--paper-seal);
+  border-bottom:1.5px dashed var(--paper-seal);
+  background:rgba(200,54,43,.07); cursor:help;
+}
+.unverified sup{
+  font-family:var(--font-mono); font-size:.62em; padding-left:1px;
+  vertical-align:super; letter-spacing:0;
+}
+
+/* ── 结构编辑视图 ────────────────────────────────────── */
+.tree{
+  width:100%; max-width:560px; background:var(--surface);
+  border:1px solid var(--line); border-radius:7px; padding:10px 0; box-shadow:var(--shadow-1);
+  font-size:12.5px;
+}
+.node{
+  display:grid; grid-template-columns:82px 1fr; gap:10px;
+  padding:5px 13px; align-items:baseline; border-left:2px solid transparent;
+}
+.node:hover{background:var(--surface-2)}
+.node.flagged{border-left-color:var(--danger); background:var(--danger-soft)}
+.ntype{
+  font-family:var(--font-mono); font-size:10px; color:var(--ink-3);
+  text-align:right; white-space:nowrap;
+}
+.ntext{color:var(--ink-2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.node .ntext b{color:var(--ink); font-weight:600}
+.n-ind-1{padding-left:29px} .n-ind-2{padding-left:45px}
+.fontchip{
+  font-size:9.5px; padding:0 4px; border-radius:3px; margin-left:6px;
+  background:var(--surface-3); color:var(--ink-3); white-space:nowrap;
+}
+
+/* ── 质检面板 ────────────────────────────────────────── */
+.scorebox{padding:13px; border-bottom:1px solid var(--line-soft)}
+.score-top{display:flex; align-items:flex-end; gap:9px}
+.score-n{
+  font-family:var(--font-mono); font-size:31px; line-height:1;
+  font-variant-numeric:tabular-nums; color:var(--warn); font-weight:600;
+}
+.score-d{font-family:var(--font-mono); font-size:12px; color:var(--ink-3)}
+.score-tag{margin-left:auto}
+.rubric{display:grid; gap:5px; margin-top:11px}
+.rubric-row{display:grid; grid-template-columns:52px 1fr 26px; gap:8px; align-items:center; font-size:11px; color:var(--ink-3)}
+.meter{height:3px; background:var(--surface-3); border-radius:3px; overflow:hidden}
+.meter i{display:block; height:100%; border-radius:3px}
+.rubric-row b{
+  font-family:var(--font-mono); font-size:10.5px; font-weight:500;
+  text-align:right; color:var(--ink-2); font-variant-numeric:tabular-nums;
+}
+
+.filters{display:flex; gap:5px; padding:9px 13px; border-bottom:1px solid var(--line-soft); flex-wrap:wrap}
+.filt{
+  appearance:none; font-family:inherit; cursor:pointer;
+  font-size:11px; padding:2px 8px; border-radius:999px;
+  border:1px solid var(--line); background:var(--surface); color:var(--ink-2);
+}
+.filt:hover{border-color:var(--line-strong)}
+.filt[aria-pressed="true"]{background:var(--ink); color:var(--surface); border-color:var(--ink)}
+.filt:focus-visible{outline:none; box-shadow:var(--focus)}
+.filt .n{font-family:var(--font-mono); font-variant-numeric:tabular-nums; opacity:.75; margin-left:3px}
+
+.findings{padding:5px 7px 12px; display:grid; gap:2px}
+.finding{
+  padding:8px 9px 9px; border-radius:var(--r-md,5px); cursor:default;
+  border:1px solid transparent; border-left:2px solid var(--line-strong);
+  transition:background .12s ease;
+}
+.finding:hover{background:var(--surface-2)}
+.finding.sev-error{border-left-color:var(--danger)}
+.finding.sev-warn{border-left-color:var(--warn)}
+.finding.sev-info{border-left-color:var(--info)}
+.f-top{display:flex; align-items:center; gap:6px; margin-bottom:3px}
+.f-id{font-family:var(--font-mono); font-size:10px; color:var(--ink-3)}
+.f-msg{font-size:12px; line-height:1.5; color:var(--ink)}
+.f-loc{
+  font-size:10.5px; color:var(--ink-3); margin-top:4px;
+  display:flex; align-items:center; gap:5px;
+}
+.f-fix{
+  margin-top:6px; font-size:11px; color:var(--accent);
+  background:var(--accent-soft); border:1px solid var(--accent-line);
+  border-radius:var(--r-sm,3px); padding:2px 7px; display:inline-block;
+}
+
+/* 事实台账 */
+.facts{padding:6px 13px 14px; display:grid; gap:6px}
+.fact{display:flex; align-items:center; gap:8px; font-size:11.5px}
+.fact-v{
+  font-family:var(--font-mono); font-variant-numeric:tabular-nums;
+  color:var(--ink); font-size:11.5px; white-space:nowrap;
+}
+.fact-src{margin-left:auto}
+
+/* ── 状态栏 ─────────────────────────────────────────── */
+.statusbar{
+  display:flex; align-items:center; gap:14px;
+  padding:5px 14px; background:var(--surface-2);
+  border-top:1px solid var(--line);
+  font-size:11px; color:var(--ink-3);
+}
+.statusbar .r{margin-left:auto; display:flex; align-items:center; gap:14px}
+.statusbar .mono{font-family:var(--font-mono); font-variant-numeric:tabular-nums}
+.sb-item{display:flex; align-items:center; gap:5px; white-space:nowrap}
+
+/* ── 通用零件 ───────────────────────────────────────── */
+.chip{
+  display:inline-flex; align-items:center; gap:4px;
+  font-size:10.5px; line-height:1.7; padding:0 6px;
+  border-radius:var(--r-sm,3px); border:1px solid; white-space:nowrap;
+}
+.chip-neutral{background:var(--info-soft); color:var(--ink-2); border-color:var(--line)}
+.chip-error{background:var(--danger-soft); color:var(--danger); border-color:var(--danger-line)}
+.chip-warn{background:var(--warn-soft); color:var(--warn); border-color:var(--warn-line)}
+.chip-ok{background:var(--ok-soft); color:var(--ok); border-color:var(--ok-line)}
+.chip-accent{background:var(--accent-soft); color:var(--accent); border-color:var(--accent-line)}
+.chip-sec{background:var(--warn-soft); color:var(--warn); border-color:var(--warn-line)}
+
+.btn{
+  appearance:none; font-family:inherit; font-size:12px; cursor:pointer;
+  padding:4px 12px; border-radius:var(--r-md,5px);
+  border:1px solid var(--line); background:var(--surface); color:var(--ink);
+  display:inline-flex; align-items:center; gap:6px; white-space:nowrap;
+}
+.btn:hover{border-color:var(--line-strong); background:var(--surface-2)}
+.btn:focus-visible{outline:none; box-shadow:var(--focus)}
+.btn-primary{background:var(--accent); border-color:var(--accent); color:var(--accent-ink)}
+.btn-primary:hover{background:var(--accent-hi); border-color:var(--accent-hi)}
+.btn-ghost{background:transparent; border-color:transparent; color:var(--ink-2)}
+.btn-ghost:hover{background:var(--surface-3); border-color:transparent}
+.btn[disabled]{opacity:.45; cursor:not-allowed}
+.btn[disabled]:hover{background:var(--surface); border-color:var(--line)}
+.btn-primary[disabled]:hover{background:var(--accent); border-color:var(--accent)}
+
+.blocked{
+  display:flex; align-items:center; gap:6px; font-size:11px;
+  color:var(--danger); background:var(--danger-soft);
+  border:1px solid var(--danger-line); border-radius:var(--r-md,5px);
+  padding:3px 9px; white-space:nowrap;
+}
+
+.ico{width:12px; height:12px; flex:none; stroke:currentColor; fill:none; stroke-width:1.6}
+
+/* ── 设计系统展示区 ──────────────────────────────────── */
+.grid-cards{display:grid; grid-template-columns:repeat(auto-fit,minmax(232px,1fr)); gap:14px}
+.card{
+  background:var(--surface); border:1px solid var(--line);
+  border-radius:7px; padding:15px 16px; box-shadow:var(--shadow-1);
+}
+.card h3{font-size:12.5px; margin-bottom:9px}
+.card p{font-size:12.5px; color:var(--ink-2); line-height:1.6}
+
+.swatches{display:grid; grid-template-columns:repeat(auto-fit,minmax(126px,1fr)); gap:9px}
+.sw{border:1px solid var(--line); border-radius:6px; overflow:hidden; background:var(--surface)}
+.sw-c{height:52px}
+.sw-b{padding:7px 9px}
+.sw-n{font-size:11.5px; font-weight:600}
+.sw-h{font-family:var(--font-mono); font-size:10px; color:var(--ink-3)}
+.sw-u{font-size:10.5px; color:var(--ink-3); margin-top:2px; line-height:1.45}
+
+.typerow{
+  display:grid; grid-template-columns:104px 1fr; gap:16px;
+  padding:11px 0; border-bottom:1px solid var(--line-soft); align-items:baseline;
+}
+.typerow:last-child{border-bottom:0}
+.typemeta{font-family:var(--font-mono); font-size:10.5px; color:var(--ink-3); line-height:1.5}
+.spec-table{width:100%; border-collapse:collapse; font-size:12.5px}
+.spec-table th,.spec-table td{
+  text-align:left; padding:7px 12px 7px 0; border-bottom:1px solid var(--line-soft);
+  vertical-align:top;
+}
+.spec-table th{font-size:11px; color:var(--ink-3); font-weight:600; letter-spacing:.05em}
+.spec-table td.mono{font-family:var(--font-mono); font-size:11.5px; font-variant-numeric:tabular-nums; color:var(--ink-2)}
+.tablewrap{overflow-x:auto}
+
+.demorow{display:flex; flex-wrap:wrap; gap:9px; align-items:center}
+footer.foot{padding:30px 0 56px; color:var(--ink-3); font-size:12px}
+</style>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <div class="brandline">
+      <div class="brandmark">秉<span class="seal">笔</span></div>
+      <div class="brandsub">公文写作工作台 · 界面设计</div>
+    </div>
+    <p>
+      为 my-wordediter 定义的视觉与交互规范。取色自公文本身的物料——蓝黑墨、冷调公文纸、校对朱批。
+      朱红是全站唯一的语义红，只用于错误、待核实与红头；石青是唯一的交互强调色。
+    </p>
+  </header>
+
+  <hr class="rule">
+
+  <!-- ══════════ 主界面 ══════════ -->
+  <section class="sec">
+    <div class="sec-head">
+      <h2>主工作区</h2>
+      <span class="note">三栏：素材 / 编辑 / 质检 · 顶部为流水线阶段 · 底部为运行状态</span>
+    </div>
+
+    <div class="appscroll">
+    <div class="app">
+
+      <!-- 标题栏 -->
+      <div class="titlebar">
+        <div class="tb-brand">秉笔</div>
+        <div class="tb-doc">
+          <span class="chip chip-neutral">请示</span>
+          <span class="tb-title">关于申请购置应急排水设备经费的请示</span>
+        </div>
+        <div class="pipe">
+          <span class="stage done"><i class="dot"></i>文种</span>
+          <span class="stage done"><i class="dot"></i>事实</span>
+          <span class="stage done"><i class="dot"></i>检索</span>
+          <span class="stage done"><i class="dot"></i>骨架</span>
+          <span class="stage done"><i class="dot"></i>起草</span>
+          <span class="stage done"><i class="dot"></i>降AI味</span>
+          <span class="stage done"><i class="dot"></i>校验</span>
+          <span class="stage active"><i class="dot"></i>事实回查</span>
+          <span class="stage"><i class="dot"></i>评分</span>
+        </div>
+        <div class="tb-actions">
+          <button class="btn btn-ghost" type="button">重跑此步</button>
+          <button class="btn btn-primary" type="button" disabled>导出 docx</button>
+        </div>
+      </div>
+
+      <div class="workspace">
+
+        <!-- 左栏 -->
+        <aside class="rail">
+          <div class="panel-h">公文要素</div>
+          <div class="panel-b">
+            <div class="fields">
+              <div class="field">
+                <label for="f-type">文种</label>
+                <div class="control" id="f-type">请示<span class="caret">▾</span></div>
+              </div>
+              <div class="field">
+                <label for="f-org">发文机关</label>
+                <div class="control is-locked" id="f-org">云岭县应急管理局</div>
+              </div>
+              <div class="field">
+                <label for="f-to">主送</label>
+                <div class="control is-locked" id="f-to">县人民政府</div>
+              </div>
+              <div class="field">
+                <label for="f-sec">密级</label>
+                <div class="control" id="f-sec">内部<span class="caret">▾</span></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel-h">库中素材<span class="count">3 / 1,284</span></div>
+          <div class="hits">
+            <div class="hit">
+              <div class="hit-t">关于申请补充防汛抢险装备的请示</div>
+              <div class="hit-p">公文/2024/云应急〔2024〕11号.md</div>
+              <div class="hit-m">
+                <span class="score">0.91</span>
+                <span class="bar"><i style="width:91%"></i></span>
+                <span class="chip chip-neutral">同文种</span>
+              </div>
+            </div>
+            <div class="hit">
+              <div class="hit-t">县防汛抗旱专项经费管理办法</div>
+              <div class="hit-p">制度/财务/防汛专项经费管理办法.md</div>
+              <div class="hit-m">
+                <span class="score">0.84</span>
+                <span class="bar"><i style="width:84%"></i></span>
+                <span class="chip chip-accent">双链</span>
+              </div>
+            </div>
+            <div class="hit">
+              <div class="hit-t">2025年汛期应急装备运行情况统计</div>
+              <div class="hit-p">台账/装备/2025汛期运行统计.md</div>
+              <div class="hit-m">
+                <span class="score">0.77</span>
+                <span class="bar"><i style="width:77%"></i></span>
+                <span class="chip chip-neutral">数据源</span>
+              </div>
+            </div>
+          </div>
+        </aside>
+
+        <!-- 中栏 -->
+        <div class="center">
+          <div class="tabs" role="tablist">
+            <button class="tab" type="button" role="tab" aria-selected="true" data-view="v-sheet">版式预览</button>
+            <button class="tab" type="button" role="tab" aria-selected="false" data-view="v-tree">结构编辑</button>
+            <div class="tabs-r">
+              <button class="btn btn-ghost" type="button" id="gridtoggle" aria-pressed="true">字格 22×28</button>
+              <span class="zoom">76%</span>
+            </div>
+          </div>
+
+          <div class="canvas">
+            <!-- 版式预览 -->
+            <div class="view" id="v-sheet">
+              <div class="sheet grid" id="sheet">
+                <div class="banxin">
+                  <div class="hongtou">
+                    <div class="org-mark">云岭县应急管理局文件</div>
+                    <div class="wenhao">
+                      <span>云应急〔2026〕27号</span>
+                      <span>签发人：周敬亭</span>
+                    </div>
+                    <div class="sep-line"></div>
+                  </div>
+
+                  <div class="doc-title">关于申请购置应急排水<br>设备经费的请示</div>
+
+                  <p class="p recipient">县人民政府：</p>
+                  <p class="p">今年入汛以来，我县降雨明显偏多，6月至8月累计降雨量较常年同期<span class="unverified" title="事实台账中无此数据（FACT-001）">偏多四成<sup>1</sup></span>。县城老城区、云溪镇等低洼地段先后出现4次内涝，排水抢险持续时间最长的一次达9小时。</p>
+                  <p class="h1">一、现有装备情况</p>
+                  <p class="h2">（一）设备配置与损耗。我局现有移动排水泵车2台、大流量排水抢险车1台，其中2台购置于2014年，已超出8年使用年限，今年汛期先后3次故障停机。</p>
+                  <p class="h2">（二）保障能力缺口。按全县12个乡镇（街道）同时启动响应测算，现有装备排水能力<span class="unverified" title="缺测算依据（FACT-004）">约为需求的六成<sup>2</sup></span>。</p>
+                  <p class="h1">二、请示事项</p>
+                  <p class="p">拟购置大流量排水抢险车3台，所需经费15万元，从县级防汛抗旱专项经费中列支，力争9月30日前完成采购并投入使用。</p>
+                  <p class="closing">妥否，请批示。</p>
+
+                  <div class="signoff">
+                    云岭县应急管理局<br>
+                    2026年8月12日
+                  </div>
+                </div>
+
+                <div class="banji">
+                  <div class="banji-line"></div>
+                  <div class="banji-row"><span>抄送：县财政局，县水务局。</span></div>
+                  <div class="banji-line"></div>
+                  <div class="banji-row">
+                    <span>云岭县应急管理局办公室</span>
+                    <span>2026年8月12日印发</span>
+                  </div>
+                  <div class="banji-line"></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 结构编辑 -->
+            <div class="view" id="v-tree" hidden>
+              <div class="tree">
+                <div class="node"><span class="ntype">header</span><span class="ntext">云岭县应急管理局文件<span class="fontchip">小标宋 · 朱</span></span></div>
+                <div class="node"><span class="ntype">doc_number</span><span class="ntext">云应急〔2026〕27号<span class="fontchip">仿宋_GB2312 · 3号</span></span></div>
+                <div class="node"><span class="ntype">title</span><span class="ntext"><b>关于申请购置应急排水设备经费的请示</b><span class="fontchip">小标宋 · 2号</span></span></div>
+                <div class="node"><span class="ntype">recipient</span><span class="ntext">县人民政府：</span></div>
+                <div class="node flagged"><span class="ntype">paragraph</span><span class="ntext">今年入汛以来，我县降雨明显偏多……<span class="fontchip">含待核实 ×1</span></span></div>
+                <div class="node"><span class="ntype">heading L1</span><span class="ntext"><b>一、现有装备情况</b><span class="fontchip">黑体 · 3号</span></span></div>
+                <div class="node n-ind-1"><span class="ntype">heading L2</span><span class="ntext">（一）设备配置与损耗<span class="fontchip">楷体_GB2312 · 3号</span></span></div>
+                <div class="node n-ind-1 flagged"><span class="ntype">heading L2</span><span class="ntext">（二）保障能力缺口<span class="fontchip">含待核实 ×1</span></span></div>
+                <div class="node"><span class="ntype">heading L1</span><span class="ntext"><b>二、请示事项</b><span class="fontchip">黑体 · 3号</span></span></div>
+                <div class="node n-ind-1"><span class="ntype">paragraph</span><span class="ntext">拟购置大流量排水抢险车3台，所需经费15万元……</span></div>
+                <div class="node"><span class="ntype">closing</span><span class="ntext">妥否，请批示。</span></div>
+                <div class="node"><span class="ntype">signer</span><span class="ntext">云岭县应急管理局</span></div>
+                <div class="node"><span class="ntype">date</span><span class="ntext">2026年8月12日<span class="fontchip">阿拉伯数字全称</span></span></div>
+                <div class="node"><span class="ntype">footer cc</span><span class="ntext">抄送：县财政局，县水务局。</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 右栏 -->
+        <aside class="inspect">
+          <div class="scorebox">
+            <div class="score-top">
+              <span class="score-n">82</span>
+              <span class="score-d">/ 100</span>
+              <span class="score-tag chip chip-warn">待修订</span>
+            </div>
+            <div class="rubric">
+              <div class="rubric-row"><span>事实密度</span><span class="meter"><i style="width:88%; background:var(--ok)"></i></span><b>88</b></div>
+              <div class="rubric-row"><span>格式合规</span><span class="meter"><i style="width:95%; background:var(--ok)"></i></span><b>95</b></div>
+              <div class="rubric-row"><span>语言克制</span><span class="meter"><i style="width:79%; background:var(--warn)"></i></span><b>79</b></div>
+              <div class="rubric-row"><span>文种贴合</span><span class="meter"><i style="width:70%; background:var(--warn)"></i></span><b>70</b></div>
+              <div class="rubric-row"><span>可交付性</span><span class="meter"><i style="width:62%; background:var(--danger)"></i></span><b>62</b></div>
+            </div>
+          </div>
+
+          <div class="filters">
+            <button class="filt" type="button" aria-pressed="true">全部<span class="n">9</span></button>
+            <button class="filt" type="button" aria-pressed="false">错误<span class="n">2</span></button>
+            <button class="filt" type="button" aria-pressed="false">警告<span class="n">4</span></button>
+            <button class="filt" type="button" aria-pressed="false">建议<span class="n">3</span></button>
+          </div>
+
+          <div class="findings">
+            <div class="finding sev-error">
+              <div class="f-top">
+                <span class="chip chip-error">错误</span>
+                <span class="f-id">FACT-001</span>
+              </div>
+              <div class="f-msg">「偏多四成」未出现在事实台账中，系模型生成，不得直接交付。</div>
+              <div class="f-loc">
+                <svg class="ico" viewBox="0 0 16 16"><path d="M3 3h10M3 8h7M3 13h10"/></svg>
+                正文 · 引言段
+              </div>
+              <span class="f-fix">补录来源 或 删除该表述</span>
+            </div>
+
+            <div class="finding sev-error">
+              <div class="f-top">
+                <span class="chip chip-error">错误</span>
+                <span class="f-id">FACT-004</span>
+              </div>
+              <div class="f-msg">「约为需求的六成」缺少测算依据，台账中无对应数据项。</div>
+              <div class="f-loc">
+                <svg class="ico" viewBox="0 0 16 16"><path d="M3 3h10M3 8h7M3 13h10"/></svg>
+                正文 · 一（二）
+              </div>
+            </div>
+
+            <div class="finding sev-warn">
+              <div class="f-top">
+                <span class="chip chip-warn">警告</span>
+                <span class="f-id">REQ-007</span>
+              </div>
+              <div class="f-msg">请示应一文一事。当前同时提出采购与列支渠道两项诉求，建议合并表述或分件行文。</div>
+              <div class="f-loc">
+                <svg class="ico" viewBox="0 0 16 16"><path d="M3 3h10M3 8h7M3 13h10"/></svg>
+                正文 · 二
+              </div>
+            </div>
+
+            <div class="finding sev-warn">
+              <div class="f-top">
+                <span class="chip chip-warn">警告</span>
+                <span class="f-id">DATE-003</span>
+              </div>
+              <div class="f-msg">成文日期与版记印发日期相同，请确认是否为同日印发。</div>
+              <div class="f-loc">
+                <svg class="ico" viewBox="0 0 16 16"><path d="M3 3h10M3 8h7M3 13h10"/></svg>
+                落款 · 版记
+              </div>
+            </div>
+
+            <div class="finding sev-info">
+              <div class="f-top">
+                <span class="chip chip-neutral">建议</span>
+                <span class="f-id">LANG-012</span>
+              </div>
+              <div class="f-msg">「力争」为不确定表述。请示时限建议写明确定日期。</div>
+              <div class="f-loc">
+                <svg class="ico" viewBox="0 0 16 16"><path d="M3 3h10M3 8h7M3 13h10"/></svg>
+                正文 · 二
+              </div>
+              <span class="f-fix">改为「于9月30日前」</span>
+            </div>
+          </div>
+
+          <div class="panel-h">事实台账<span class="count">5 项</span></div>
+          <div class="facts">
+            <div class="fact"><span class="fact-v">15 万元</span><span class="fact-src chip chip-ok">用户提供</span></div>
+            <div class="fact"><span class="fact-v">3 台</span><span class="fact-src chip chip-ok">用户提供</span></div>
+            <div class="fact"><span class="fact-v">2026-09-30</span><span class="fact-src chip chip-ok">用户提供</span></div>
+            <div class="fact"><span class="fact-v">2 台 / 2014 年</span><span class="fact-src chip chip-accent">库检索</span></div>
+            <div class="fact"><span class="fact-v">偏多四成</span><span class="fact-src chip chip-error">模型生成</span></div>
+          </div>
+        </aside>
+      </div>
+
+      <!-- 状态栏 -->
+      <div class="statusbar">
+        <span class="sb-item">
+          <svg class="ico" viewBox="0 0 16 16"><rect x="3.5" y="7" width="9" height="6" rx="1"/><path d="M5.5 7V5a2.5 2.5 0 015 0v2"/></svg>
+          密级 内部 · 允许云端模型
+        </span>
+        <span class="sb-item">deepseek-chat · 起草 claude-sonnet-5</span>
+        <div class="r">
+          <span class="sb-item">字体 已就绪</span>
+          <span class="sb-item mono">4,182 tokens · ¥0.031</span>
+          <span class="sb-item">已保存 12:41</span>
+        </div>
+      </div>
+    </div>
+    </div>
+
+    <div style="margin-top:14px; display:flex; gap:9px; flex-wrap:wrap; align-items:center">
+      <span class="blocked">
+        <svg class="ico" viewBox="0 0 16 16"><path d="M8 2l6 11H2z"/><path d="M8 6.5v3M8 11.2v.1"/></svg>
+        存在 2 项错误，导出已阻断
+      </span>
+      <span style="font-size:12px; color:var(--ink-3)">
+        —— error 级问题阻断导出，用户可显式覆盖但需二次确认。这是防幻觉链路的最后一道闸。
+      </span>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <!-- ══════════ 色彩 ══════════ -->
+  <section class="sec">
+    <div class="sec-head">
+      <h2>色彩</h2>
+      <span class="note">中性色偏蓝，与石青同源；朱红只做语义，不做装饰</span>
+    </div>
+
+    <div class="swatches">
+      <div class="sw"><div class="sw-c" style="background:#141821"></div><div class="sw-b">
+        <div class="sw-n">墨</div><div class="sw-h">--ink · #141821</div><div class="sw-u">主文字。蓝偏黑，非纯黑</div></div></div>
+      <div class="sw"><div class="sw-c" style="background:#eef1f5"></div><div class="sw-b">
+        <div class="sw-n">冷纸灰</div><div class="sw-h">--ground · #EEF1F5</div><div class="sw-u">应用底色</div></div></div>
+      <div class="sw"><div class="sw-c" style="background:#1b5e7e"></div><div class="sw-b">
+        <div class="sw-n">石青</div><div class="sw-h">--accent · #1B5E7E</div><div class="sw-u">全站唯一交互强调色</div></div></div>
+      <div class="sw"><div class="sw-c" style="background:#b8362c"></div><div class="sw-b">
+        <div class="sw-n">朱</div><div class="sw-h">--danger · #B8362C</div><div class="sw-u">错误 / 待核实 / 红头</div></div></div>
+      <div class="sw"><div class="sw-c" style="background:#96690f"></div><div class="sw-b">
+        <div class="sw-n">赭</div><div class="sw-h">--warn · #96690F</div><div class="sw-u">警告 / 待修订</div></div></div>
+      <div class="sw"><div class="sw-c" style="background:#3a6e4c"></div><div class="sw-b">
+        <div class="sw-n">松绿</div><div class="sw-h">--ok · #3A6E4C</div><div class="sw-u">通过 / 事实可信</div></div></div>
+    </div>
+
+    <div class="grid-cards" style="margin-top:20px">
+      <div class="card">
+        <h3>为什么朱红不当强调色</h3>
+        <p>公文里红色天然带有"红头"和"朱批"两重含义。一旦拿它做按钮、做高亮，用户就无法从颜色本身判断"这是要我注意的问题"还是"这只是个装饰"。所以朱红全站只出现在三处：红头与分隔线、error 级问题、待核实事实。</p>
+      </div>
+      <div class="card">
+        <h3>纸张色是独立令牌组</h3>
+        <p><code style="font-family:var(--font-mono); font-size:11.5px">--paper-*</code> 在明暗两个主题下取值相同。暗色界面中文档预览仍为浅色纸，沿用 Word 与 Acrobat 的惯例——用户校对的是将要打印的实物。纸上的一切颜色只能取 paper 令牌，不得混用界面令牌。</p>
+      </div>
+      <div class="card">
+        <h3>状态编码不只靠颜色</h3>
+        <p>每条问题同时用左侧色条、文字标签（错误/警告/建议）和规则编号三重编码。色觉障碍用户只看标签也能分辨严重程度，这也是 error 阻断导出这类硬逻辑必须可读的前提。</p>
+      </div>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <!-- ══════════ 字体 ══════════ -->
+  <section class="sec">
+    <div class="sec-head">
+      <h2>字体</h2>
+      <span class="note">界面用系统黑体栈；纸面严格使用国标字体，与导出 docx 一致</span>
+    </div>
+
+    <div class="typerow">
+      <div class="typemeta">纸面 · 标题<br>方正小标宋<br>2号 / 22pt</div>
+      <div style="font-family:var(--font-title); font-size:23px; line-height:1.4">关于申请购置应急排水设备经费的请示</div>
+    </div>
+    <div class="typerow">
+      <div class="typemeta">纸面 · 一级<br>黑体<br>3号 / 16pt</div>
+      <div style="font-family:var(--font-hei); font-size:18px">一、现有装备情况</div>
+    </div>
+    <div class="typerow">
+      <div class="typemeta">纸面 · 二级<br>楷体_GB2312<br>3号 / 16pt</div>
+      <div style="font-family:var(--font-kai); font-size:18px">（一）设备配置与损耗</div>
+    </div>
+    <div class="typerow">
+      <div class="typemeta">纸面 · 正文<br>仿宋_GB2312<br>3号 / 16pt · 行距28pt</div>
+      <div style="font-family:var(--font-doc); font-size:17px; line-height:1.85; max-width:34em">拟购置大流量排水抢险车3台，所需经费15万元，从县级防汛抗旱专项经费中列支，于9月30日前完成采购并投入使用。</div>
+    </div>
+    <div class="typerow">
+      <div class="typemeta">界面 · 正文<br>系统黑体栈<br>13.5px</div>
+      <div style="font-size:13.5px; max-width:40em; color:var(--ink-2)">界面文字与纸面文字必须在视觉上可区分——纸上是要交付的公文，界面上是工具的话。二者混淆时用户会误以为工具提示会被打印出去。</div>
+    </div>
+    <div class="typerow">
+      <div class="typemeta">界面 · 数据<br>等宽栈<br>tabular-nums</div>
+      <div class="mono" style="font-family:var(--font-mono); font-size:13px; font-variant-numeric:tabular-nums">FACT-001 · 4,182 tokens · ¥0.031 · 0.91</div>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <!-- ══════════ 版面规格 ══════════ -->
+  <section class="sec">
+    <div class="sec-head">
+      <h2>版面规格</h2>
+      <span class="note">GB/T 9704-2012 · 预览与 docx 导出共用同一组常量</span>
+    </div>
+    <div class="tablewrap">
+      <table class="spec-table">
+        <thead><tr><th>要素</th><th>规格</th><th>令牌</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td>用纸</td><td class="mono">A4 · 210 × 297 mm</td><td class="mono">--gb-page-w/h</td><td>固定</td></tr>
+          <tr><td>天头</td><td class="mono">37 mm ± 1</td><td class="mono">--gb-margin-t</td><td>上白边</td></tr>
+          <tr><td>订口</td><td class="mono">28 mm ± 1</td><td class="mono">--gb-margin-l</td><td>左白边</td></tr>
+          <tr><td>版心</td><td class="mono">156 × 225 mm</td><td class="mono">--gb-body-w/h</td><td>预览按百分比定位，缩放不失真</td></tr>
+          <tr><td>行距</td><td class="mono">28 pt 固定值</td><td class="mono">--gb-leading</td><td>非倍数行距</td></tr>
+          <tr><td>字格</td><td class="mono">22 行 × 28 字</td><td class="mono">--gb-lines/chars</td><td>按字号计算，不依赖实际渲染测量</td></tr>
+          <tr><td>发文字号</td><td class="mono">〔2026〕27号</td><td class="mono">FMT-013</td><td>六角括号，规则引擎硬校验</td></tr>
+          <tr><td>成文日期</td><td class="mono">2026年8月12日</td><td class="mono">DATE-001</td><td>阿拉伯数字全称</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <!-- ══════════ 组件 ══════════ -->
+  <section class="sec">
+    <div class="sec-head">
+      <h2>组件</h2>
+      <span class="note">圆角最大 8px，阴影极轻，分层主要靠边框</span>
+    </div>
+
+    <div class="grid-cards">
+      <div class="card">
+        <h3>按钮</h3>
+        <div class="demorow">
+          <button class="btn btn-primary" type="button">导出 docx</button>
+          <button class="btn" type="button">重跑此步</button>
+          <button class="btn btn-ghost" type="button">取消</button>
+          <button class="btn btn-primary" type="button" disabled>已阻断</button>
+        </div>
+        <p style="margin-top:11px">主按钮全窗口仅一个。禁用态必须配一条说明为什么被禁用的文案，不留用户猜。</p>
+      </div>
+
+      <div class="card">
+        <h3>严重程度</h3>
+        <div class="demorow">
+          <span class="chip chip-error">错误</span>
+          <span class="chip chip-warn">警告</span>
+          <span class="chip chip-neutral">建议</span>
+          <span class="chip chip-ok">通过</span>
+        </div>
+        <p style="margin-top:11px">错误阻断导出，警告与建议不阻断。三者的差别是产品逻辑，不是视觉轻重。</p>
+      </div>
+
+      <div class="card">
+        <h3>事实来源</h3>
+        <div class="demorow">
+          <span class="chip chip-ok">用户提供</span>
+          <span class="chip chip-accent">库检索</span>
+          <span class="chip chip-error">模型生成</span>
+        </div>
+        <p style="margin-top:11px">每一条事实都必须带来源标记。"模型生成"一律朱红，因为它等同于"尚未有人为此负责"。</p>
+      </div>
+
+      <div class="card">
+        <h3>待核实标记</h3>
+        <p style="font-family:var(--font-doc); font-size:16px; color:var(--paper-ink); background:var(--paper); padding:11px 13px; border-radius:5px; border:1px solid var(--paper-line); line-height:1.8">累计降雨量较常年同期<span class="unverified">偏多四成<sup>1</sup></span>。</p>
+        <p style="margin-top:11px">朱红虚线下划线 + 角标编号，对应右栏问题列表。悬停显示规则编号与原因。</p>
+      </div>
+
+      <div class="card">
+        <h3>流水线阶段</h3>
+        <div class="demorow" style="gap:0">
+          <span class="stage done"><i class="dot"></i>校验</span>
+          <span class="stage active"><i class="dot"></i>事实回查</span>
+          <span class="stage"><i class="dot"></i>评分</span>
+        </div>
+        <p style="margin-top:11px">九个阶段是真实的执行顺序，所以用序列式布局。任一阶段可单独重跑而不重跑全程。</p>
+      </div>
+
+      <div class="card">
+        <h3>密级与模型</h3>
+        <div class="demorow">
+          <span class="chip chip-ok">公开</span>
+          <span class="chip chip-neutral">内部</span>
+          <span class="chip chip-sec">秘密 · 仅本地模型</span>
+        </div>
+        <p style="margin-top:11px">密级达到秘密及以上时，云端 Provider 在设置里直接置灰，不给"确认后继续"的口子。</p>
+      </div>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <footer class="foot">
+    my-wordediter · 界面设计 v0.1 · 令牌文件见 <code style="font-family:var(--font-mono)">src/styles/tokens.css</code>，
+    版面常量与 <code style="font-family:var(--font-mono)">packs/gb9704-format/style/gb9704.toml</code> 必须保持一致
+  </footer>
+</div>
+
+<script>
+(function(){
+  var tabs = document.querySelectorAll('.tab');
+  tabs.forEach(function(t){
+    t.addEventListener('click', function(){
+      tabs.forEach(function(o){
+        o.setAttribute('aria-selected','false');
+        document.getElementById(o.dataset.view).hidden = true;
+      });
+      t.setAttribute('aria-selected','true');
+      document.getElementById(t.dataset.view).hidden = false;
+    });
+  });
+
+  var gt = document.getElementById('gridtoggle');
+  var sheet = document.getElementById('sheet');
+  gt.addEventListener('click', function(){
+    var on = gt.getAttribute('aria-pressed') === 'true';
+    gt.setAttribute('aria-pressed', String(!on));
+    sheet.classList.toggle('grid', !on);
+  });
+
+  document.querySelectorAll('.filt').forEach(function(f){
+    f.addEventListener('click', function(){
+      document.querySelectorAll('.filt').forEach(function(o){ o.setAttribute('aria-pressed','false'); });
+      f.setAttribute('aria-pressed','true');
+    });
+  });
+})();
+</script>

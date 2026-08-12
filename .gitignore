@@ -1,0 +1,45 @@
+# Rust / Tauri
+target/
+src-tauri/target/
+**/*.rs.bk
+*.pdb
+
+# Node
+node_modules/
+dist/
+dist-ssr/
+.vite/
+*.local
+
+# 本地配置与密钥（密钥应存系统 Keyring，此处仅防误提交）
+.env
+.env.*
+!.env.example
+providers.local.toml
+config.local.*
+
+# 应用数据
+*.db
+*.db-shm
+*.db-wal
+/data/
+/.cache/
+
+# 用户公文与语料（涉密风险，一律不入库）
+/vault/
+/corpus/
+packs/local-corpus/
+*.docx
+*.doc
+!templates/docx/*.docx
+
+# 编辑器与系统
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+
+# Claude Code 本地状态
+.claude/
