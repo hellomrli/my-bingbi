@@ -1572,6 +1572,97 @@ textarea::placeholder {
   height: min(720px, calc(100dvh - 32px));
 }
 
+.session-history {
+  width: min(720px, calc(100vw - 32px));
+  height: min(600px, calc(100dvh - 32px));
+}
+
+.session-list {
+  min-height: 0;
+  overflow: auto;
+  padding: 6px;
+  display: grid;
+  gap: 6px;
+}
+
+.session-row {
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+
+.session-row.is-expanded {
+  border-color: var(--accent-soft);
+}
+
+.session-row-head {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--ink-1);
+}
+
+.session-row-head:hover {
+  background: var(--surface-2);
+}
+
+.session-row-time {
+  flex: none;
+  color: var(--ink-3);
+  font-size: var(--fs-micro);
+}
+
+.session-row-tokens {
+  margin-left: auto;
+  color: var(--ink-2);
+  font-size: var(--fs-micro);
+  font-variant-numeric: tabular-nums;
+}
+
+.session-row-head svg.is-flipped {
+  transform: rotate(180deg);
+}
+
+.session-run-table {
+  width: 100%;
+  border-collapse: collapse;
+  border-top: 1px solid var(--line);
+  font-size: var(--fs-micro);
+}
+
+.session-run-table th,
+.session-run-table td {
+  padding: 5px 10px;
+  text-align: left;
+}
+
+.session-run-table th {
+  color: var(--ink-3);
+  font-weight: 500;
+  background: var(--surface-2);
+}
+
+.session-run-table td.is-numeric,
+.session-run-table th.is-numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.session-run-table td:last-child {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.session-empty-detail {
+  color: var(--ink-3);
+  text-align: center;
+}
+
 .version-layout {
   display: grid;
   min-width: 0;

@@ -198,6 +198,58 @@ impl DocumentStore {
             .ok_or_else(|| StoreError::SessionNotFound(session_id.to_owned()))
     }
 
+    /// Lists drafting sessions, newest first, optionally restricted to one document.
+    ///
+    /// Session rows carry the pipeline kind and total token cost, which the workbench shows as
+    /// the drafting cost panel. The `limit` must be between 1 and 100.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an invalid document filter or limit, or a `SQLite` read failure.
+    pub fn list_sessions(
+        &self,
+        document_id: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<SessionSummary>, StoreError> {
+        if !(1..=100).contains(&limit) {
+            return Err(StoreError::InvalidSession(
+                "session limit out of range".to_owned(),
+            ));
+        }
+        if let Some(document_id) = document_id {
+            validate_identifier(document_id, MAX_SESSION_ID_BYTES, "document ID")?;
+        }
+        let mut statement = self.connection.prepare(
+            "SELECT id, doc_id, pipeline, state_json, cost_tokens, created_at, updated_at
+             FROM sessions
+             WHERE (?1 IS NULL OR doc_id = ?1)
+             ORDER BY updated_at DESC, id DESC
+             LIMIT ?2",
+        )?;
+        let rows = statement.query_map(params![document_id, i64::from(limit)], |row| {
+            Ok(SessionSummary {
+                id: row.get(0)?,
+                document_id: row.get(1)?,
+                pipeline: row.get(2)?,
+                state_json: row.get(3)?,
+                cost_tokens: row.get::<_, i64>(4)?.try_into().map_err(|_| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        4,
+                        rusqlite::types::Type::Integer,
+                        Box::new(std::io::Error::other("negative token count")),
+                    )
+                })?,
+                created_at: row.get(5)?,
+                updated_at: row.get(6)?,
+            })
+        })?;
+        let mut sessions = Vec::new();
+        for row in rows {
+            sessions.push(row?);
+        }
+        Ok(sessions)
+    }
+
     /// Loads the input snapshot of the latest run of one pipeline stage.
     ///
     /// Used by single-stage rerun to reconstruct the exact context the stage originally saw.
@@ -397,6 +449,111 @@ mod tests {
         ));
         assert!(matches!(
             store.start_session("session-1", "missing", "draft", "\0"),
+            Err(StoreError::InvalidSession(_))
+        ));
+    }
+
+    #[test]
+    fn list_sessions_orders_newest_first_and_filters_by_document() {
+        let mut store = DocumentStore::open_in_memory().expect("store should open");
+        let first = ODoc::empty();
+        let mut second = ODoc::empty();
+        second.body.title.text = "另一篇".to_owned();
+        store
+            .save_document(&first, Some("initial"))
+            .expect("first document should save");
+        store
+            .save_document(&second, Some("initial"))
+            .expect("second document should save");
+        store
+            .start_session("session-a", &first.id, "draft", "{}")
+            .expect("session a should start");
+        store
+            .start_session("session-b", &first.id, "imitate", "{}")
+            .expect("session b should start");
+        store
+            .start_session("session-c", &second.id, "draft", "{}")
+            .expect("session c should start");
+        store
+            .record_stage_run(
+                "session-a",
+                "draft",
+                "{}",
+                Some("{}"),
+                Some("ollama"),
+                11,
+                4,
+            )
+            .expect("stage should record");
+        store
+            .record_stage_run(
+                "session-b",
+                "draft",
+                "{}",
+                Some("{}"),
+                Some("ollama"),
+                22,
+                4,
+            )
+            .expect("stage should record");
+        store
+            .record_stage_run(
+                "session-c",
+                "draft",
+                "{}",
+                Some("{}"),
+                Some("ollama"),
+                33,
+                4,
+            )
+            .expect("stage should record");
+        // The inserts all land in the same millisecond; age them apart to exercise the ordering.
+        for (session, offset) in [
+            ("session-b", 3_000_i64),
+            ("session-c", 2_000),
+            ("session-a", 1_000),
+        ] {
+            store
+                .connection
+                .execute(
+                    "UPDATE sessions SET updated_at = updated_at + ?1 WHERE id = ?2",
+                    params![offset, session],
+                )
+                .expect("session age should update");
+        }
+
+        let all = store
+            .list_sessions(None, 100)
+            .expect("sessions should load");
+        assert_eq!(all.len(), 3);
+        // session-b recorded last, so it is newest.
+        assert_eq!(all[0].id, "session-b");
+        assert_eq!(all[0].pipeline, "imitate");
+        assert_eq!(all[0].cost_tokens, 22);
+        assert_eq!(all[1].id, "session-c");
+        assert_eq!(all[2].id, "session-a");
+
+        let filtered = store
+            .list_sessions(Some(&first.id), 100)
+            .expect("filtered sessions should load");
+        assert_eq!(
+            filtered
+                .iter()
+                .map(|session| session.id.as_str())
+                .collect::<Vec<_>>(),
+            ["session-b", "session-a"]
+        );
+
+        let limited = store
+            .list_sessions(None, 2)
+            .expect("limited sessions should load");
+        assert_eq!(limited.len(), 2);
+        assert!(matches!(
+            store.list_sessions(None, 0),
+            Err(StoreError::InvalidSession(_))
+        ));
+        assert!(matches!(
+            store.list_sessions(Some(""), 10),
             Err(StoreError::InvalidSession(_))
         ));
     }

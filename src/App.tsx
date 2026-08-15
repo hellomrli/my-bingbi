@@ -8,6 +8,7 @@ import { IntakeSidebar } from "./features/intake/IntakeSidebar";
 import { LintPanel } from "./features/lint-panel/LintPanel";
 import { DocumentPreview } from "./features/preview/DocumentPreview";
 import { ReviewReportDialog } from "./features/review/ReviewReportDialog";
+import { SessionHistoryDialog } from "./features/documents/SessionHistoryDialog";
 import { SettingsDialog } from "./features/settings/SettingsDialog";
 import { Toolbar } from "./features/workbench/Toolbar";
 import { countChineseCharacters, documentTypeLabels } from "./lib/document";
@@ -96,6 +97,7 @@ function App() {
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [archiveBusy, setArchiveBusy] = useState(false);
   const [historyTarget, setHistoryTarget] = useState<{ id: string; title: string } | null>(null);
+  const [sessionTarget, setSessionTarget] = useState<{ id: string; title: string } | null>(null);
   const [libraryLoading, setLibraryLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savedVersion, setSavedVersion] = useState<number | null>(null);
@@ -900,6 +902,7 @@ function App() {
         onRefresh={() => void refreshDocuments()}
         onOpen={(id) => void handleOpenDocument(id)}
         onHistory={(id, title) => setHistoryTarget({ id, title })}
+        onSessions={(id, title) => setSessionTarget({ id, title })}
         onDelete={(id) => void handleDeleteDocument(id)}
       />
       <ArchiveDialog
@@ -916,6 +919,12 @@ function App() {
         title={historyTarget?.title ?? ""}
         onClose={() => setHistoryTarget(null)}
         onRestored={handleVersionRestored}
+      />
+      <SessionHistoryDialog
+        open={sessionTarget !== null}
+        documentId={sessionTarget?.id ?? null}
+        title={sessionTarget?.title ?? ""}
+        onClose={() => setSessionTarget(null)}
       />
       <SettingsDialog
         open={settingsOpen}

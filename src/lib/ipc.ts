@@ -17,6 +17,8 @@ import type {
   DocumentVersionSummary,
   KbIndexState,
   SaveDocumentResult,
+  SessionSummary,
+  StageRunRecord,
 } from "./store";
 
 const BROWSER_REPOSITORY_KEY = "bingbi-browser-repository-v1";
@@ -262,6 +264,24 @@ export async function listDocuments(limit = 30): Promise<DocumentSummary[]> {
     }))
     .sort((left, right) => right.updatedAt - left.updatedAt || left.id.localeCompare(right.id))
     .slice(0, Math.max(1, Math.min(limit, 200)));
+}
+
+/** Lists drafting sessions (newest first); browser preview has no desktop sessions. */
+export async function listSessions(
+  documentId?: string | null,
+  limit = 20,
+): Promise<SessionSummary[]> {
+  if (!isDesktopRuntime()) return [];
+  return invoke<SessionSummary[]>("list_sessions", {
+    documentId: documentId ?? null,
+    limit,
+  });
+}
+
+/** Lists the recorded stage runs of one drafting session for the cost panel. */
+export async function listStageRuns(sessionId: string): Promise<StageRunRecord[]> {
+  if (!isDesktopRuntime()) return [];
+  return invoke<StageRunRecord[]>("list_stage_runs", { sessionId });
 }
 
 export async function deleteDocument(id: string): Promise<boolean> {

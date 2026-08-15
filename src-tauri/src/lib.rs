@@ -277,6 +277,34 @@ fn list_documents(
 }
 
 #[tauri::command]
+fn list_sessions(
+    state: State<'_, AppState>,
+    document_id: Option<String>,
+    limit: Option<u32>,
+) -> Result<Vec<odoc_store::SessionSummary>, IpcError> {
+    let limit = limit.unwrap_or(20);
+    if !(1..=100).contains(&limit) {
+        return Err(IpcError {
+            code: "invalid_input",
+            message: "起草记录数量范围无效。",
+        });
+    }
+    lock_documents(&state)?
+        .list_sessions(document_id.as_deref(), limit)
+        .map_err(map_store_error)
+}
+
+#[tauri::command]
+fn list_stage_runs(
+    state: State<'_, AppState>,
+    session_id: String,
+) -> Result<Vec<odoc_store::StageRunRecord>, IpcError> {
+    lock_documents(&state)?
+        .list_stage_runs(&session_id)
+        .map_err(map_store_error)
+}
+
+#[tauri::command]
 fn delete_document(state: State<'_, AppState>, id: String) -> Result<bool, IpcError> {
     lock_documents(&state)?
         .delete_document(&id)
@@ -2296,6 +2324,8 @@ pub fn run() {
             save_document,
             load_document,
             list_documents,
+            list_sessions,
+            list_stage_runs,
             delete_document,
             list_document_versions,
             load_document_version,

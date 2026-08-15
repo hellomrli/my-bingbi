@@ -1,4 +1,4 @@
-import { FileText, History, RefreshCw, Trash2, X } from "lucide-react";
+import { FileText, History, Receipt, RefreshCw, Trash2, X } from "lucide-react";
 import { documentTypeLabels } from "../../lib/document";
 import type { DocumentSummary } from "../../lib/store";
 
@@ -11,6 +11,7 @@ interface DocumentLibraryProps {
   onRefresh: () => void;
   onOpen: (id: string) => void;
   onHistory: (id: string, title: string) => void;
+  onSessions: (id: string, title: string) => void;
   onDelete: (id: string) => void;
 }
 
@@ -32,6 +33,7 @@ export function DocumentLibrary({
   onRefresh,
   onOpen,
   onHistory,
+  onSessions,
   onDelete,
 }: DocumentLibraryProps) {
   if (!open) return null;
@@ -79,6 +81,15 @@ export function DocumentLibrary({
                 aria-label={`查看 ${item.title} 的版本历史`}
               >
                 <History size={14} />
+              </button>
+              <button
+                className="icon-button small"
+                type="button"
+                onClick={() => onSessions(item.id, item.title)}
+                title="起草记录与成本"
+                aria-label={`查看 ${item.title} 的起草记录`}
+              >
+                <Receipt size={14} />
               </button>
               <button
                 className="icon-button small danger-action"
