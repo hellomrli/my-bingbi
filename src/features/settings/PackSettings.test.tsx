@@ -55,6 +55,8 @@ beforeEach(() => {
   (window as unknown as { __TAURI_INTERNALS__: object }).__TAURI_INTERNALS__ = {};
   mockedInvoke.mockImplementation(async (command: string) => {
     if (command === "list_pack_summaries") return builtinPacks;
+    if (command === "user_pack_root") return "/home/test/.config/my-wordediter/packs";
+    if (command === "pack_load_issues") return [];
     throw new Error(`unexpected command ${command}`);
   });
 });
@@ -99,5 +101,18 @@ describe("PackSettings", () => {
     // The pack stays enabled and the guard message explains why.
     expect((custom as unknown as HTMLInputElement).checked).toBe(true);
     expect(await screen.findByText("至少需要启用一个可切换知识包。")).toBeTruthy();
+  });
+
+  it("shows the user pack directory and reports load issues", async () => {
+    mockedInvoke.mockImplementation(async (command: string) => {
+      if (command === "list_pack_summaries") return builtinPacks;
+      if (command === "user_pack_root") return "/home/test/.config/my-wordediter/packs";
+      if (command === "pack_load_issues") return ["pack rule 'x' is invalid", "duplicate pack id 'core-pack'"];
+      throw new Error(`unexpected command ${command}`);
+    });
+    render(<PackSettings activePackIds={["gb9704-format", "renmin-style"]} onSave={vi.fn()} />);
+    expect(await screen.findByText("/home/test/.config/my-wordediter/packs")).toBeTruthy();
+    expect(screen.getByText(/用户包加载失败：pack rule 'x' is invalid/)).toBeTruthy();
+    expect(screen.getByText(/用户包加载失败：duplicate pack id 'core-pack'/)).toBeTruthy();
   });
 });

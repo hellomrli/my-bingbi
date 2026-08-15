@@ -490,6 +490,59 @@ impl PackRegistry {
         Ok(Self { packs })
     }
 
+    /// Loads the built-in packs and additionally tolerates user packs from a second root.
+    ///
+    /// Invalid user packs and identifier clashes with built-ins are skipped and reported in
+    /// the returned issue list; only problems inside the built-in root are fatal. A missing
+    /// user root loads nothing and reports no issues.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the built-in root is unsafe or contains an invalid pack.
+    pub fn load_with_user_root(
+        builtin_root: impl AsRef<Path>,
+        user_root: impl AsRef<Path>,
+    ) -> Result<(Self, Vec<PackError>), PackError> {
+        let mut registry = Self::load(builtin_root)?;
+        let mut issues = Vec::new();
+        let user_root = user_root.as_ref();
+        if !user_root.exists() {
+            return Ok((registry, issues));
+        }
+        if let Err(error) = validate_directory(user_root) {
+            return Ok((registry, vec![error]));
+        }
+        let mut directories = match fs::read_dir(user_root) {
+            Ok(entries) => entries.collect::<Result<Vec<_>, _>>()?,
+            Err(error) => return Ok((registry, vec![PackError::Io(error)])),
+        };
+        directories.sort_by_key(std::fs::DirEntry::file_name);
+        for entry in directories {
+            let path = entry.path();
+            let Ok(metadata) = path.symlink_metadata() else {
+                continue;
+            };
+            if !metadata.is_dir() || !path.join(MANIFEST_FILE).is_file() {
+                continue;
+            }
+            match LoadedPack::load(&path) {
+                Ok(pack) => {
+                    let id = pack.manifest.pack.id.clone();
+                    match registry.packs.entry(id) {
+                        std::collections::btree_map::Entry::Vacant(entry) => {
+                            entry.insert(pack);
+                        }
+                        std::collections::btree_map::Entry::Occupied(entry) => {
+                            issues.push(PackError::DuplicatePackId(entry.key().clone()));
+                        }
+                    }
+                }
+                Err(error) => issues.push(error),
+            }
+        }
+        Ok((registry, issues))
+    }
+
     pub fn get(&self, id: &str) -> Option<&LoadedPack> {
         self.packs.get(id)
     }

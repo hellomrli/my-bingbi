@@ -483,6 +483,18 @@ export async function archiveDocumentToKb(
   return invoke<ArchiveResult>("archive_document_to_kb", { documentId, path, overwrite });
 }
 
+/** The user pack directory; browser preview has none. */
+export async function userPackRoot(): Promise<string | null> {
+  if (!isDesktopRuntime()) return null;
+  return invoke<string>("user_pack_root");
+}
+
+/** Pack-loading issues from the user pack directory (broken manifests, id clashes). */
+export async function packLoadIssues(): Promise<string[]> {
+  if (!isDesktopRuntime()) return [];
+  return invoke<string[]>("pack_load_issues");
+}
+
 export async function listProviderProfiles(): Promise<ProviderProfile[]> {
   if (isDesktopRuntime()) return invoke<ProviderProfile[]>("list_provider_profiles");
   const profiles = new Map(builtinProviderProfiles.map((profile) => [profile.id, structuredClone(profile)]));

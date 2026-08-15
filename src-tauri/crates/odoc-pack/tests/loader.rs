@@ -285,3 +285,85 @@ fn rejects_invalid_rule_parameters() {
         );
     }
 }
+
+#[test]
+fn user_pack_root_tolerates_bad_packs_and_reports_issues() {
+    let temp = tempfile::tempdir().expect("temporary directory should exist");
+    let builtin = temp.path().join("builtin");
+    let user = temp.path().join("user");
+    write_valid_pack(
+        &builtin.join("core-pack"),
+        "core-pack",
+        "rules/main.yaml",
+        VALID_RULE,
+    );
+    // A valid user pack, a statically broken one, an id clash and a stray file.
+    write_valid_pack(
+        &user.join("user-pack"),
+        "user-pack",
+        "rules/main.yaml",
+        VALID_RULE,
+    );
+    write_valid_pack(
+        &user.join("broken-pack"),
+        "broken-pack",
+        "rules/main.yaml",
+        "- id: bad-density\n  name: 非法密度\n  severity: warn\n  type: lexicon_density\n  scope: body.blocks\n  lexicon: [口号]\n  max_per_100_chars: -1\n  message: 非法密度\n",
+    );
+    write_valid_pack(
+        &user.join("core-pack"),
+        "core-pack",
+        "rules/main.yaml",
+        VALID_RULE,
+    );
+    fs::write(user.join("notes.txt"), "not a pack").expect("stray file should be written");
+
+    let (registry, issues) =
+        PackRegistry::load_with_user_root(&builtin, &user).expect("built-in root should load");
+    assert_eq!(registry.len(), 2, "core-pack and user-pack should load");
+    assert_eq!(
+        registry
+            .get("core-pack")
+            .expect("core should load")
+            .manifest()
+            .pack
+            .name,
+        "测试包"
+    );
+    assert_eq!(
+        registry
+            .get("user-pack")
+            .expect("user pack should load")
+            .manifest()
+            .pack
+            .name,
+        "测试包"
+    );
+    assert_eq!(
+        issues.len(),
+        2,
+        "the broken pack and the clash should be reported"
+    );
+    assert!(
+        issues
+            .iter()
+            .any(|issue| matches!(issue, PackError::InvalidRule { .. }))
+    );
+    assert!(
+        issues
+            .iter()
+            .any(|issue| matches!(issue, PackError::DuplicatePackId(id) if id == "core-pack"))
+    );
+}
+
+#[test]
+fn user_pack_root_may_be_missing() {
+    let temp = tempfile::tempdir().expect("temporary directory should exist");
+    let builtin = temp.path().join("builtin");
+    fs::create_dir_all(&builtin).expect("built-in root should be created");
+    let (registry, issues) =
+        PackRegistry::load_with_user_root(&builtin, temp.path().join("user-missing"))
+            .expect("built-in root should load");
+    assert!(registry.is_empty());
+    assert!(issues.is_empty());
+}

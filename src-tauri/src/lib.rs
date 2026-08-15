@@ -33,6 +33,8 @@ struct AppState {
     documents: Mutex<DocumentStore>,
     secrets: Box<dyn SecretStore>,
     kb_sync_generation: tokio::sync::watch::Sender<u64>,
+    user_pack_root: PathBuf,
+    pack_issues: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -245,6 +247,69 @@ fn backend_version() -> &'static str {
 #[tauri::command]
 fn list_pack_summaries(packs: State<'_, PackRegistry>) -> Vec<PackSummary> {
     pack_summaries(&packs)
+}
+
+#[tauri::command]
+fn user_pack_root(state: State<'_, AppState>) -> Result<String, IpcError> {
+    Ok(state.user_pack_root.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+fn pack_load_issues(state: State<'_, AppState>) -> Result<Vec<String>, IpcError> {
+    Ok(state.pack_issues.clone())
+}
+
+/// Creates the user pack root, seeding a commented example pack when the root is empty.
+///
+/// The example pack demonstrates custom deterministic rules: edit `rules/format.yaml` and
+/// restart the app. Existing content is never touched.
+fn ensure_user_pack_root(root: &std::path::Path) -> Result<(), std::io::Error> {
+    std::fs::create_dir_all(root)?;
+    if root.read_dir()?.next().is_some() {
+        return Ok(());
+    }
+    let pack_dir = root.join("local-corpus");
+    std::fs::create_dir_all(pack_dir.join("rules"))?;
+    std::fs::write(
+        pack_dir.join("pack.toml"),
+        r#"schema_version = "1"
+
+[pack]
+id = "local-corpus"
+name = "本单位语料包"
+version = "0.1.0"
+description = "本单位规则与笔法（示例包，规则文件可直接编辑）"
+license = "private"
+
+[capabilities]
+provides = ["format_rules", "language_rules"]
+
+[[bindings]]
+stage = "lint"
+rules = ["rules/format.yaml"]
+"#,
+    )?;
+    std::fs::write(
+        pack_dir.join("rules/format.yaml"),
+        r#"# 本单位自定义规则（示例）
+# 每条规则是一个 `- id: ...` 条目，语法见内置包 packs/gb9704-format/rules/format.yaml。
+# 取消注释即可启用示例规则，修改后重启应用生效。
+
+# - id: unit-banned-word
+#   name: 本单位禁用语
+#   severity: error
+#   type: lexicon_density
+#   scope: body.blocks
+#   lexicon: ["杜绝形式主义"]
+#   max_per_100_chars: 0
+#   message: 本单位禁用语，请更换表述
+"#,
+    )?;
+    std::fs::write(
+        pack_dir.join("README.md"),
+        "# 本单位语料包（示例）\n\n这是秉笔为用户自定义规则准备的示例知识包。修改\n`rules/format.yaml` 后重启应用生效；也可以复制本目录为一个新包\n（pack.toml 里的 id 必须与目录名一致）。\n",
+    )?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -2306,12 +2371,20 @@ pub fn run() {
             let database_path = DocumentStore::default_database_path()?;
             let documents = DocumentStore::open(database_path)?;
             let secrets = KeyringSecretStore::new(DEFAULT_SECRET_SERVICE)?;
-            let packs = PackRegistry::load(builtin_pack_root(app)?)?;
+            let user_pack_root = odoc_store::default_config_dir()?.join("packs");
+            ensure_user_pack_root(&user_pack_root)?;
+            let (packs, pack_issues) =
+                PackRegistry::load_with_user_root(builtin_pack_root(app)?, &user_pack_root)?;
             let (kb_sync_generation, kb_sync_receiver) = tokio::sync::watch::channel(0_u64);
             app.manage(AppState {
                 documents: Mutex::new(documents),
                 secrets: Box::new(secrets),
                 kb_sync_generation,
+                user_pack_root,
+                pack_issues: pack_issues
+                    .into_iter()
+                    .map(|issue| issue.to_string())
+                    .collect(),
             });
             app.manage(packs);
             tauri::async_runtime::spawn(kb_sync_supervisor(app.handle().clone(), kb_sync_receiver));
@@ -2321,6 +2394,8 @@ pub fn run() {
             create_empty_document,
             backend_version,
             list_pack_summaries,
+            user_pack_root,
+            pack_load_issues,
             save_document,
             load_document,
             list_documents,
@@ -2465,6 +2540,8 @@ mod tests {
             documents: Mutex::new(store),
             secrets: Box::new(odoc_store::MemorySecretStore::default()),
             kb_sync_generation: tokio::sync::watch::channel(0_u64).0,
+            user_pack_root: PathBuf::from("/tmp/user-packs"),
+            pack_issues: Vec::new(),
         };
         let mut request = connection_test_request();
         assert_eq!(request.security_level, SecurityLevel::Internal);
@@ -2570,6 +2647,8 @@ mod tests {
             documents: Mutex::new(store),
             secrets: Box::new(odoc_store::MemorySecretStore::default()),
             kb_sync_generation: tokio::sync::watch::channel(0_u64).0,
+            user_pack_root: PathBuf::from("/tmp/user-packs"),
+            pack_issues: Vec::new(),
         };
         let journal = StoreDraftJournal {
             state: &state,
@@ -2653,6 +2732,43 @@ mod tests {
     }
 
     #[test]
+    #[test]
+    fn user_pack_root_seeds_an_example_pack_only_when_empty() {
+        let directory = tempfile::tempdir().expect("temp directory");
+        let root = directory.path().join("packs");
+        ensure_user_pack_root(&root).expect("example pack should be seeded");
+        let manifest = std::fs::read_to_string(root.join("local-corpus/pack.toml"))
+            .expect("example manifest should exist");
+        assert!(manifest.contains("id = \"local-corpus\""));
+        assert!(
+            std::fs::read_to_string(root.join("local-corpus/rules/format.yaml"))
+                .expect("example rules should exist")
+                .contains("本单位自定义规则")
+        );
+
+        // The seeded example is a loadable pack with no rules.
+        let builtin = directory.path().join("builtin");
+        std::fs::create_dir_all(&builtin).expect("builtin root");
+        let (registry, issues) =
+            PackRegistry::load_with_user_root(&builtin, &root).expect("packs should load");
+        assert!(issues.is_empty());
+        assert_eq!(
+            registry
+                .get("local-corpus")
+                .expect("example pack should load")
+                .manifest()
+                .pack
+                .id,
+            "local-corpus"
+        );
+
+        // Existing content is never touched.
+        std::fs::write(root.join("keep.txt"), "keep me").expect("marker should be written");
+        ensure_user_pack_root(&root).expect("existing root should stay untouched");
+        assert!(root.join("keep.txt").is_file());
+        assert!(!root.join("another-pack").exists());
+    }
+
     fn review_request_normalizes_blank_focus_and_rejects_oversized_focus() {
         let blank = ReviewStartRequest {
             document_id: "doc".to_owned(),

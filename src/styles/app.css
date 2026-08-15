@@ -1728,6 +1728,28 @@ textarea::placeholder {
   padding: 12px 4px;
 }
 
+.pack-root-path {
+  display: block;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  padding: 6px 8px;
+  color: var(--ink-2);
+  font-size: var(--fs-micro);
+  background: var(--surface-2);
+}
+
+.pack-issues {
+  display: grid;
+  gap: 4px;
+  margin-top: 6px;
+  border: 1px solid var(--danger);
+  border-radius: var(--r-md);
+  padding: 7px 9px;
+  color: var(--danger);
+  font-size: var(--fs-micro);
+}
+
 .settings-hint {
   color: var(--ink-3);
   font-size: var(--fs-micro);

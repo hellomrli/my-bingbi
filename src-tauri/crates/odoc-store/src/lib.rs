@@ -94,6 +94,20 @@ impl DocumentStore {
         Ok(directories.config_dir().join("bingbi.sqlite3"))
     }
 
+    /// Resolves the platform-specific user configuration directory.
+    ///
+    /// User knowledge packs live under `config_dir/packs`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StoreError::ApplicationDirectoryUnavailable`] when the current platform does
+    /// not expose a user configuration directory.
+    pub fn default_config_dir() -> Result<PathBuf, StoreError> {
+        let directories = ProjectDirs::from("cn", "Bingbi", "my-wordediter")
+            .ok_or(StoreError::ApplicationDirectoryUnavailable)?;
+        Ok(directories.config_dir().to_path_buf())
+    }
+
     fn initialize(&mut self, file_backed: bool) -> Result<(), StoreError> {
         self.connection.busy_timeout(Duration::from_secs(5))?;
         self.connection.execute_batch("PRAGMA foreign_keys = ON;")?;

@@ -1,6 +1,6 @@
-import { Box, Check, LoaderCircle, LockKeyhole } from "lucide-react";
+import { Box, Check, FolderOpen, LoaderCircle, LockKeyhole } from "lucide-react";
 import { useEffect, useState } from "react";
-import { ipcErrorMessage, listPackSummaries } from "../../lib/ipc";
+import { ipcErrorMessage, listPackSummaries, packLoadIssues, userPackRoot } from "../../lib/ipc";
 import type { PackCapability, PackSummary } from "../../lib/pack";
 
 interface PackSettingsProps {
@@ -28,12 +28,16 @@ export function PackSettings({ activePackIds, onSave }: PackSettingsProps) {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [userRoot, setUserRoot] = useState<string | null>(null);
+  const [loadIssues, setLoadIssues] = useState<string[]>([]);
 
   useEffect(() => {
     listPackSummaries()
       .then(setPacks)
       .catch((loadError) => setError(ipcErrorMessage(loadError)))
       .finally(() => setBusy(false));
+    userPackRoot().then(setUserRoot).catch(() => setUserRoot(null));
+    packLoadIssues().then(setLoadIssues).catch(() => setLoadIssues([]));
   }, []);
 
   function togglePack(packId: string) {
@@ -126,6 +130,28 @@ export function PackSettings({ activePackIds, onSave }: PackSettingsProps) {
         </div>
       </div>
       {message && <div className="source-message" role="status">{message}</div>}
+      <div className="settings-group">
+        <label>用户包目录</label>
+        {userRoot ? (
+          <>
+            <span className="settings-hint">
+              <FolderOpen size={12} />
+              把自建知识包（含 pack.toml 的目录）放到这里，重启应用后生效；首个空目录已自动放入
+              local-corpus 示例包，直接编辑其 rules/ 即可添加本单位规则。
+            </span>
+            <code className="pack-root-path">{userRoot}</code>
+          </>
+        ) : (
+          <span className="settings-hint">浏览器预览没有用户包目录。</span>
+        )}
+        {loadIssues.length > 0 && (
+          <div className="pack-issues" role="alert">
+            {loadIssues.map((issue, index) => (
+              <div key={index}>用户包加载失败：{issue}</div>
+            ))}
+          </div>
+        )}
+      </div>
       <button className="command-button primary" type="submit" disabled={saving}>
         {saving ? <LoaderCircle size={15} className="is-spinning" /> : <Check size={15} />}
         保存知识包设置
