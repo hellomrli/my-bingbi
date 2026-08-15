@@ -1,4 +1,5 @@
 import {
+  BookOpen,
   Check,
   Eye,
   EyeOff,
@@ -41,6 +42,7 @@ interface SettingsDialogProps {
   config: AppConfig;
   onClose: () => void;
   onSave: (config: AppConfig) => Promise<void>;
+  onShowGuide?: () => void;
 }
 
 const themeOptions: Array<{ value: AppTheme; label: string }> = [
@@ -73,7 +75,7 @@ function profileInput(profile: ProviderProfile): ProviderProfileInput {
   return input;
 }
 
-export function SettingsDialog({ open, config, onClose, onSave }: SettingsDialogProps) {
+export function SettingsDialog({ open, config, onClose, onSave, onShowGuide }: SettingsDialogProps) {
   const [tab, setTab] = useState<SettingsTab>("general");
   const [draft, setDraft] = useState(config);
   const [saving, setSaving] = useState(false);
@@ -423,6 +425,12 @@ export function SettingsDialog({ open, config, onClose, onSave }: SettingsDialog
               </div>
               <footer className="modal-footer">
                 <button className="command-button" type="button" onClick={onClose}>取消</button>
+                {onShowGuide && (
+                  <button className="command-button" type="button" onClick={onShowGuide}>
+                    <BookOpen size={14} />
+                    重新查看欢迎引导
+                  </button>
+                )}
                 <button className="command-button primary" type="submit" disabled={saving}>
                   <Check size={15} />
                   保存设置

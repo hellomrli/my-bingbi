@@ -1745,6 +1745,154 @@ textarea::placeholder {
   line-height: 1.5;
 }
 
+.welcome-guide {
+  width: min(560px, calc(100vw - 32px));
+  max-height: min(640px, calc(100dvh - 32px));
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px;
+}
+
+.welcome-guide-steps {
+  display: flex;
+  gap: 6px;
+}
+
+.welcome-guide-steps span {
+  flex: 1;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--line-strong);
+}
+
+.welcome-guide-steps span.is-done {
+  background: var(--accent);
+}
+
+.welcome-guide-body {
+  display: grid;
+  gap: 10px;
+}
+
+.welcome-guide h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.welcome-guide-lead {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: var(--fs-small);
+  line-height: 1.6;
+}
+
+.brand-large {
+  font-size: 28px;
+  font-weight: 700;
+}
+
+.welcome-guide-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.welcome-guide-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  padding: 8px 10px;
+}
+
+.welcome-guide-item svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--accent);
+}
+
+.welcome-guide-item div {
+  display: grid;
+  gap: 2px;
+}
+
+.welcome-guide-item strong {
+  font-size: var(--fs-small);
+}
+
+.welcome-guide-item span,
+.welcome-guide-note {
+  color: var(--ink-3);
+  font-size: var(--fs-micro);
+}
+
+.welcome-guide-note {
+  margin: 0;
+}
+
+.welcome-guide-empty {
+  display: grid;
+  gap: 8px;
+  color: var(--ink-2);
+}
+
+.welcome-provider-list {
+  display: grid;
+  gap: 6px;
+}
+
+.welcome-provider-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  padding: 8px 10px;
+  cursor: pointer;
+}
+
+.welcome-provider-row input {
+  margin-top: 3px;
+}
+
+.welcome-provider-row span {
+  display: grid;
+  gap: 2px;
+}
+
+.welcome-provider-row small {
+  color: var(--ink-3);
+  font-size: var(--fs-micro);
+}
+
+.welcome-guide-checklist {
+  display: grid;
+  gap: 6px;
+  color: var(--ink-2);
+  font-size: var(--fs-small);
+}
+
+.welcome-guide-checklist div {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.welcome-guide-checklist svg {
+  color: var(--ok);
+}
+
+.welcome-guide-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+
 .version-layout {
   display: grid;
   min-width: 0;

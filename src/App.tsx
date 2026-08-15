@@ -6,6 +6,7 @@ import { VersionHistoryDialog } from "./features/documents/VersionHistoryDialog"
 import { StructureEditor } from "./features/editor/StructureEditor";
 import { IntakeSidebar } from "./features/intake/IntakeSidebar";
 import { LintPanel } from "./features/lint-panel/LintPanel";
+import { WelcomeGuide } from "./features/onboarding/WelcomeGuide";
 import { DocumentPreview } from "./features/preview/DocumentPreview";
 import { ReviewReportDialog } from "./features/review/ReviewReportDialog";
 import { SessionHistoryDialog } from "./features/documents/SessionHistoryDialog";
@@ -94,6 +95,7 @@ function App() {
   const [documents, setDocuments] = useState<DocumentSummary[]>([]);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [guideOpen, setGuideOpen] = useState(false);
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [archiveBusy, setArchiveBusy] = useState(false);
   const [historyTarget, setHistoryTarget] = useState<{ id: string; title: string } | null>(null);
@@ -164,6 +166,7 @@ function App() {
       .then((loaded) => {
         setConfig(loaded);
         setTheme(loaded.theme);
+        if (!loaded.firstRunCompleted) setGuideOpen(true);
       })
       .catch((error) => setNotice(ipcErrorMessage(error)));
     loadKbConfig()
@@ -693,6 +696,17 @@ function App() {
       window.document.querySelector<HTMLElement>(`[data-node-id="${nodeId}"]`)?.scrollIntoView({ block: "center" }));
   }
 
+  async function completeGuide() {
+    const next = { ...config, firstRunCompleted: true };
+    try {
+      await saveAppConfig(next);
+      setConfig(next);
+    } catch (error) {
+      setNotice(ipcErrorMessage(error));
+    }
+    setGuideOpen(false);
+  }
+
   async function handleCloseSettings() {
     setSettingsOpen(false);
     try {
@@ -931,6 +945,18 @@ function App() {
         config={config}
         onClose={() => void handleCloseSettings()}
         onSave={handleSaveConfig}
+        onShowGuide={() => {
+          setSettingsOpen(false);
+          setGuideOpen(true);
+        }}
+      />
+      <WelcomeGuide
+        open={guideOpen}
+        onComplete={() => void completeGuide()}
+        onOpenSettings={() => {
+          setGuideOpen(false);
+          setSettingsOpen(true);
+        }}
       />
       <ReviewReportDialog
         open={reviewOpen}
