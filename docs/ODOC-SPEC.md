@@ -49,8 +49,8 @@ ODoc（Official Document Model）是秉笔内部唯一的公文数据模型。�
 
 `Header` 包含：
 
-- `issuingAuthorityMark`：发文机关标志，例如“云岭县应急管理局文件”。
-- `documentNumber`：完整发文字号，例如“云应急〔2026〕27号”。
+- `issuingAuthorityMark`：发文机关标志，例如“×××县×××局文件”。
+- `documentNumber`：完整发文字号，例如“×××〔2026〕27号”。
 - `signer`：上行文签发人姓名。
 
 ## 4. 主体与正文块

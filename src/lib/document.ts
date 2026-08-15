@@ -68,48 +68,55 @@ export function createEmptyDocument(): ODoc {
   };
 }
 
+/**
+ * 演示范文模板。
+ *
+ * 为保持中立、避免被误认为真实单位或个人，正文中的机关、人名一律以
+ * 占位符“×××”表示，不出现任何具体单位名与人名。用户可直接在此基础上
+ * 替换占位符形成自己的公文。
+ */
 export function createDemoDocument(): ODoc {
   const document = createEmptyDocument();
   document.id = "demo-request-2026";
   document.header = {
     id: "header-demo",
-    issuingAuthorityMark: "云岭县应急管理局文件",
-    documentNumber: "云应急〔2026〕27号",
-    signer: "周敬亭",
+    issuingAuthorityMark: "×××县×××局文件",
+    documentNumber: "×××〔2026〕27号",
+    signer: null,
   };
   document.body.title.text = "关于申请购置应急排水设备经费的请示";
-  document.body.mainRecipients = ["县人民政府"];
+  document.body.mainRecipients = ["×××人民政府"];
   document.body.blocks = [
     {
       type: "paragraph",
       id: "block-intro",
-      content: "今年入汛以来，我县强降雨增多，老城区等低洼地段出现内涝，现有排水装备难以满足抢险需要。",
+      content: "今年入汛以来，×××县强降雨增多，城区低洼地段出现内涝，现有排水装备难以满足抢险需要。",
     },
     { type: "heading", id: "block-h1-current", level: "l1", content: "现有装备情况" },
     {
       type: "heading",
       id: "block-h2-loss",
       level: "l2",
-      content: "设备配置与损耗。我局现有移动排水泵车2台，其中1台购置于2014年，今年汛期已3次故障停机。",
+      content: "设备配置与损耗。×××局现有移动排水泵车2台，其中1台购置于20××年，今年汛期已3次故障停机。",
     },
     { type: "heading", id: "block-h1-request", level: "l1", content: "请示事项" },
     {
       type: "paragraph",
       id: "block-request",
-      content: "拟购置大流量排水抢险车3台，所需经费15万元，从县级防汛抗旱专项经费列支，于2026年9月30日前完成采购。",
+      content: "拟购置大流量排水抢险车3台，所需经费15万元，从×××专项经费列支，于2026年9月30日前完成采购。",
     },
     { type: "paragraph", id: "block-closing", content: "妥否，请批示。" },
   ];
   document.body.signer = {
     id: "signer-demo",
-    authority: "云岭县应急管理局",
+    authority: "×××县×××局",
     representative: null,
   };
   document.body.date = { id: "date-demo", value: "2026年8月12日" };
   document.footer = {
     id: "footer-demo",
-    copyRecipients: ["县财政局", "县水务局"],
-    printingAuthority: "云岭县应急管理局办公室",
+    copyRecipients: ["×××局", "×××局"],
+    printingAuthority: "×××县×××局办公室",
     printingDate: "2026年8月12日",
   };
   document.facts.facts = [
