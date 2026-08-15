@@ -1,7 +1,7 @@
 use odoc_engine::{
     DraftEngine, DraftEvent, DraftInput, DraftJournal, DraftOutcome, EngineError,
     PipelineDefinition, RerunOutcome, ReviewEngine, ReviewEvent, ReviewInput, ReviewOutcome,
-    StageOutput, StageStatus,
+    StageOutput,
 };
 use odoc_export::{
     ExportError, Gb9704Style, print_html, read_docx, validate_docx_template, write_docx_with_style,
@@ -2543,6 +2543,7 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use odoc_engine::StageStatus;
 
     #[test]
     fn creates_an_empty_document_for_ipc() {
@@ -2842,7 +2843,6 @@ mod tests {
         assert!(validate_rerun_stage_request(&empty_session).is_err());
     }
 
-    #[test]
     #[test]
     fn user_pack_root_seeds_an_example_pack_only_when_empty() {
         let directory = tempfile::tempdir().expect("temp directory");
