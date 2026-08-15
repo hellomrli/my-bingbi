@@ -346,7 +346,7 @@ fn ensure_user_pack_root(root: &std::path::Path) -> Result<(), std::io::Error> {
     std::fs::create_dir_all(pack_dir.join("rules"))?;
     std::fs::write(
         pack_dir.join("pack.toml"),
-        r#"schema_version = "1"
+        r#"schema_version = "0.1"
 
 [pack]
 id = "local-corpus"
