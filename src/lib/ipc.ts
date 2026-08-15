@@ -483,6 +483,29 @@ export async function archiveDocumentToKb(
   return invoke<ArchiveResult>("archive_document_to_kb", { documentId, path, overwrite });
 }
 
+export interface UpdateCheckResult {
+  available: boolean;
+  version: string | null;
+  notes: string | null;
+  installed: boolean;
+}
+
+/** Checks the configured update endpoint; only the desktop runtime has update services. */
+export async function checkForUpdate(): Promise<UpdateCheckResult> {
+  if (!isDesktopRuntime()) {
+    throw browserError("update_unavailable", "更新检查仅在桌面应用中可用。");
+  }
+  return invoke<UpdateCheckResult>("check_for_update");
+}
+
+/** Downloads and installs the pending update, then restarts the application. */
+export async function applyUpdate(): Promise<void> {
+  if (!isDesktopRuntime()) {
+    throw browserError("update_unavailable", "更新检查仅在桌面应用中可用。");
+  }
+  return invoke<void>("apply_update");
+}
+
 /** The user pack directory; browser preview has none. */
 export async function userPackRoot(): Promise<string | null> {
   if (!isDesktopRuntime()) return null;

@@ -28,6 +28,8 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tauri::ipc::Channel;
 use tauri::{Manager, State};
+use tauri_plugin_process::Restart;
+use tauri_plugin_updater::UpdaterExt;
 
 struct AppState {
     documents: Mutex<DocumentStore>,
@@ -142,6 +144,15 @@ struct ExportCapabilities {
     custom_template_configured: bool,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateCheckResult {
+    available: bool,
+    version: Option<String>,
+    notes: Option<String>,
+    installed: bool,
+}
+
 struct StoreDraftJournal<'a> {
     state: &'a AppState,
     provider_id: String,
@@ -250,6 +261,67 @@ fn backend_version() -> &'static str {
 #[tauri::command]
 fn list_pack_summaries(packs: State<'_, PackRegistry>) -> Vec<PackSummary> {
     pack_summaries(&packs)
+}
+
+/// Checks the configured update endpoint for a newer version.
+///
+/// The updater plugin is only registered when `BINGBI_UPDATER_PUBKEY` is set at startup (the
+/// release pipeline injects it); without it, this command reports the service as unconfigured
+/// instead of failing.
+#[tauri::command]
+async fn check_for_update<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<UpdateCheckResult, IpcError> {
+    let Ok(updater) = app.updater() else {
+        return Err(IpcError {
+            code: "update_unavailable",
+            message: "更新服务未配置。",
+        });
+    };
+    let update = updater.check().await.map_err(|_| IpcError {
+        code: "update_check_failed",
+        message: "检查更新失败，请稍后重试。",
+    })?;
+    Ok(update.map_or(
+        UpdateCheckResult {
+            available: false,
+            version: None,
+            notes: None,
+            installed: false,
+        },
+        |update| UpdateCheckResult {
+            available: true,
+            version: Some(update.version.to_string()),
+            notes: update.notes,
+            installed: false,
+        },
+    ))
+}
+
+/// Downloads and installs the pending update, then restarts the application.
+#[tauri::command]
+async fn apply_update<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), IpcError> {
+    let updater = app.updater().map_err(|_| IpcError {
+        code: "update_unavailable",
+        message: "更新服务未配置。",
+    })?;
+    let update = updater
+        .check()
+        .await
+        .map_err(|_| IpcError {
+            code: "update_check_failed",
+            message: "检查更新失败，请稍后重试。",
+        })?
+        .ok_or(IpcError {
+            code: "update_unavailable",
+            message: "当前已是最新版本。",
+        })?;
+    update.download_and_install().await.map_err(|_| IpcError {
+        code: "update_install_failed",
+        message: "更新下载或安装失败，请稍后重试。",
+    })?;
+    app.restart();
+    Ok(())
 }
 
 #[tauri::command]
@@ -2378,6 +2450,17 @@ pub fn run() {
             let database_path = DocumentStore::default_database_path()?;
             let documents = DocumentStore::open(database_path)?;
             let secrets = KeyringSecretStore::new(DEFAULT_SECRET_SERVICE)?;
+            // The updater needs a release signing key; only the release pipeline has one, so
+            // the plugin is registered conditionally and dev/CI builds stay signature-free.
+            if let Ok(pubkey) = std::env::var("BINGBI_UPDATER_PUBKEY")
+                && !pubkey.trim().is_empty()
+            {
+                app.handle().plugin(
+                    tauri_plugin_updater::Builder::new()
+                        .pubkey(pubkey.trim().to_owned())
+                        .build(),
+                )?;
+            }
             let user_pack_root = odoc_store::default_config_dir()?.join("packs");
             ensure_user_pack_root(&user_pack_root)?;
             let (packs, pack_issues) =
@@ -2403,6 +2486,8 @@ pub fn run() {
             list_pack_summaries,
             user_pack_root,
             pack_load_issues,
+            check_for_update,
+            apply_update,
             save_document,
             load_document,
             list_documents,

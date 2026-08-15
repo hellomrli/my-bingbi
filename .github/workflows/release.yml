@@ -66,14 +66,29 @@ jobs:
       - name: Install JavaScript dependencies
         run: npm ci
 
-      - name: Build desktop bundle
-        run: npm run tauri -- build --bundles ${{ matrix.bundle }} --ci
+      - name: Verify update signing key
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo "::error::TAURI_SIGNING_PRIVATE_KEY secret missing. Generate one with 'tauri signer generate' and configure it in repository secrets before tagging a release."
+            exit 1
+          fi
 
-      - name: Upload installer
+      - name: Build desktop bundle with signed update artifacts
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npm run tauri -- build --bundles ${{ matrix.bundle }} --ci --config '{"bundle":{"createUpdaterArtifacts":true}}'
+
+      - name: Upload installer and update artifacts
         uses: actions/upload-artifact@v4
         with:
           name: my-bingbi-${{ matrix.platform }}
-          path: ${{ matrix.artifact }}
+          path: |
+            ${{ matrix.artifact }}
+            src-tauri/target/release/bundle/latest.json
+            src-tauri/target/release/bundle/**/*.sig
           if-no-files-found: error
           retention-days: 1
 

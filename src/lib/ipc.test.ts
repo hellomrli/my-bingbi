@@ -3,6 +3,8 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { createEmptyDocument } from "./document";
 import {
+  applyUpdate,
+  checkForUpdate,
   defaultAppConfig,
   defaultKbConfig,
   deleteDocument,
@@ -121,6 +123,11 @@ describe("browser document repository", () => {
     expect(saved).toMatchObject({ displayName: "本地测试", model: "qwen3", isLocal: true });
     expect(await listProviderProfiles()).toContainEqual(saved);
     expect(localStorage.getItem("bingbi-browser-providers-v1")).not.toContain("apiKey");
+  });
+
+  it("keeps update checks behind the desktop boundary", async () => {
+    await expect(checkForUpdate()).rejects.toMatchObject({ code: "update_unavailable" });
+    await expect(applyUpdate()).rejects.toMatchObject({ code: "update_unavailable" });
   });
 
   it("does not allow model calls to bypass the Rust security boundary", async () => {

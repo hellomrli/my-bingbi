@@ -1,6 +1,7 @@
 import {
   BookOpen,
   Check,
+  Download,
   Eye,
   EyeOff,
   KeyRound,
@@ -16,6 +17,8 @@ import {
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
+  applyUpdate,
+  checkForUpdate,
   deleteProviderSecret,
   deleteDocxTemplate,
   exportCapabilities,
@@ -28,6 +31,7 @@ import {
   saveDocxTemplate,
   setProviderSecret,
   testProviderConnection,
+  type UpdateCheckResult,
 } from "../../lib/ipc";
 import type { ProviderKind, ProviderProfile, ProviderProfileInput } from "../../lib/llm";
 import { probeGbFonts, type FontProbe } from "../../lib/fonts";
@@ -96,6 +100,9 @@ export function SettingsDialog({ open, config, onClose, onSave, onShowGuide }: S
   const [sniffing, setSniffing] = useState(false);
   const [sniffMessage, setSniffMessage] = useState<string | null>(null);
   const [fontProbe, setFontProbe] = useState<FontProbe | null>(null);
+  const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(null);
+  const [updateBusy, setUpdateBusy] = useState(false);
+  const [updateMessage, setUpdateMessage] = useState<string | null>(null);
   const desktop = isDesktopRuntime();
 
   const selectedProfile = useMemo(
@@ -150,6 +157,32 @@ export function SettingsDialog({ open, config, onClose, onSave, onShowGuide }: S
       // The parent surfaces the safe IPC error and keeps this dialog open.
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function runUpdateCheck() {
+    setUpdateBusy(true);
+    setUpdateMessage(null);
+    setUpdateResult(null);
+    try {
+      setUpdateResult(await checkForUpdate());
+    } catch (error) {
+      setUpdateMessage(ipcErrorMessage(error));
+    } finally {
+      setUpdateBusy(false);
+    }
+  }
+
+  async function installUpdate() {
+    setUpdateBusy(true);
+    setUpdateMessage(null);
+    try {
+      await applyUpdate();
+      // Success restarts the app; reaching here means the restart was deferred.
+    } catch (error) {
+      setUpdateMessage(ipcErrorMessage(error));
+    } finally {
+      setUpdateBusy(false);
     }
   }
 
@@ -422,6 +455,42 @@ export function SettingsDialog({ open, config, onClose, onSave, onShowGuide }: S
                   </button>
                 </div>
                 {templateMessage && <span className="field-message">{templateMessage}</span>}
+              </div>
+              <div className="settings-group">
+                <label>关于与更新</label>
+                <div className="update-row">
+                  <span className="settings-hint">
+                    更新包由发布签名验证，仅在桌面版可用；检查结果取决于是否配置了发布通道。
+                  </span>
+                  <button
+                    className="command-button"
+                    type="button"
+                    onClick={() => void runUpdateCheck()}
+                    disabled={updateBusy || !desktop}
+                    title={desktop ? undefined : "浏览器预览不可用"}
+                  >
+                    {updateBusy ? <LoaderCircle size={14} className="is-spinning" /> : <RefreshCw size={14} />}
+                    检查更新
+                  </button>
+                </div>
+                {updateResult?.available && (
+                  <div className="update-available" role="status">
+                    <span>发现新版本 v{updateResult.version}，安装后将自动重启。</span>
+                    <button
+                      className="command-button primary"
+                      type="button"
+                      onClick={() => void installUpdate()}
+                      disabled={updateBusy}
+                    >
+                      <Download size={14} />
+                      立即更新
+                    </button>
+                  </div>
+                )}
+                {updateResult && !updateResult.available && !updateMessage && (
+                  <div className="source-message" role="status">已是最新版本。</div>
+                )}
+                {updateMessage && <div className="source-message is-error" role="alert">{updateMessage}</div>}
               </div>
               <footer className="modal-footer">
                 <button className="command-button" type="button" onClick={onClose}>取消</button>

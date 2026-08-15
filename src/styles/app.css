@@ -1768,6 +1768,25 @@ textarea::placeholder {
   line-height: 1.5;
 }
 
+.update-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.update-available {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid var(--accent-soft);
+  border-radius: var(--r-md);
+  padding: 8px 10px;
+  color: var(--ink-2);
+  font-size: var(--fs-micro);
+}
+
 .welcome-guide {
   width: min(560px, calc(100vw - 32px));
   max-height: min(640px, calc(100dvh - 32px));
