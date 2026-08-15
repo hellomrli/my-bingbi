@@ -777,7 +777,7 @@ CI 用 GitHub Actions matrix（`windows-latest` + `ubuntu-22.04`）交叉产出�
 ### M2 — 知识库与严格排版（约 4 周）
 
 - [x] `odoc-kb`：REST Provider 与本地 Vault 已完成；WebSocket 增量订阅已接入（后台同步守护 + 设置页开关 + 游标持久化）
-- [ ] 三级检索管线：关键词召回 + RRF 融合 + 本地索引缓存已落地；双链扩展与向量重排待补
+- [x] 三级检索管线：关键词召回 + 双链扩展 + 向量重排（embedding 余弦分融入 RRF）+ 本地索引缓存，全部落地
 - [x] Obsidian 库自动打标（frontmatter 补全，设置页可关）
 - [x] 检索增强已接入 `draft.yaml`（有界关键词召回 + 来源注入），素材侧栏可用
 - [x] 归档回写：生成的公文一键存回 Obsidian 库并带 frontmatter（`archive_document_to_kb` + 归档对话框）
@@ -803,7 +803,7 @@ CI 用 GitHub Actions matrix（`windows-latest` + `ubuntu-22.04`）交叉产出�
 - [x] 知识包管理 UI（启用/停用；用户包目录 + local-corpus 示例包自建；安装/更新待补）
 - [x] 用户自定义规则（编辑示例包 rules/ 或复制为新包，重启生效）、自定义机关 docx 模板（模板注入法 + 设置页上传）
 - [x] 字体检测与映射（FontFaceSet 探测国标字体缺失 + 设置页提示与映射）；首次运行引导（桌面端三步向导：欢迎 → 模型服务 → 开始使用）
-- [ ] 自动更新（tauri-plugin-updater）、崩溃上报（本地）
+- [x] 自动更新（tauri-plugin-updater 条件启用 + release 签名产物与 latest.json；发布前置：`tauri signer generate` 后配置 `TAURI_SIGNING_PRIVATE_KEY` secret）；崩溃上报（本地）待补
 - [x] 文档与示例包（README 同步当前进度与快速开始；local-corpus 自定义规则示例包随用户包目录自动创建）
 - **验收**：一个新用户从下载到产出第一份合格公文，全程无需看文档
 
