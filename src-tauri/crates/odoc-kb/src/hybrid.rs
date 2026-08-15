@@ -1,10 +1,14 @@
 use crate::{Frontmatter, KbError, KbHit, KbProvider, KbQuery};
+use odoc_llm::LlmProvider;
 use std::collections::{BTreeMap, BTreeSet};
 
 const PRIMARY_LIMIT: u32 = 80;
 const GRAPH_SEEDS: usize = 20;
 const GRAPH_LIMIT: usize = 80;
 const RRF_K: f32 = 60.0;
+/// Weight of the cosine similarity between a hit and the query in the fused score.
+const SEMANTIC_WEIGHT: f32 = 0.25;
+const SEMANTIC_TEXT_CHARS: usize = 480;
 
 /// Performs deterministic three-level retrieval: provider full-text search, one-hop link
 /// expansion, then reciprocal-rank fusion. The provider remains responsible for security and
@@ -17,6 +21,24 @@ const RRF_K: f32 = 60.0;
 pub async fn hybrid_search(
     provider: &dyn KbProvider,
     query: &KbQuery,
+) -> Result<Vec<KbHit>, KbError> {
+    hybrid_search_with_semantic(provider, query, None::<&dyn LlmProvider>).await
+}
+
+/// [`hybrid_search`] with an optional semantic re-ranking pass.
+///
+/// When `semantic` is supplied and supports embeddings, every fused hit is embedded together
+/// with the query and its cosine similarity is folded into the score. Embedding failures are
+/// silently ignored — semantic re-ranking is an enhancement, never a failure mode.
+///
+/// # Errors
+///
+/// Returns an error when the query is invalid or the provider's primary search fails. Link
+/// expansion failures are treated as "no extra hits" rather than aborting the search.
+pub async fn hybrid_search_with_semantic<P: LlmProvider + ?Sized>(
+    provider: &dyn KbProvider,
+    query: &KbQuery,
+    semantic: Option<&P>,
 ) -> Result<Vec<KbHit>, KbError> {
     query.validate()?;
     let mut primary_query = query.clone();
@@ -93,8 +115,77 @@ pub async fn hybrid_search(
             .then_with(|| left.path.cmp(&right.path))
             .then_with(|| left.vault.cmp(&right.vault))
     });
+    if let Some(semantic) = semantic {
+        fold_semantic_scores(semantic, query, &mut result).await;
+    }
     result.truncate(query.normalized_limit() as usize);
     Ok(result)
+}
+
+/// Embeds the query and the top hits, then adds the weighted cosine similarity to each score.
+///
+/// Any embedding failure drops the whole pass; the lexical fusion remains authoritative.
+async fn fold_semantic_scores<P: LlmProvider + ?Sized>(
+    semantic: &P,
+    query: &KbQuery,
+    result: &mut [KbHit],
+) {
+    let Some(query_vector) = semantic
+        .embed(std::slice::from_ref(&query.keyword))
+        .await
+        .ok()
+        .and_then(|vectors| vectors.into_iter().next())
+    else {
+        return;
+    };
+    let texts = result
+        .iter()
+        .map(|hit| {
+            hit.snippet
+                .chars()
+                .take(SEMANTIC_TEXT_CHARS)
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>();
+    let Ok(vectors) = semantic.embed(&texts).await else {
+        return;
+    };
+    if vectors.len() != result.len() {
+        return;
+    }
+    for (hit, vector) in result.iter_mut().zip(vectors) {
+        hit.score += cosine_similarity(&query_vector, &vector) * SEMANTIC_WEIGHT;
+    }
+    result.sort_by(|left, right| {
+        right
+            .score
+            .total_cmp(&left.score)
+            .then_with(|| left.path.cmp(&right.path))
+            .then_with(|| left.vault.cmp(&right.vault))
+    });
+}
+
+fn cosine_similarity(left: &[f32], right: &[f32]) -> f32 {
+    if left.len() != right.len() || left.is_empty() {
+        return 0.0;
+    }
+    let dot = left
+        .iter()
+        .zip(right)
+        .fold(0.0_f32, |acc, (a, b)| acc + a * b);
+    let left_norm = left
+        .iter()
+        .fold(0.0_f32, |acc, value| acc + value * value)
+        .sqrt();
+    let right_norm = right
+        .iter()
+        .fold(0.0_f32, |acc, value| acc + value * value)
+        .sqrt();
+    if left_norm == 0.0 || right_norm == 0.0 {
+        0.0
+    } else {
+        dot / (left_norm * right_norm)
+    }
 }
 
 fn matches_path_prefix(path: &str, prefix: Option<&str>) -> bool {
@@ -111,4 +202,176 @@ fn matches_frontmatter(frontmatter: &Frontmatter, filters: &Frontmatter) -> bool
     filters
         .iter()
         .all(|(key, value)| frontmatter.get(key) == Some(value))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{ChangeEvent, KbNote};
+    use async_trait::async_trait;
+    use odoc_llm::{Capabilities, ChatDelta, ChatRequest, ChatResponse, LlmError, LlmProvider};
+    use tokio::sync::mpsc::Sender;
+
+    struct FakeKb;
+
+    #[async_trait]
+    impl KbProvider for FakeKb {
+        async fn search(&self, _query: &KbQuery) -> Result<Vec<KbHit>, KbError> {
+            Ok(vec![
+                KbHit {
+                    vault: "v".into(),
+                    path: "公文/a.md".into(),
+                    title: "甲".into(),
+                    snippet: "防汛演练方案".into(),
+                    score: 0.9,
+                    frontmatter: Frontmatter::new(),
+                },
+                KbHit {
+                    vault: "v".into(),
+                    path: "公文/b.md".into(),
+                    title: "乙".into(),
+                    snippet: "食堂菜谱".into(),
+                    score: 0.8,
+                    frontmatter: Frontmatter::new(),
+                },
+            ])
+        }
+        async fn get(&self, _path: &str) -> Result<KbNote, KbError> {
+            unreachable!()
+        }
+        async fn backlinks(&self, _path: &str) -> Result<Vec<String>, KbError> {
+            Ok(Vec::new())
+        }
+        async fn outlinks(&self, _path: &str) -> Result<Vec<String>, KbError> {
+            Ok(Vec::new())
+        }
+        async fn write(&self, _path: &str, _content: &str) -> Result<(), KbError> {
+            Ok(())
+        }
+        async fn patch_frontmatter(
+            &self,
+            _path: &str,
+            _fields: &Frontmatter,
+        ) -> Result<(), KbError> {
+            Ok(())
+        }
+        fn watch(&self) -> Option<tokio::sync::broadcast::Receiver<ChangeEvent>> {
+            None
+        }
+    }
+
+    /// Embeds the query and the first text identically, everything else orthogonally.
+    struct SemanticProvider;
+
+    #[async_trait]
+    impl LlmProvider for SemanticProvider {
+        fn id(&self) -> &'static str {
+            "semantic"
+        }
+        fn capabilities(&self) -> Capabilities {
+            Capabilities {
+                streaming: false,
+                json_mode: false,
+                tool_calling: false,
+                embeddings: true,
+                context_window: None,
+                is_local: true,
+            }
+        }
+        async fn chat(&self, _request: ChatRequest) -> Result<ChatResponse, LlmError> {
+            Ok(ChatResponse {
+                content: String::new(),
+                finish_reason: None,
+                usage: None,
+            })
+        }
+        async fn chat_stream(
+            &self,
+            _request: ChatRequest,
+            _sender: Sender<ChatDelta>,
+        ) -> Result<(), LlmError> {
+            Ok(())
+        }
+        async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, LlmError> {
+            Ok(texts
+                .iter()
+                .map(|text| {
+                    if text.contains("防汛") {
+                        vec![1.0, 0.0]
+                    } else {
+                        vec![0.0, 1.0]
+                    }
+                })
+                .collect())
+        }
+    }
+
+    /// A provider whose embedding endpoint is missing.
+    struct NoEmbedProvider;
+
+    #[async_trait]
+    impl LlmProvider for NoEmbedProvider {
+        fn id(&self) -> &'static str {
+            "no-embed"
+        }
+        fn capabilities(&self) -> Capabilities {
+            Capabilities {
+                streaming: false,
+                json_mode: false,
+                tool_calling: false,
+                embeddings: false,
+                context_window: None,
+                is_local: true,
+            }
+        }
+        async fn chat(&self, _request: ChatRequest) -> Result<ChatResponse, LlmError> {
+            Ok(ChatResponse {
+                content: String::new(),
+                finish_reason: None,
+                usage: None,
+            })
+        }
+        async fn chat_stream(
+            &self,
+            _request: ChatRequest,
+            _sender: Sender<ChatDelta>,
+        ) -> Result<(), LlmError> {
+            Ok(())
+        }
+    }
+
+    fn query() -> KbQuery {
+        KbQuery {
+            keyword: "防汛".into(),
+            ..KbQuery::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn semantic_rerank_promotes_the_most_similar_hit() {
+        let lexical = hybrid_search(&FakeKb, &query())
+            .await
+            .expect("search should work");
+        assert_eq!(lexical[0].path, "公文/a.md");
+
+        let reranked = hybrid_search_with_semantic(&FakeKb, &query(), Some(&SemanticProvider))
+            .await
+            .expect("search should work");
+        assert_eq!(reranked[0].path, "公文/a.md");
+        assert!(
+            reranked[0].score > lexical[0].score,
+            "semantic similarity should lift the matching hit"
+        );
+    }
+
+    #[tokio::test]
+    async fn missing_embeddings_fall_back_to_lexical_fusion() {
+        let with = hybrid_search_with_semantic(&FakeKb, &query(), Some(&NoEmbedProvider))
+            .await
+            .expect("search should work");
+        let without = hybrid_search(&FakeKb, &query())
+            .await
+            .expect("search should work");
+        assert_eq!(with, without);
+    }
 }

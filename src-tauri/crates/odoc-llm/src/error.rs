@@ -20,6 +20,8 @@ pub enum LlmError {
     HttpStatus(u16),
     #[error("the model service returned an unsupported response")]
     InvalidResponse,
+    #[error("the model service does not support this capability")]
+    Unsupported,
 }
 
 impl LlmError {
@@ -34,6 +36,7 @@ impl LlmError {
             Self::Network => "llm_network_error",
             Self::HttpStatus(_) => "llm_http_error",
             Self::InvalidResponse => "llm_invalid_response",
+            Self::Unsupported => "model_embedding_unavailable",
         }
     }
 
@@ -51,6 +54,7 @@ impl LlmError {
             Self::HttpStatus(429) => "模型服务请求过于频繁，请稍后重试。",
             Self::HttpStatus(_) => "模型服务返回错误。",
             Self::InvalidResponse => "模型服务返回了无法识别的数据。",
+            Self::Unsupported => "当前模型服务不支持向量嵌入。",
         }
     }
 }

@@ -42,6 +42,19 @@ pub trait LlmProvider: Send + Sync {
         sender: Sender<ChatDelta>,
     ) -> Result<(), LlmError>;
 
+    /// Embeds texts into vectors for semantic retrieval, when the provider supports it.
+    ///
+    /// Callers treat a [`LlmError::Unsupported`] response as "no semantic re-ranking" and fall
+    /// back to lexical fusion; they must never fail a search because embeddings are missing.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable, redacted [`LlmError`] for validation, network, HTTP, and response
+    /// parsing failures, or [`LlmError::Unsupported`] when the provider cannot embed.
+    async fn embed(&self, _texts: &[String]) -> Result<Vec<Vec<f32>>, LlmError> {
+        Err(LlmError::Unsupported)
+    }
+
     /// Lists the model identifiers the upstream service currently exposes.
     ///
     /// The default implementation returns an empty list so lightweight test providers do not need
@@ -146,6 +159,18 @@ impl ProviderClient {
             ProviderKind::OpenAiCompatible | ProviderKind::Anthropic => "v1/models",
             ProviderKind::Ollama if base_path.ends_with("/api") => "tags",
             ProviderKind::Ollama => "api/tags",
+        };
+        base.join(endpoint)
+            .map_err(|_| LlmError::InvalidConfiguration)
+    }
+
+    fn embeddings_endpoint(&self) -> Result<Url, LlmError> {
+        let base = self.base_url()?;
+        let base_path = base.path().trim_end_matches('/');
+        let endpoint = if base_path.ends_with("/v1") {
+            "embeddings"
+        } else {
+            "v1/embeddings"
         };
         base.join(endpoint)
             .map_err(|_| LlmError::InvalidConfiguration)
@@ -436,6 +461,37 @@ impl LlmProvider for ProviderClient {
         }
     }
 
+    async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, LlmError> {
+        if texts.is_empty() || texts.iter().any(String::is_empty) {
+            return Err(LlmError::InvalidRequest);
+        }
+        if self.profile.kind != ProviderKind::OpenAiCompatible {
+            return Err(LlmError::Unsupported);
+        }
+        let body = EmbeddingRequest {
+            model: &self.profile.model,
+            input: texts,
+        };
+        let response = self
+            .authorize(self.client.post(self.embeddings_endpoint()?).json(&body))
+            .send()
+            .await
+            .map_err(|error| map_reqwest_error(&error))?;
+        let response: EmbeddingResponse = ensure_success(response)?
+            .json()
+            .await
+            .map_err(|_| LlmError::InvalidResponse)?;
+        let vectors = response
+            .data
+            .into_iter()
+            .map(|entry| entry.embedding)
+            .collect::<Vec<_>>();
+        if vectors.len() != texts.len() {
+            return Err(LlmError::InvalidResponse);
+        }
+        Ok(vectors)
+    }
+
     async fn list_models(&self) -> Result<Vec<String>, LlmError> {
         self.list_models_impl().await
     }
@@ -494,6 +550,22 @@ async fn process_ollama_line(line: &str, sender: &Sender<ChatDelta>) -> Result<b
     let done = response.done;
     send_delta(sender, response.into_delta()).await?;
     Ok(done)
+}
+
+#[derive(Serialize)]
+struct EmbeddingRequest<'a> {
+    model: &'a str,
+    input: &'a [String],
+}
+
+#[derive(Deserialize)]
+struct EmbeddingResponse {
+    data: Vec<EmbeddingEntry>,
+}
+
+#[derive(Deserialize)]
+struct EmbeddingEntry {
+    embedding: Vec<f32>,
 }
 
 #[derive(Serialize)]

@@ -5,7 +5,7 @@ use crate::types::{
     StageSummary, StyleProfile, TypeDecision,
 };
 use futures_util::future::try_join_all;
-use odoc_kb::{KbError, KbHit, KbProvider, KbQuery, SearchMode, hybrid_search};
+use odoc_kb::{KbError, KbHit, KbProvider, KbQuery, SearchMode, hybrid_search_with_semantic};
 use odoc_lint::{FactCheckReport, LintReport, fact_check_document, lint_document};
 use odoc_llm::{ChatMessage, ChatRequest, ChatResponse, ChatRole, LlmProvider};
 use odoc_model::{Block, DocumentType, Fact, ODoc};
@@ -672,7 +672,9 @@ impl<'a, J: DraftJournal, P: LlmProvider + ?Sized> DraftEngine<'a, J, P> {
                     ..KbQuery::default()
                 })
                 .collect::<Vec<_>>();
-            let searches = queries.iter().map(|query| hybrid_search(provider, query));
+            let searches = queries
+                .iter()
+                .map(|query| hybrid_search_with_semantic(provider, query, Some(self.provider)));
             let mut hits = Vec::new();
             for incoming in try_join_all(searches).await? {
                 merge_hits(&mut hits, incoming);

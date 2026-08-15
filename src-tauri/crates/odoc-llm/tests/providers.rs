@@ -551,3 +551,53 @@ async fn list_models_parses_each_provider_kind() {
     );
     task.await.expect("mock server should finish");
 }
+
+#[tokio::test]
+async fn openai_embeddings_hit_the_embeddings_endpoint_and_return_vectors() {
+    let body = r#"{"data":[{"embedding":[0.1,0.2,0.3]},{"embedding":[-0.1,0.0,0.5]}]}"#;
+    let (base_url, request_rx, task) = spawn_server(MockResponse {
+        status: "200 OK",
+        content_type: "application/json",
+        chunks: vec![body.as_bytes().to_vec()],
+        initial_delay: Duration::ZERO,
+        chunk_delay: Duration::ZERO,
+    })
+    .await;
+    let client = ProviderClient::new(
+        profile(ProviderKind::OpenAiCompatible, format!("{base_url}/v1")),
+        Some("top-secret-key".to_owned()),
+    )
+    .expect("client should build");
+
+    let vectors = client
+        .embed(&["第一段".to_owned(), "第二段".to_owned()])
+        .await
+        .expect("embedding should succeed");
+    assert_eq!(vectors, vec![vec![0.1, 0.2, 0.3], vec![-0.1, 0.0, 0.5]]);
+
+    let request = request_rx.await.expect("request should be captured");
+    let request = String::from_utf8_lossy(&request);
+    assert!(request.starts_with("POST /v1/embeddings HTTP/1.1\r\n"));
+    let body = request.split("\r\n\r\n").nth(1).expect("body should exist");
+    assert!(body.contains("\"model\":\"test-model\""));
+    assert!(body.contains("\"input\":[\"第一段\",\"第二段\"]"));
+    assert!(!body.contains("top-secret-key"));
+    task.await.expect("mock server should finish");
+}
+
+#[tokio::test]
+async fn non_openai_providers_report_embeddings_as_unsupported() {
+    let client = ProviderClient::new(
+        profile(
+            ProviderKind::Anthropic,
+            "https://api.example.com".to_owned(),
+        ),
+        Some("key".to_owned()),
+    )
+    .expect("client should build");
+    let error = client
+        .embed(&["文本".to_owned()])
+        .await
+        .expect_err("embedding should be unsupported");
+    assert_eq!(error.code(), "model_embedding_unavailable");
+}

@@ -14,7 +14,7 @@ mod types;
 
 pub use fns::FnsProvider;
 pub use fns_watch::{FnsPendingChange, FnsWatchConfig, FnsWatchEvent, watch_fns_notes};
-pub use hybrid::hybrid_search;
+pub use hybrid::{hybrid_search, hybrid_search_with_semantic};
 pub use local::{LocalVaultProvider, parse_markdown_note};
 pub use mcp::McpProvider;
 pub use tagging::suggest_missing_frontmatter;
