@@ -87,7 +87,7 @@ test("knowledge-base settings stay within a mobile viewport", async ({ page }) =
   await settings.getByRole("button", { name: "本地 Vault" }).click();
   await settings.locator("#kb-vault").fill("政务资料库");
   await settings.locator("#kb-local-path").fill("/tmp/obsidian-vault");
-  await settings.locator(".toggle-row input[type=checkbox]").check();
+  await settings.getByRole("checkbox", { name: /启用知识库/ }).check();
   await settings.getByRole("button", { name: "保存配置" }).click();
   await expect(settings).toContainText("知识库配置已保存");
 
