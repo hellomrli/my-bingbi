@@ -16,7 +16,7 @@ import {
   SunMoon,
 } from "lucide-react";
 import { documentTypeLabels } from "../../lib/document";
-import { draftStageLabels, draftStages, type DraftStageId } from "../../lib/engine";
+import { draftStageLabels, draftStages, imitateStages, type DraftStageId } from "../../lib/engine";
 import type { Finding } from "../../lib/lint";
 import { reviewStageLabels, reviewStages, type ReviewStageId } from "../../lib/review";
 import type { AppTheme } from "../../lib/store";
@@ -36,7 +36,7 @@ interface ToolbarProps {
   onOpenSettings: () => void;
   onThemeChange: (theme: AppTheme) => void;
   exportFormat?: "docx" | "odoc";
-  pipeline?: "draft" | "review";
+  pipeline?: "draft" | "review" | "imitate";
   activeStage?: DraftStageId | null;
   completedStages?: DraftStageId[];
   failedStage?: DraftStageId | null;
@@ -87,7 +87,9 @@ export function Toolbar({
   const reviewing = pipeline === "review";
   const pipelineStages: { id: string; label: string }[] = reviewing
     ? reviewStages.map((id) => ({ id, label: reviewStageLabels[id] }))
-    : draftStages.map((id) => ({ id, label: draftStageLabels[id] }));
+    : pipeline === "imitate"
+      ? imitateStages.map((id) => ({ id, label: draftStageLabels[id] }))
+      : draftStages.map((id) => ({ id, label: draftStageLabels[id] }));
   const current: string | null = reviewing ? activeReviewStage : activeStage;
   const completed: readonly string[] = reviewing ? completedReviewStages : completedStages;
   const failed: string | null = reviewing ? failedReviewStage : failedStage;

@@ -433,6 +433,19 @@ textarea::placeholder {
   width: 100%;
 }
 
+.imitate-start-button {
+  width: 100%;
+  color: var(--accent);
+}
+
+.model-text-field textarea {
+  min-height: 72px;
+}
+
+.model-text-field small {
+  color: var(--ink-3);
+}
+
 .draft-security-note,
 .draft-browser-note,
 .draft-error {

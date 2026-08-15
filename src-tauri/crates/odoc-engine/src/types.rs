@@ -25,6 +25,20 @@ pub enum PipelineKind {
     #[default]
     Draft,
     Review,
+    /// Imitate mode reuses the drafting stages and adds a `style` stage that distills the
+    /// caller-supplied model text into a reusable writing-style profile.
+    Imitate,
+}
+
+impl PipelineKind {
+    /// The stable session-storage identifier, distinct from the human-facing pipeline name.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Draft => "draft",
+            Self::Review => "review",
+            Self::Imitate => "imitate",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -174,8 +188,32 @@ pub struct RerunOutcome {
 #[ts(rename_all = "camelCase")]
 pub struct DraftInput {
     pub material: String,
+    /// The reference text an imitate pipeline copies the writing style from. Must be present
+    /// for `PipelineKind::Imitate` and absent for any other kind.
+    #[serde(default)]
+    pub model_text: Option<String>,
     pub initial_document: Option<ODoc>,
     pub confirmed_doc_type: Option<DocumentType>,
+}
+
+/// The reusable writing-style profile an imitate pipeline distills from a model text.
+///
+/// It describes the reference text's own craft, never its facts: numbers, dates, names and
+/// institutions must not appear here, so downstream drafting stages cannot copy them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct StyleProfile {
+    /// 结构安排：层次序数使用、开篇方式、结尾方式。
+    pub structure: String,
+    /// 句式节奏：长短句搭配、排比与对仗的使用程度。
+    pub sentence_patterns: String,
+    /// 用词习惯：术语与称谓的选用。
+    pub vocabulary: String,
+    /// 可直接套用的惯用表述，逐条列出。
+    pub common_phrases: String,
+    /// 范文刻意避开的表述与风格。
+    pub taboos: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]

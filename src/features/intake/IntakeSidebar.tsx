@@ -12,6 +12,9 @@ import { useWorkbenchStore } from "../../store/workbench";
 interface IntakeSidebarProps {
   material: string;
   onMaterialChange: (value: string) => void;
+  modelText: string;
+  onModelTextChange: (value: string) => void;
+  onStartImitate: () => void;
   providers: ProviderProfile[];
   providerId: string;
   onProviderChange: (value: string) => void;
@@ -31,6 +34,9 @@ interface IntakeSidebarProps {
 export function IntakeSidebar({
   material,
   onMaterialChange,
+  modelText,
+  onModelTextChange,
+  onStartImitate,
   providers,
   providerId,
   onProviderChange,
@@ -111,7 +117,7 @@ export function IntakeSidebar({
     setSourceError(null);
   }
   const stageLabel = draftStage
-    ? ({ doctype: "文种识别", facts: "事实提取", retrieve: "知识检索", outline: "骨架生成", draft: "正文起草", deai: "降 AI 味", lint: "规则校验", factcheck: "事实回查", score: "质量评分" } as const)[draftStage]
+    ? ({ doctype: "文种识别", facts: "事实提取", retrieve: "知识检索", style: "笔法分析", outline: "骨架生成", draft: "正文起草", deai: "降 AI 味", lint: "规则校验", factcheck: "事实回查", score: "质量评分" } as const)[draftStage]
     : null;
 
   return (
@@ -211,6 +217,18 @@ export function IntakeSidebar({
             />
             <small>{material.length.toLocaleString("zh-CN")} 字符</small>
           </label>
+          <label className="field model-text-field">
+            <span>范文（仿写模式）</span>
+            <textarea
+              value={modelText}
+              onChange={(event) => onModelTextChange(event.target.value)}
+              placeholder="粘贴一篇本单位同类公文。起草前模型会先提炼它的笔法：结构、句式、用词与惯用表述。"
+              rows={4}
+              maxLength={2 * 1024 * 1024}
+              disabled={drafting}
+            />
+            <small>{modelText.trim() ? "提供范文时将按仿写流程起草" : "留空则使用普通起草流程"}</small>
+          </label>
           <label className="field">
             <span>模型服务</span>
             <select value={providerId} onChange={(event) => onProviderChange(event.target.value)} disabled={drafting || providers.length === 0}>
@@ -270,6 +288,16 @@ export function IntakeSidebar({
           >
             {drafting ? <LoaderCircle size={15} className="is-spinning" /> : <Play size={15} />}
             {drafting ? "正在起草" : typeDecision ? "重新起草" : "开始起草"}
+          </button>
+          <button
+            className="command-button imitate-start-button"
+            type="button"
+            onClick={onStartImitate}
+            disabled={drafting || !material.trim() || !modelText.trim() || !providerId || providerBlocked || !selectedProvider?.enabled}
+            title={!modelText.trim() ? "请先粘贴范文" : providerBlocked ? "当前密级禁止使用云端模型" : undefined}
+          >
+            {drafting ? <LoaderCircle size={15} className="is-spinning" /> : <FilePlus2 size={15} />}
+            仿写起草
           </button>
         </div>
       </section>

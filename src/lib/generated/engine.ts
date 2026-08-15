@@ -9,7 +9,7 @@ export type StageKind = "llm" | "pack" | "draft";
 
 export type StageStatus = "running" | "completed" | "failed" | "cancelled";
 
-export type PipelineKind = "draft" | "review";
+export type PipelineKind = "draft" | "review" | "imitate";
 
 export type LowConfidenceAction = "ask_user";
 
@@ -33,7 +33,12 @@ export type StageSummary = { stageId: StageId, status: StageStatus, usage: Token
 
 export type RerunOutcome = { sessionId: string, stageId: StageId, document: ODoc, output: StageOutput, lintReport: LintReport | null, factCheckReport: FactCheckReport | null, };
 
-export type DraftInput = { material: string, initialDocument: ODoc | null, confirmedDocType: DocumentType | null, };
+export type DraftInput = { material: string, 
+/**
+ * The reference text an imitate pipeline copies the writing style from. Must be present
+ * for `PipelineKind::Imitate` and absent for any other kind.
+ */
+modelText: string | null, initialDocument: ODoc | null, confirmedDocType: DocumentType | null, };
 
 export type DraftOutcome = { sessionId: string, document: ODoc, typeDecision: TypeDecision, facts: FactExtraction, stages: Array<StageSummary>, lintReport: LintReport | null, factCheckReport: FactCheckReport | null, score: Score | null, revisionIterations: number, };
 

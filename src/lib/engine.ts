@@ -23,12 +23,27 @@ export const draftStages = [
   "score",
 ] as const;
 
-export type DraftStageId = (typeof draftStages)[number];
+/** Imitate mode inserts the style stage between retrieval and outline. */
+export const imitateStages = [
+  "doctype",
+  "facts",
+  "retrieve",
+  "style",
+  "outline",
+  "draft",
+  "deai",
+  "lint",
+  "factcheck",
+  "score",
+] as const;
+
+export type DraftStageId = (typeof draftStages)[number] | (typeof imitateStages)[number];
 
 export const draftStageLabels: Record<DraftStageId, string> = {
   doctype: "文种",
   facts: "事实",
   retrieve: "检索",
+  style: "笔法",
   outline: "骨架",
   draft: "起草",
   deai: "降 AI 味",
@@ -44,6 +59,8 @@ export interface DraftStartInput {
   material: string;
   providerId: string;
   confirmedDocType?: DocumentType | null;
+  /** Reference text for imitate mode; its presence selects the imitate pipeline. */
+  modelText?: string | null;
 }
 
 /** Starts the persisted desktop drafting pipeline and forwards ordered stage events. */
@@ -65,9 +82,27 @@ export async function startDraft(
       material: input.material,
       providerId: input.providerId,
       confirmedDocType: input.confirmedDocType ?? null,
+      modelText: input.modelText ?? null,
     },
     onEvent: channel,
   });
+}
+
+/**
+ * Imitate mode: drafts a new document copying the writing style of the supplied reference
+ * text. The kernel distills the style into a profile first, then drafts from the material.
+ */
+export async function startImitate(
+  input: DraftStartInput & { modelText: string },
+  onEvent: (event: DraftEvent) => void,
+): Promise<DraftOutcome> {
+  if (!isDesktopRuntime()) {
+    throw {
+      code: "model_runtime_unavailable",
+      message: "模型调用仅在桌面应用中可用。",
+    };
+  }
+  return startDraft(input, onEvent);
 }
 
 /**

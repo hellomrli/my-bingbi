@@ -49,6 +49,9 @@ struct DraftStartRequest {
     material: String,
     provider_id: String,
     confirmed_doc_type: Option<DocumentType>,
+    /// Reference text for imitate mode; its presence selects the imitate pipeline.
+    #[serde(default)]
+    model_text: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -933,7 +936,8 @@ async fn draft_start<R: tauri::Runtime>(
             .map_err(map_store_error)
     })?;
     let provider = provider_client(&state, &request.provider_id)?;
-    let pipeline_path = builtin_pipeline_path(&app, "draft.yaml").map_err(map_tauri_error)?;
+    let pipeline_file = draft_pipeline_file(request.model_text.as_deref());
+    let pipeline_path = builtin_pipeline_path(&app, pipeline_file).map_err(map_tauri_error)?;
     let pipeline = PipelineDefinition::load(pipeline_path).map_err(map_engine_error)?;
     let journal = StoreDraftJournal {
         state: &state,
@@ -947,6 +951,7 @@ async fn draft_start<R: tauri::Runtime>(
     }
     let input = DraftInput {
         material: request.material,
+        model_text: request.model_text,
         initial_document: Some(document),
         confirmed_doc_type: request.confirmed_doc_type,
     };
@@ -996,12 +1001,16 @@ async fn rerun_stage<R: tauri::Runtime>(
     let session = lock_documents(&state)?
         .get_session(&request.session_id)
         .map_err(map_store_error)?;
-    if session.pipeline != "draft" {
-        return Err(IpcError {
-            code: "rerun_unsupported",
-            message: "审核流程暂不支持单步重跑，请整体重新审核。",
-        });
-    }
+    let pipeline_file = match session.pipeline.as_str() {
+        "draft" => "draft.yaml",
+        "imitate" => "imitate.yaml",
+        _ => {
+            return Err(IpcError {
+                code: "rerun_unsupported",
+                message: "审核流程暂不支持单步重跑，请整体重新审核。",
+            });
+        }
+    };
     let document = lock_documents(&state)?
         .get_document(&session.document_id)
         .map_err(map_store_error)?;
@@ -1023,7 +1032,7 @@ async fn rerun_stage<R: tauri::Runtime>(
             message: "当前密级仅允许本地模型，无法重跑该阶段。",
         });
     }
-    let pipeline_path = builtin_pipeline_path(&app, "draft.yaml").map_err(map_tauri_error)?;
+    let pipeline_path = builtin_pipeline_path(&app, pipeline_file).map_err(map_tauri_error)?;
     let pipeline = PipelineDefinition::load(pipeline_path).map_err(map_engine_error)?;
     let journal = StoreDraftJournal {
         state: &state,
@@ -1290,16 +1299,20 @@ fn export_style(state: &AppState, packs: &PackRegistry) -> Result<Gb9704Style, I
 }
 
 fn validate_draft_start_request(request: &DraftStartRequest) -> Result<(), IpcError> {
-    if request.material.trim().is_empty()
-        || request.material.len() > MAX_DRAFT_MATERIAL_BYTES
-        || request.material.chars().any(|character| character == '\0')
-    {
+    const MAX_MODEL_TEXT_BYTES: usize = 2 * 1024 * 1024;
+    let material_valid = !request.material.trim().is_empty()
+        && request.material.len() <= MAX_DRAFT_MATERIAL_BYTES
+        && !request.material.chars().any(|character| character == '\0');
+    let model_text_valid = request.model_text.as_ref().is_none_or(|text| {
+        text.len() <= MAX_MODEL_TEXT_BYTES && !text.chars().any(|character| character == '\0')
+    });
+    if material_valid && model_text_valid {
+        Ok(())
+    } else {
         Err(IpcError {
             code: "invalid_input",
             message: "起草材料格式无效。",
         })
-    } else {
-        Ok(())
     }
 }
 
@@ -1319,6 +1332,15 @@ fn validate_rerun_stage_request(request: &RerunStageRequest) -> Result<(), IpcEr
             code: "invalid_input",
             message: "起草阶段重跑请求格式无效。",
         })
+    }
+}
+
+/// Selects the pipeline file a draft request runs: a non-blank model text means imitate mode.
+fn draft_pipeline_file(model_text: Option<&str>) -> &'static str {
+    if model_text.is_some_and(|text| !text.trim().is_empty()) {
+        "imitate.yaml"
+    } else {
+        "draft.yaml"
     }
 }
 
@@ -2422,7 +2444,7 @@ mod tests {
 
     #[test]
     fn development_pipeline_paths_point_to_repository_resources() {
-        for file_name in ["draft.yaml", "review.yaml"] {
+        for file_name in ["draft.yaml", "review.yaml", "imitate.yaml"] {
             let path = development_pipeline_path(file_name);
             assert!(path.ends_with(format!("pipelines/{file_name}")));
             assert!(
@@ -2440,6 +2462,9 @@ mod tests {
         let review = PipelineDefinition::load(development_pipeline_path("review.yaml"))
             .expect("review pipeline should load");
         assert_eq!(review.kind, odoc_engine::PipelineKind::Review);
+        let imitate = PipelineDefinition::load(development_pipeline_path("imitate.yaml"))
+            .expect("imitate pipeline should load");
+        assert_eq!(imitate.kind, odoc_engine::PipelineKind::Imitate);
     }
 
     #[test]
@@ -2449,6 +2474,7 @@ mod tests {
             material: " \n".to_owned(),
             provider_id: "ollama".to_owned(),
             confirmed_doc_type: None,
+            model_text: None,
         };
         assert!(validate_draft_start_request(&empty).is_err());
         let oversized = DraftStartRequest {
@@ -2456,6 +2482,37 @@ mod tests {
             ..empty
         };
         assert!(validate_draft_start_request(&oversized).is_err());
+    }
+
+    #[test]
+    fn draft_request_validates_model_text_and_selects_the_imitate_pipeline() {
+        let base = DraftStartRequest {
+            document_id: "doc".to_owned(),
+            material: "申请事项".to_owned(),
+            provider_id: "ollama".to_owned(),
+            confirmed_doc_type: None,
+            model_text: None,
+        };
+        assert!(validate_draft_start_request(&base).is_ok());
+        let imitating = DraftStartRequest {
+            model_text: Some("范文正文".to_owned()),
+            ..base
+        };
+        assert!(validate_draft_start_request(&imitating).is_ok());
+        let oversized_model = DraftStartRequest {
+            model_text: Some("x".repeat(2 * 1024 * 1024 + 1)),
+            ..base
+        };
+        assert!(validate_draft_start_request(&oversized_model).is_err());
+        let control_character_model = DraftStartRequest {
+            model_text: Some("范文\0正文".to_owned()),
+            ..base
+        };
+        assert!(validate_draft_start_request(&control_character_model).is_err());
+
+        assert_eq!(draft_pipeline_file(None), "draft.yaml");
+        assert_eq!(draft_pipeline_file(Some("   ")), "draft.yaml");
+        assert_eq!(draft_pipeline_file(Some("范文正文")), "imitate.yaml");
     }
 
     #[test]

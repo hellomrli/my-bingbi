@@ -11,7 +11,7 @@ import { ReviewReportDialog } from "./features/review/ReviewReportDialog";
 import { SettingsDialog } from "./features/settings/SettingsDialog";
 import { Toolbar } from "./features/workbench/Toolbar";
 import { countChineseCharacters, documentTypeLabels } from "./lib/document";
-import { draftStageLabels, draftStages, rerunStage, startDraft, type DraftStageId } from "./lib/engine";
+import { draftStageLabels, draftStages, imitateStages, rerunStage, startDraft, startImitate, type DraftStageId } from "./lib/engine";
 import { isReviewStage, startReview, type ReviewStageId } from "./lib/review";
 import {
   backendVersion,
@@ -102,6 +102,7 @@ function App() {
   const [providers, setProviders] = useState<ProviderProfile[]>([]);
   const [providerId, setProviderId] = useState("");
   const [material, setMaterial] = useState("");
+  const [modelText, setModelText] = useState("");
   const [drafting, setDrafting] = useState(false);
   const [draftStage, setDraftStage] = useState<DraftStageId | null>(null);
   const [completedStages, setCompletedStages] = useState<DraftStageId[]>([]);
@@ -115,7 +116,7 @@ function App() {
   const [engineLintReport, setEngineLintReport] = useState<LintReport | null>(null);
   const [engineFactCheckReport, setEngineFactCheckReport] = useState<FactCheckReport | null>(null);
   const [engineReportRevision, setEngineReportRevision] = useState<number | null>(null);
-  const [pipeline, setPipeline] = useState<"draft" | "review">("draft");
+  const [pipeline, setPipeline] = useState<"draft" | "review" | "imitate">("draft");
   const [reviewOpen, setReviewOpen] = useState(false);
   const [reviewing, setReviewing] = useState(false);
   const [reviewStage, setReviewStage] = useState<ReviewStageId | null>(null);
@@ -439,9 +440,11 @@ function App() {
     setDraftStage(null);
     setFailedStage(null);
     // Downstream stages ran against the previous output, so their records no longer hold.
-    const rerunIndex = draftStages.indexOf(rerunStageId);
+    // The stage order depends on the session's pipeline kind, which the closure captured.
+    const stageOrder: readonly DraftStageId[] = pipeline === "imitate" ? imitateStages : draftStages;
+    const rerunIndex = stageOrder.indexOf(rerunStageId);
     setCompletedStages((current) =>
-      current.filter((stage) => draftStages.indexOf(stage) <= rerunIndex),
+      current.filter((stage) => stageOrder.indexOf(stage) <= rerunIndex),
     );
     void refreshDocuments().then((loaded) => {
       setSavedVersion(loaded.find((item) => item.id === outcome.document.id)?.versionCount ?? null);
@@ -529,6 +532,58 @@ function App() {
     }
   }
 
+  async function runImitate() {
+    if (drafting || !material.trim() || !modelText.trim() || !providerId) return;
+    if (!desktopRuntime) {
+      setDraftError("模型调用仅在桌面应用中可用。");
+      return;
+    }
+    const selected = providers.find((provider) => provider.id === providerId);
+    const restricted = document.meta.securityLevel === "secret" || document.meta.securityLevel === "confidential";
+    if (!selected?.enabled || (restricted && !selected.isLocal)) {
+      setDraftError(restricted ? "当前密级仅允许本地模型，请先选择本地服务。" : "模型服务不可用，请先在设置中启用服务。");
+      return;
+    }
+    setDrafting(true);
+    setPipeline("imitate");
+    setDraftStage(null);
+    setCompletedStages([]);
+    setFailedStage(null);
+    setDraftText("");
+    setDraftError(null);
+    setDraftSessionId(null);
+    setTypeDecision(null);
+    setConfirmedDocType(null);
+    try {
+      await saveBeforeDraft();
+      const snapshot = useWorkbenchStore.getState().document;
+      const outcome = await startImitate(
+        {
+          documentId: snapshot.id,
+          material: material.trim(),
+          providerId,
+          modelText: modelText.trim(),
+          confirmedDocType: null,
+        },
+        handleDraftEvent,
+      );
+      // Older runtimes may return the outcome without delivering the final channel event.
+      if (useWorkbenchStore.getState().document.id !== outcome.document.id || useWorkbenchStore.getState().document.revision !== outcome.document.revision) {
+        applyDraftOutcome(outcome);
+      }
+    } catch (error) {
+      const code = errorCode(error);
+      if (code === "document_type_confirmation_required") {
+        setDraftError(null);
+      } else {
+        setDraftError(ipcErrorMessage(error));
+        if (isDraftStage(draftStage ?? "")) setFailedStage(draftStage);
+      }
+    } finally {
+      setDrafting(false);
+    }
+  }
+
   async function rerunPipelineStage(stageId: DraftStageId) {
     if (drafting || reviewing || !draftSessionId) return;
     if (!desktopRuntime) {
@@ -536,7 +591,6 @@ function App() {
       return;
     }
     setDrafting(true);
-    setPipeline("draft");
     setDraftStage(stageId);
     setFailedStage(null);
     setDraftError(null);
@@ -784,6 +838,9 @@ function App() {
         <IntakeSidebar
           material={material}
           onMaterialChange={setMaterial}
+          modelText={modelText}
+          onModelTextChange={setModelText}
+          onStartImitate={() => void runImitate()}
           providers={providers}
           providerId={providerId}
           onProviderChange={setProviderId}

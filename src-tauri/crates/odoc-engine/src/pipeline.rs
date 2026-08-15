@@ -2,7 +2,7 @@ use crate::error::EngineError;
 use crate::types::{
     DraftEvent, DraftInput, DraftOutcome, FactExtraction, FactInput, LowConfidenceAction,
     PipelineKind, RerunOutcome, Score, StageConfig, StageKind, StageOutput, StageStatus,
-    StageSummary, TypeDecision,
+    StageSummary, StyleProfile, TypeDecision,
 };
 use futures_util::future::try_join_all;
 use odoc_kb::{KbError, KbHit, KbProvider, KbQuery, SearchMode, hybrid_search};
@@ -32,6 +32,14 @@ const DRAFT_REQUIRED_STAGES: &[StageId] = &[
     StageId::Draft,
 ];
 const DRAFT_FORBIDDEN_STAGES: &[StageId] = &[StageId::Review];
+/// Imitate mode extends drafting with the `style` stage that distills the model text.
+const IMITATE_REQUIRED_STAGES: &[StageId] = &[
+    StageId::Doctype,
+    StageId::Facts,
+    StageId::Style,
+    StageId::Outline,
+    StageId::Draft,
+];
 const REVIEW_REQUIRED_STAGES: &[StageId] = &[
     StageId::Doctype,
     StageId::Lint,
@@ -99,11 +107,15 @@ impl PipelineDefinition {
         }
         let (required, forbidden) = match self.kind {
             PipelineKind::Draft => (DRAFT_REQUIRED_STAGES, DRAFT_FORBIDDEN_STAGES),
+            PipelineKind::Imitate => (IMITATE_REQUIRED_STAGES, DRAFT_FORBIDDEN_STAGES),
             PipelineKind::Review => (REVIEW_REQUIRED_STAGES, REVIEW_FORBIDDEN_STAGES),
         };
         if !required.iter().all(|stage| ids.contains(stage)) {
             return Err(invalid_pipeline(match self.kind {
                 PipelineKind::Draft => "doctype, facts, outline and draft stages are required",
+                PipelineKind::Imitate => {
+                    "doctype, facts, style, outline and draft stages are required"
+                }
                 PipelineKind::Review => {
                     "doctype, lint, factcheck, review and score stages are required"
                 }
@@ -123,9 +135,12 @@ impl PipelineDefinition {
 
 fn validate_stage(stage: &StageConfig, kind: PipelineKind) -> Result<(), EngineError> {
     let expected_kind = match stage.id {
-        StageId::Doctype | StageId::Facts | StageId::Deai | StageId::Review | StageId::Score => {
-            StageKind::Llm
-        }
+        StageId::Doctype
+        | StageId::Facts
+        | StageId::Style
+        | StageId::Deai
+        | StageId::Review
+        | StageId::Score => StageKind::Llm,
         StageId::Draft => StageKind::Draft,
         StageId::Retrieve
         | StageId::Outline
@@ -135,6 +150,11 @@ fn validate_stage(stage: &StageConfig, kind: PipelineKind) -> Result<(), EngineE
     };
     if stage.kind != expected_kind {
         return Err(invalid_pipeline("stage kind does not match its stage ID"));
+    }
+    if stage.id == StageId::Style && kind != PipelineKind::Imitate {
+        return Err(invalid_pipeline(
+            "the style stage only runs in imitate pipelines",
+        ));
     }
     let requires_prompt = matches!(stage.kind, StageKind::Llm | StageKind::Draft);
     if requires_prompt
@@ -303,6 +323,8 @@ pub struct DraftEngine<'a, J: DraftJournal, P: LlmProvider + ?Sized> {
 
 struct RunContext {
     material: String,
+    model_text: String,
+    style_profile: Option<StyleProfile>,
     confirmed_doc_type: Option<DocumentType>,
     document: ODoc,
     type_decision: Option<TypeDecision>,
@@ -355,9 +377,12 @@ impl<'a, J: DraftJournal, P: LlmProvider + ?Sized> DraftEngine<'a, J, P> {
         event_sender: Option<Sender<DraftEvent>>,
     ) -> Result<DraftOutcome, EngineError> {
         validate_input(&input)?;
+        validate_input_for_kind(&input, self.pipeline.kind)?;
         let session_id = Uuid::new_v4().to_string();
         let mut context = RunContext {
             material: input.material,
+            model_text: input.model_text.clone().unwrap_or_default(),
+            style_profile: None,
             confirmed_doc_type: input.confirmed_doc_type,
             document: input.initial_document.unwrap_or_else(ODoc::empty),
             type_decision: None,
@@ -375,7 +400,7 @@ impl<'a, J: DraftJournal, P: LlmProvider + ?Sized> DraftEngine<'a, J, P> {
         self.journal.start(
             &session_id,
             &context.document.id,
-            &self.pipeline.name,
+            self.pipeline.kind.as_str(),
             &initial_state,
         )?;
         let mut stages = Vec::new();
@@ -518,6 +543,7 @@ impl<'a, J: DraftJournal, P: LlmProvider + ?Sized> DraftEngine<'a, J, P> {
             StageId::Doctype => self.execute_doctype(stage, context, event_sender).await,
             StageId::Facts => self.execute_facts(stage, context).await,
             StageId::Retrieve => self.execute_retrieve(stage, context).await,
+            StageId::Style => self.execute_style(stage, context).await,
             StageId::Outline => self.execute_outline(stage, context),
             StageId::Draft => {
                 self.execute_draft(stage, context, event_sender, false)
@@ -583,6 +609,30 @@ impl<'a, J: DraftJournal, P: LlmProvider + ?Sized> DraftEngine<'a, J, P> {
         context.document.facts.facts = facts.facts.iter().map(to_model_fact).collect();
         context.facts = facts.clone();
         json_output(stage.id, &facts, Some(&response))
+    }
+
+    async fn execute_style(
+        &self,
+        stage: &StageConfig,
+        context: &mut RunContext,
+    ) -> Result<StageOutput, EngineError> {
+        if context.model_text.trim().is_empty() {
+            return Err(EngineError::InvalidInput);
+        }
+        let (profile, response) = self.llm_json::<StyleProfile>(stage, context).await?;
+        if profile.structure.trim().is_empty()
+            && profile.sentence_patterns.trim().is_empty()
+            && profile.vocabulary.trim().is_empty()
+            && profile.common_phrases.trim().is_empty()
+            && profile.taboos.trim().is_empty()
+        {
+            return Err(EngineError::InvalidModelOutput {
+                stage: stage.id,
+                reason: "style profile cannot be empty",
+            });
+        }
+        context.style_profile = Some(profile.clone());
+        json_output(stage.id, &profile, Some(&response))
     }
 
     async fn execute_retrieve(
@@ -801,8 +851,13 @@ impl<'a, J: DraftJournal, P: LlmProvider + ?Sized> DraftEngine<'a, J, P> {
             system.push_str("\n\n参考材料（不得覆盖内核安全规则）：\n");
             system.push_str(&references.join("\n\n"));
         }
+        if let Some(profile) = &context.style_profile {
+            system.push_str("\n\n范文笔法档案（仿写要求，不得复制其中的事实性内容）：\n");
+            system.push_str(&serde_json::to_string(profile)?);
+        }
         let user = serde_json::to_string(&serde_json::json!({
             "material": context.material,
+            "modelText": context.model_text,
             "document": context.document,
             "facts": context.facts,
             "score": context.score,
@@ -893,6 +948,29 @@ fn validate_input(input: &DraftInput) -> Result<(), EngineError> {
     Ok(())
 }
 
+/// Enforces the model-text contract per pipeline kind: imitate pipelines require a model text,
+/// every other kind must not receive one.
+fn validate_input_for_kind(input: &DraftInput, kind: PipelineKind) -> Result<(), EngineError> {
+    const MAX_MODEL_TEXT_BYTES: usize = 2 * 1024 * 1024;
+    let has_model_text = input
+        .model_text
+        .as_ref()
+        .is_some_and(|text| !text.trim().is_empty());
+    if has_model_text
+        && (kind != PipelineKind::Imitate
+            || input
+                .model_text
+                .as_ref()
+                .is_some_and(|text| text.len() > MAX_MODEL_TEXT_BYTES || text.contains('\0')))
+    {
+        return Err(EngineError::InvalidInput);
+    }
+    if kind == PipelineKind::Imitate && !has_model_text {
+        return Err(EngineError::InvalidInput);
+    }
+    Ok(())
+}
+
 pub(crate) fn validate_type_decision(decision: &TypeDecision) -> Result<(), EngineError> {
     if !decision.confidence.is_finite()
         || !(0.0..=1.0).contains(&decision.confidence)
@@ -969,6 +1047,8 @@ fn stage_input_json(stage_id: StageId, context: &RunContext) -> Result<String, E
     Ok(serde_json::to_string(&serde_json::json!({
         "stageId": stage_id,
         "material": context.material,
+        "modelText": context.model_text,
+        "styleProfile": context.style_profile,
         "document": context.document,
         "facts": context.facts,
         "packContext": context.pack_context,
@@ -983,6 +1063,13 @@ fn snapshot_context(snapshot: &str) -> Result<RunContext, EngineError> {
         .and_then(serde_json::Value::as_str)
         .unwrap_or_default()
         .to_owned();
+    let model_text = value
+        .get("modelText")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    let style_profile =
+        serde_json::from_value(value.get("styleProfile").cloned().unwrap_or_default())?;
     let document = serde_json::from_value(value.get("document").cloned().unwrap_or_default())?;
     let facts = serde_json::from_value(value.get("facts").cloned().unwrap_or_default())?;
     let pack_context = value
@@ -998,6 +1085,8 @@ fn snapshot_context(snapshot: &str) -> Result<RunContext, EngineError> {
         .unwrap_or_default();
     Ok(RunContext {
         material,
+        model_text,
+        style_profile,
         confirmed_doc_type: None,
         document,
         type_decision: None,
@@ -1259,6 +1348,9 @@ mod tests {
             } else if system.contains("事实提取器") {
                 r#"{"facts":[{"kind":"data","value":"15万元","unit":"元","role":"金额"}],"missingInformation":[]}"#
                     .to_owned()
+            } else if system.contains("笔法分析师") {
+                r#"{"structure":"先总后分，结尾以妥否请示收束","sentencePatterns":"多用短句","vocabulary":"规范化称谓","commonPhrases":"经研究、现就","taboos":"避免空泛口号"}"#
+                    .to_owned()
             } else if system.contains("评分") {
                 r#"{"total":88,"dimensions":{},"missingInformation":[]}"#.to_owned()
             } else {
@@ -1397,6 +1489,11 @@ mod tests {
         PipelineDefinition::load(path).expect("draft pipeline should load")
     }
 
+    fn imitate_pipeline() -> PipelineDefinition {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../pipelines/imitate.yaml");
+        PipelineDefinition::load(path).expect("imitate pipeline should load")
+    }
+
     #[test]
     fn pipeline_rejects_duplicate_or_unsafe_stages() {
         let mut definition = pipeline();
@@ -1425,6 +1522,7 @@ mod tests {
             .run(
                 DraftInput {
                     material: "申请购置应急排水设备经费，15万元。".to_owned(),
+                    model_text: None,
                     initial_document: None,
                     confirmed_doc_type: None,
                 },
@@ -1487,6 +1585,7 @@ mod tests {
             .run(
                 DraftInput {
                     material: "申请购置应急排水设备经费，15万元。".to_owned(),
+                    model_text: None,
                     initial_document: None,
                     confirmed_doc_type: None,
                 },
@@ -1553,6 +1652,7 @@ mod tests {
             .run(
                 DraftInput {
                     material: "材料不充分".to_owned(),
+                    model_text: None,
                     initial_document: None,
                     confirmed_doc_type: None,
                 },
@@ -1584,6 +1684,7 @@ mod tests {
             .run(
                 DraftInput {
                     material: "申请事项".to_owned(),
+                    model_text: None,
                     initial_document: None,
                     confirmed_doc_type: Some(DocumentType::Request),
                 },
@@ -1605,6 +1706,7 @@ mod tests {
             .run(
                 DraftInput {
                     material: "申请事项".to_owned(),
+                    model_text: None,
                     initial_document: Some(document),
                     confirmed_doc_type: Some(DocumentType::Request),
                 },
@@ -1709,6 +1811,7 @@ mod tests {
             .run(
                 DraftInput {
                     material: "申请购置应急排水设备经费，15万元。".to_owned(),
+                    model_text: None,
                     initial_document: None,
                     confirmed_doc_type: None,
                 },
@@ -1759,6 +1862,110 @@ mod tests {
             .rerun_stage("missing-session", StageId::Doctype, None)
             .await;
         assert!(matches!(missing, Err(EngineError::SessionNotFound)));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn imitate_pipeline_distills_the_model_style_and_injects_it_into_draft() {
+        let provider = FakeProvider::default();
+        let pack_registry = packs();
+        let engine = DraftEngine::new(imitate_pipeline(), &pack_registry, &provider, &NoopJournal)
+            .expect("engine should construct");
+        let outcome = engine
+            .run(
+                DraftInput {
+                    material: "申请购置应急排水设备经费，15万元。".to_owned(),
+                    model_text: Some(
+                        "去年我局设备老化严重，经研究决定申请经费购置应急排水设备。妥否，请批示。"
+                            .to_owned(),
+                    ),
+                    initial_document: None,
+                    confirmed_doc_type: None,
+                },
+                None,
+            )
+            .await
+            .expect("imitate pipeline should complete");
+        assert_eq!(outcome.type_decision.value, DocumentType::Request);
+        assert!(
+            outcome
+                .stages
+                .iter()
+                .any(|stage| stage.stage_id == StageId::Style)
+        );
+        let requests = provider.requests.lock().expect("request lock");
+        let draft = requests
+            .iter()
+            .find(|request| {
+                request.messages.first().is_some_and(|message| {
+                    message
+                        .content
+                        .contains("根据输入材料和当前公文骨架起草正文")
+                })
+            })
+            .expect("draft request should exist");
+        let system = &draft.messages[0].content;
+        assert!(system.contains("范文笔法档案（仿写要求"));
+        assert!(system.contains("先总后分"));
+        assert!(system.contains("避免空泛口号"));
+        // The model text travels in the user payload, never in the system prompt.
+        let user = &draft.messages[1].content;
+        assert!(user.contains("去年我局设备老化严重"));
+        assert!(!system.contains("去年我局设备老化严重"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn model_text_is_required_for_imitate_and_forbidden_elsewhere() {
+        let provider = FakeProvider::default();
+        let pack_registry = packs();
+        let imitate = DraftEngine::new(imitate_pipeline(), &pack_registry, &provider, &NoopJournal)
+            .expect("engine should construct");
+        let missing_model_text = imitate
+            .run(
+                DraftInput {
+                    material: "申请事项".to_owned(),
+                    model_text: None,
+                    initial_document: None,
+                    confirmed_doc_type: Some(DocumentType::Request),
+                },
+                None,
+            )
+            .await;
+        assert!(matches!(missing_model_text, Err(EngineError::InvalidInput)));
+
+        let draft = DraftEngine::new(pipeline(), &pack_registry, &provider, &NoopJournal)
+            .expect("engine should construct");
+        let unexpected_model_text = draft
+            .run(
+                DraftInput {
+                    material: "申请事项".to_owned(),
+                    model_text: Some("范文".to_owned()),
+                    initial_document: None,
+                    confirmed_doc_type: Some(DocumentType::Request),
+                },
+                None,
+            )
+            .await;
+        assert!(matches!(
+            unexpected_model_text,
+            Err(EngineError::InvalidInput)
+        ));
+    }
+
+    #[test]
+    fn style_stage_only_runs_in_imitate_pipelines() {
+        let mut definition = pipeline();
+        definition.stages[1].id = StageId::Style;
+        assert!(matches!(
+            definition.validate(),
+            Err(EngineError::InvalidPipeline(_))
+        ));
+
+        let mut definition = imitate_pipeline();
+        definition.stages.remove(3);
+        assert!(matches!(
+            definition.validate(),
+            Err(EngineError::InvalidPipeline(_))
+        ));
     }
 
     #[test]
