@@ -50,7 +50,9 @@ button:disabled {
   display: grid;
   grid-template-rows: 48px minmax(0, 1fr) 28px;
   width: 100%;
-  min-height: 100vh;
+  /* Lock the shell to the viewport so the three panes scroll internally; a min-height
+     would let the grid grow with its content and push the statusbar out of sight. */
+  height: 100dvh;
   overflow: hidden;
 }
 
@@ -2625,6 +2627,7 @@ textarea::placeholder {
 
 @media (max-width: 930px) {
   .app-shell {
+    height: auto;
     min-height: 100dvh;
     overflow: visible;
   }
@@ -2832,6 +2835,32 @@ textarea::placeholder {
 
   .diff-toolbar {
     flex-wrap: wrap;
+  }
+}
+
+/* Compact the side rails on short screens so drafting actions stay reachable. */
+@media (max-height: 800px) {
+  .panel-heading {
+    min-height: 32px;
+  }
+
+  .form-fields,
+  .draft-form {
+    gap: 7px;
+    padding: var(--sp-2);
+  }
+
+  .material-field textarea,
+  .model-text-field textarea {
+    min-height: 56px;
+  }
+
+  .field {
+    gap: 2px;
+  }
+
+  .source-search {
+    margin: var(--sp-2);
   }
 }
 
