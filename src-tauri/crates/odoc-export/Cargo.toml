@@ -1,0 +1,21 @@
+[package]
+name = "odoc-export"
+version = "0.1.0"
+description = "Deterministic DOCX export for Bingbi ODocs"
+edition = "2024"
+rust-version = "1.85"
+
+[dependencies]
+odoc-model = { path = "../odoc-model" }
+quick-xml = "0.41"
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "2.0"
+tempfile = "3.15"
+toml = "0.8.23"
+zip = { version = "7.2", default-features = false }
+
+[dev-dependencies]
+odoc-model = { path = "../odoc-model" }
+
+[lints]
+workspace = true

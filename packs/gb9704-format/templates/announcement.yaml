@@ -1,0 +1,12 @@
+doc_type: announcement
+blocks:
+  - type: paragraph
+    role: basis
+    guidance: 说明公告依据和适用范围
+  - type: heading
+    level: l1
+    title: 公告事项
+    role: matters
+  - type: paragraph
+    role: effective_time
+    guidance: 写明生效时间和必要的咨询渠道

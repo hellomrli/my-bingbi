@@ -1,0 +1,23 @@
+[package]
+name = "odoc-pack"
+version = "0.1.0"
+description = "Safe declarative skill-pack loading for Bingbi"
+edition = "2024"
+rust-version = "1.85"
+
+[dependencies]
+odoc-model = { path = "../odoc-model" }
+regex = "1.11"
+semver = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.9.34"
+thiserror = "2.0"
+toml = "0.8.23"
+ts-rs = { version = "11.1", features = ["serde-compat"] }
+walkdir = "2.5"
+
+[dev-dependencies]
+tempfile = "3.15"
+
+[lints]
+workspace = true

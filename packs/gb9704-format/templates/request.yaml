@@ -1,0 +1,19 @@
+doc_type: request
+required:
+  main_recipients: true
+  closing: 妥否，请批示。
+blocks:
+  - type: paragraph
+    role: rationale
+    guidance: 说明请示依据、现实问题和必要性
+  - type: heading
+    level: l1
+    title: 基本情况
+    role: background
+  - type: heading
+    level: l1
+    title: 请示事项
+    role: request
+  - type: paragraph
+    role: closing
+    guidance: 使用规范请示结语

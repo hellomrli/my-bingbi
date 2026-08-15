@@ -1,0 +1,16 @@
+doc_type: proclamation
+blocks:
+  - type: paragraph
+    role: basis
+    guidance: 写明发布通告的事实依据、管理目的和适用范围
+  - type: heading
+    level: l1
+    title: 通告事项
+    role: matters
+  - type: heading
+    level: l1
+    title: 执行要求
+    role: execution
+  - type: paragraph
+    role: effective_time
+    guidance: 明确生效时间、咨询渠道和必要的法律责任

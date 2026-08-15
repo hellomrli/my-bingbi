@@ -1,0 +1,114 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+      - run: npm audit --audit-level=high
+
+  rust-core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: cargo fmt --all -- --check
+        working-directory: src-tauri
+      - run: cargo clippy -p odoc-model -p odoc-store -p odoc-llm -p odoc-pack -p odoc-lint -p odoc-export -p odoc-kb -p odoc-engine --all-targets -- -D warnings
+        working-directory: src-tauri
+      - run: cargo test -p odoc-model -p odoc-store -p odoc-llm -p odoc-pack -p odoc-lint -p odoc-export -p odoc-kb -p odoc-engine
+        working-directory: src-tauri
+      - run: cargo run -p odoc-model --example export_odoc_bindings
+        working-directory: src-tauri
+      - run: cargo run -p odoc-store --example export_store_bindings
+        working-directory: src-tauri
+      - run: cargo run -p odoc-llm --example export_llm_bindings
+        working-directory: src-tauri
+      - run: cargo run -p odoc-pack --example export_pack_bindings
+        working-directory: src-tauri
+      - run: cargo run -p odoc-lint --example export_lint_bindings
+        working-directory: src-tauri
+      - run: cargo run -p odoc-kb --example export_kb_bindings
+        working-directory: src-tauri
+      - run: cargo run -p odoc-engine --example export_engine_bindings
+        working-directory: src-tauri
+      - run: git diff --exit-code -- src/lib/generated/bindings.ts src/lib/generated/store.ts src/lib/generated/llm.ts src/lib/generated/pack.ts src/lib/generated/lint.ts src/lib/generated/kb.ts src/lib/generated/engine.ts
+
+  desktop:
+    name: desktop (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux
+            os: ubuntu-latest
+            bundle: deb
+            artifact: src-tauri/target/release/bundle/deb/*.deb
+          - platform: windows
+            os: windows-latest
+            bundle: nsis
+            artifact: src-tauri/target/release/bundle/nsis/*.exe
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: ${{ matrix.platform }}
+      - name: Install Linux desktop dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            libayatana-appindicator3-dev \
+            libssl-dev \
+            libxdo-dev \
+            librsvg2-dev \
+            libwebkit2gtk-4.1-dev \
+            patchelf \
+            build-essential \
+            curl \
+            file \
+            wget
+      - run: npm ci
+      - run: cargo check -p my-bingbi --all-targets --locked
+        working-directory: src-tauri
+      - run: cargo clippy -p my-bingbi --all-targets --locked -- -D warnings
+        working-directory: src-tauri
+      - run: cargo test -p my-bingbi --locked
+        working-directory: src-tauri
+      - run: npm run tauri -- build --bundles ${{ matrix.bundle }} --ci
+      - uses: actions/upload-artifact@v4
+        with:
+          name: my-bingbi-${{ matrix.platform }}
+          path: ${{ matrix.artifact }}
+          if-no-files-found: error
+          retention-days: 7

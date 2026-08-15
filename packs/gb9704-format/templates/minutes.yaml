@@ -1,0 +1,13 @@
+doc_type: minutes
+blocks:
+  - type: paragraph
+    role: meeting_overview
+    guidance: 写明会议时间、地点、主持人和参会范围
+  - type: heading
+    level: l1
+    title: 议定事项
+    role: decisions
+  - type: heading
+    level: l1
+    title: 任务分工
+    role: assignments

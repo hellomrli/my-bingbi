@@ -1,0 +1,14 @@
+doc_type: certificate
+blocks:
+  - type: paragraph
+    role: subject
+    guidance: 写明被证明主体及其可核验身份信息
+  - type: paragraph
+    role: certified_fact
+    guidance: 仅陈述材料能够证明的具体事实、时间和范围
+  - type: paragraph
+    role: purpose
+    guidance: 必要时限定证明用途和有效范围
+  - type: paragraph
+    role: closing
+    guidance: 使用“特此证明”等规范结语并保留签章位置

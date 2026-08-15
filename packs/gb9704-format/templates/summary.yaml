@@ -1,0 +1,17 @@
+doc_type: summary
+blocks:
+  - type: paragraph
+    role: overview
+    guidance: 概述周期、范围和总体成效
+  - type: heading
+    level: l1
+    title: 主要工作
+    role: work
+  - type: heading
+    level: l1
+    title: 经验与问题
+    role: analysis
+  - type: heading
+    level: l1
+    title: 下一步安排
+    role: next_steps

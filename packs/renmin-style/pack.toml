@@ -1,0 +1,42 @@
+schema_version = "0.1"
+
+[pack]
+id = "renmin-style"
+name = "务实公文表达包"
+version = "0.1.0"
+description = "文种判断、事实提取、反 AI 味规则与质量评分量表"
+license = "MIT"
+source = "https://github.com/Liuxiangjian-ai/official-document-skill"
+
+[capabilities]
+doc_types = [
+  "request", "notice", "report", "letter", "minutes", "summary", "decision",
+  "announcement", "regulation", "proclamation", "reply", "instruction", "proposal",
+  "work_plan", "work_report", "briefing", "speech", "presentation", "memo",
+  "invitation", "certificate", "other"
+]
+provides = ["language_rules", "references", "checklists", "tests"]
+
+[[bindings]]
+stage = "doctype"
+inject = ["references/document-type-router.md"]
+
+[[bindings]]
+stage = "facts"
+inject = ["references/fact-extraction.md"]
+
+[[bindings]]
+stage = "deai"
+inject = ["references/humanizer.md"]
+
+[[bindings]]
+stage = "lint"
+rules = ["rules/anti-ai.yaml"]
+
+[[bindings]]
+stage = "review"
+inject = ["references/humanizer.md"]
+
+[[bindings]]
+stage = "score"
+inject = ["checklists/scoring-rubric.md"]

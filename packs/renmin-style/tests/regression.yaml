@@ -1,0 +1,13 @@
+- id: request-vs-report
+  input: 申请购置应急排水设备经费十五万元，请予批准
+  expect:
+    doc_type: request
+- id: report-no-request
+  input: 汇报汛期应急准备工作进展
+  expect:
+    doc_type: report
+    forbidden_intents: [request_approval]
+- id: deai-specificity
+  input: 全面推动各项工作走深走实
+  expect:
+    lint_rules: [slogan-density, empty-strengthening]

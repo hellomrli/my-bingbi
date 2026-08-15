@@ -1,0 +1,58 @@
+name: 公文审核流程
+kind: review
+stages:
+  - id: doctype
+    kind: llm
+    prompt: |
+      你是公文文种复核员。仅输出 JSON：{"value":"request|notice|report|letter|minutes|summary|decision|announcement|regulation|proclamation|reply|instruction|proposal|work_plan|work_report|briefing|speech|presentation|memo|invitation|certificate|other","confidence":0.0,"alternatives":[],"missingInformation":[]}。
+      只依据 documentText 的实际内容判断该文应当使用的文种，不要迁就 declaredDocType。证据不足时降低 confidence 并填写 missingInformation。
+    output_schema: TypeDecision
+    json_mode: true
+    inject:
+      - pack://renmin-style#references/document-type-router.md
+
+  - id: lint
+    kind: pack
+    inject:
+      - pack://gb9704-format#rules/format.yaml
+      - pack://renmin-style#rules/anti-ai.yaml
+
+  - id: factcheck
+    kind: pack
+
+  - id: review
+    kind: llm
+    prompt: |
+      你是公文审核员，对一份**已经写好**的公文做体检。你只出具意见，不得改写原文。
+      仅输出 JSON：{"findings":[{"dimension":"format|content|language|logic|detail","severity":"error|warn|info","nodeId":null,"message":"","evidence":null,"suggestion":null}],"summary":"","missingInformation":[]}。
+
+      维度划分：
+      - format 格式：版头版记要素、主送机关、署名、成文日期、附件说明的齐备与位置。
+      - content 内容：事项是否说清，有无缺失的背景、依据、要求或落实措施。
+      - language 语言：是否具体可执行，有无空泛口号、模糊主体、万能结论。
+      - logic 逻辑：层次序数、因果关系、文种纪律（如报告不得夹带请示、请示不得多头主送）。
+      - detail 细节：数字、日期、称谓、标点、计量单位等易错项。
+
+      纪律：
+      1. ruleFindings 和 factCheckFindings 是规则引擎已经查出的问题，**不要重复报告**，只补充规则查不出来的判断。
+      2. nodeId 必须取自 nodeIds 列表；讲的是全篇问题时填 null。不在列表中的标识会被丢弃。
+      3. evidence 必须是原文里真实出现的片段，不得改写、不得杜撰。
+      4. 拿不准的写进 missingInformation，不要臆断；宁可少报，不可错报。
+      5. severity：会导致公文不能发出的用 error，需要修改的用 warn，可改可不改的用 info。
+      6. summary 用两三句话概括整体印象和最该先改的地方。
+    output_schema: ReviewReport
+    json_mode: true
+    inject:
+      - pack://gb9704-format#checklists/quality-checklist.md
+      - pack://renmin-style#references/humanizer.md
+
+  - id: score
+    kind: llm
+    prompt: |
+      仅输出 JSON：{"total":0,"dimensions":{"type_structure":{"score":0,"maxScore":20,"findings":[]},"facts":{"score":0,"maxScore":30,"findings":[]},"execution":{"score":0,"maxScore":20,"findings":[]},"language":{"score":0,"maxScore":20,"findings":[]},"format":{"score":0,"maxScore":10,"findings":[]}},"revisionInstructions":[],"missingInformation":[]}。
+      total 必须等于所有 dimensions.score 之和，满分 100。评分要与 ruleFindings、factCheckFindings、reviewFindings 一致：已经报出 error 的维度不得给满分。
+      revisionInstructions 写给作者看，每条都要可执行、指明改哪里、改成什么。
+    output_schema: Score
+    json_mode: true
+    inject:
+      - pack://renmin-style#checklists/scoring-rubric.md

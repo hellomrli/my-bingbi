@@ -1,0 +1,18 @@
+doc_type: memo
+required:
+  main_recipients: true
+blocks:
+  - type: paragraph
+    role: context
+    guidance: 说明备忘事项的背景、参与方和形成时间
+  - type: heading
+    level: l1
+    title: 已确认事项
+    role: agreements
+  - type: heading
+    level: l1
+    title: 后续安排
+    role: follow_up
+  - type: paragraph
+    role: reservations
+    guidance: 明确未决事项、责任人和确认方式

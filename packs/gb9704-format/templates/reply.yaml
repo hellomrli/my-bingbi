@@ -1,0 +1,18 @@
+doc_type: reply
+required:
+  main_recipients: true
+  closing: 此复。
+blocks:
+  - type: paragraph
+    role: reference
+    guidance: 准确引述来文标题、文号和请示事项
+  - type: paragraph
+    role: decision
+    guidance: 明确答复同意、原则同意或不同意及其边界
+  - type: heading
+    level: l1
+    title: 办理要求
+    role: requirements
+  - type: paragraph
+    role: closing
+    guidance: 使用规范批复结语，不夹带新的请示事项

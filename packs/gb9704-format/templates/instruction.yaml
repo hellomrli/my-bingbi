@@ -1,0 +1,18 @@
+doc_type: instruction
+required:
+  main_recipients: true
+blocks:
+  - type: paragraph
+    role: authority
+    guidance: 写明发布命令的法定职权和依据
+  - type: heading
+    level: l1
+    title: 命令事项
+    role: orders
+  - type: heading
+    level: l1
+    title: 执行范围
+    role: scope
+  - type: paragraph
+    role: effective_time
+    guidance: 明确签署人、命令号和施行日期

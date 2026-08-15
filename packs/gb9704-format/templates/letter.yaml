@@ -1,0 +1,14 @@
+doc_type: letter
+required:
+  main_recipients: true
+blocks:
+  - type: paragraph
+    role: context
+    guidance: 交代商洽、询问或答复事项的背景
+  - type: heading
+    level: l1
+    title: 有关事项
+    role: matters
+  - type: paragraph
+    role: response
+    guidance: 明确希望对方办理或反馈的内容和期限

@@ -574,7 +574,9 @@ stages:
 - **成本核算**：按 stage 统计 token 与费用。
 - **取消与恢复**：长流程可中断，断点续跑。
 
-**其他流水线**：`polish.yaml`（润色/降 AI 味）、`review.yaml`（审核已有公文）、`imitate.yaml`（仿写指定范文）。
+**其他流水线**：`polish.yaml`（润色/降 AI 味）、`review.yaml`（审核已有公文，已实现）、`imitate.yaml`（仿写指定范文）。
+
+流水线用 `kind` 区分阶段集合：`draft`（默认，向后兼容不写该字段的旧定义）必须含 `doctype`/`facts`/`outline`/`draft`；`review` 必须含 `doctype`/`lint`/`factcheck`/`review`/`score`，且**禁止声明任何会改写文档的阶段**（`facts`/`outline`/`draft`/`deai`/`export`）——审核只出意见，不动原文，这条边界在内核校验层强制，而不是靠提示词约束。
 
 ### 5.7 `odoc-export` — 排版导出
 
@@ -757,29 +759,29 @@ CI 用 GitHub Actions matrix（`windows-latest` + `ubuntu-22.04`）交叉产出�
 ### M0 — 骨架与规范（约 2 周）
 
 - [ ] Tauri 2 + React + Vite 工程搭起来，两平台各出一个能跑的包（CI 打通）
-- [ ] `odoc-model` 定义完成，`ODOC-SPEC.md` 写清楚，`ts-rs` 类型导出打通
-- [ ] `PACK-SPEC.md` 知识包格式定稿
-- [ ] SQLite 初始化、配置读写、Keyring 打通
-- **验收**：能创建一个空 ODoc，前后端类型一致，双平台安装包可运行
+- [x] `odoc-model` 定义完成，`ODOC-SPEC.md` 写清楚，`ts-rs` 类型导出打通
+- [x] `PACK-SPEC.md` 知识包格式定稿
+- [x] SQLite 初始化、配置读写、Keyring 打通
+- **验收进度**：空 ODoc、前后端类型一致、Linux `.deb` 已在本机验证；Windows 原生构建与 NSIS 安装包已纳入 Windows CI，待首次 CI 运行产出安装包后完成双平台验收。
 
 ### M1 — 最小可用闭环（约 4 周）
 
-- [ ] `odoc-llm`：OpenAI 兼容 + Ollama 两个 Provider，流式输出打通
-- [ ] `odoc-pack`：把 ref1/ref2 转成 `gb9704-format`、`renmin-style` 两个包
-- [ ] `odoc-engine`：`draft.yaml` 流水线跑通（文种路由 → 事实提取 → 骨架 → 起草）
-- [ ] 前端：要素表单 + TipTap 编辑器 + A4 版式预览
-- [ ] `odoc-lint`：规则引擎 + 首批 30 条规则（格式类 + AI 味类）
-- [ ] 导出：PDF（WebView 打印）+ 简化 docx
-- **验收**：输入"申请购置应急排水设备经费，15 万元，设备老化，强降雨"→ 出一份格式正确的**请示**，质检面板能报出问题，可导出 PDF
+- [x] `odoc-llm`：OpenAI 兼容 + Ollama 两个 Provider，流式输出打通
+- [x] `odoc-pack`：把 ref1/ref2 转成 `gb9704-format`、`renmin-style` 两个包；桌面启动时校验并加载，安装包内资源映射到 `packs/`
+- [x] `odoc-engine`：`draft.yaml` 流水线跑通（文种路由 → 事实提取 → 骨架 → 起草）；已接入 SQLite 会话日志、流式 Tauri IPC 与密级边界
+- [x] 前端：要素表单 + 结构化编辑器 + A4 版式预览；已接入材料输入、Provider 选择、流式起草和低置信度文种确认
+- [x] `odoc-lint`：知识包规则引擎 + 事实回查；已接入 `lint`/`factcheck` stage 和右侧质检面板
+- [x] 导出：桌面版简化 DOCX（OOXML ZIP + GB/T 9704 页面参数 + 内核 lint/factcheck 阻断）；PDF/WebView 打印待补
+- **验收**：输入"申请购置应急排水设备经费，15 万元，设备老化，强降雨"→ 出一份格式正确的**请示**，质检面板能报出问题，桌面版可导出简化 DOCX（PDF 待补）
 
 ### M2 — 知识库与严格排版（约 4 周）
 
-- [ ] `odoc-kb`：`FnsProvider` 完整实现（REST + WebSocket 增量）
+- [ ] `odoc-kb`：REST Provider 与本地 Vault 已完成；WebSocket 增量订阅待补
 - [ ] 三级检索管线（FTS5 → 双链扩展 → 向量重排），本地索引缓存
 - [ ] Obsidian 库自动打标（frontmatter 补全）
-- [ ] 检索增强接入 `draft.yaml`，素材侧栏可用
+- [x] 检索增强已接入 `draft.yaml`（有界关键词召回 + 来源注入），素材侧栏可用
 - [ ] 归档回写：生成的公文一键存回 Obsidian 库并打标
-- [ ] `odoc-export`：严格 docx 排版引擎（docx-rs + `style/gb9704.toml`）+ 模板注入法
+- [ ] `odoc-export`：严格 docx 排版引擎（docx-rs + `style/gb9704.toml`）+ 模板注入法（当前已有简化 OOXML 导出基础）
 - [ ] 文种覆盖扩到 20+（法定公文 12 种 + 事务文书 8 种）
 - **验收**：起草时能自动召回"去年同类文件"作参考；导出的 docx 在 Word 里打开，各要素字体字号、版心、行距完全符合国标
 
@@ -788,9 +790,9 @@ CI 用 GitHub Actions matrix（`windows-latest` + `ubuntu-22.04`）交叉产出�
 - [ ] 事实台账 + 事实回查 + 待核实标红（判断三完整落地）
 - [ ] 降 AI 味 / humanizer 二次审稿 stage
 - [ ] 质量评分 rubric + 不达标自动回炉
-- [ ] 审核模式（`review.yaml`）：导入 docx → 体检报告
+- [x] 审核模式（`review.yaml`）：打开或导入已有公文 → 体检报告。内核新增 `review` stage 与只读的 `ReviewEngine`（文种复核 → 规则校验 → 事实回查 → 语义评审 → 质量评分），模型给出的节点标识经内核校验后才允许定位，全程不改写被审文档
 - [ ] 仿写模式（`imitate.yaml`）：指定范文，学其笔法
-- [ ] 版本对比 diff 视图、单步重跑
+- [x] 版本对比 diff 视图；单步重跑待补
 - [ ] 涉密拦截：密级 ≥ 秘密时强制本地模型
 - **验收**：生成的公文里凡是模型自己编的数字/文号/日期全部标红；跑通 ref2 的 5 个回归用例
 

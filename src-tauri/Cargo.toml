@@ -1,0 +1,41 @@
+[package]
+name = "my-bingbi"
+version = "0.1.0"
+description = "A local-first Chinese official document writing workbench"
+authors = ["my-bingbi contributors"]
+edition = "2024"
+rust-version = "1.85"
+
+[lib]
+name = "my_bingbi_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.5", features = [] }
+
+[dependencies]
+odoc-engine = { path = "crates/odoc-engine" }
+odoc-export = { path = "crates/odoc-export" }
+odoc-kb = { path = "crates/odoc-kb" }
+odoc-llm = { path = "crates/odoc-llm" }
+odoc-lint = { path = "crates/odoc-lint" }
+odoc-model = { path = "crates/odoc-model" }
+odoc-pack = { path = "crates/odoc-pack" }
+odoc-store = { path = "crates/odoc-store" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tauri = { version = "2.9", features = [] }
+tokio = { version = "1.43", features = ["sync", "time"] }
+
+[workspace]
+members = ["crates/odoc-engine", "crates/odoc-export", "crates/odoc-kb", "crates/odoc-llm", "crates/odoc-lint", "crates/odoc-model", "crates/odoc-pack", "crates/odoc-store"]
+resolver = "2"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+must_use_candidate = "allow"

@@ -1,0 +1,20 @@
+doc_type: speech
+blocks:
+  - type: paragraph
+    role: salutation
+    guidance: 按会议对象和场合使用准确称谓并简洁开场
+  - type: heading
+    level: l1
+    title: 认清形势和任务
+    role: situation
+  - type: heading
+    level: l1
+    title: 抓好重点工作
+    role: tasks
+  - type: heading
+    level: l1
+    title: 强化责任落实
+    role: implementation
+  - type: paragraph
+    role: closing
+    guidance: 结合场合自然收束，不使用无实指万能结论

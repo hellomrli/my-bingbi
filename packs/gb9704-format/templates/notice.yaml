@@ -1,0 +1,18 @@
+doc_type: notice
+required:
+  main_recipients: true
+blocks:
+  - type: paragraph
+    role: purpose
+    guidance: 说明通知依据、目的和适用范围
+  - type: heading
+    level: l1
+    title: 工作任务
+    role: tasks
+  - type: heading
+    level: l1
+    title: 工作要求
+    role: requirements
+  - type: paragraph
+    role: contact
+    guidance: 写明时间、责任单位和反馈路径

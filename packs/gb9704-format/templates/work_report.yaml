@@ -1,0 +1,19 @@
+doc_type: work_report
+required:
+  main_recipients: true
+blocks:
+  - type: paragraph
+    role: overview
+    guidance: 概述汇报时段、职责范围和总体判断
+  - type: heading
+    level: l1
+    title: 主要工作及成效
+    role: achievements
+  - type: heading
+    level: l1
+    title: 存在的问题
+    role: problems
+  - type: heading
+    level: l1
+    title: 下一步打算
+    role: next_steps

@@ -1,0 +1,16 @@
+doc_type: regulation
+blocks:
+  - type: paragraph
+    role: publication_context
+    guidance: 说明发布机关、发布依据和本期公报范围
+  - type: heading
+    level: l1
+    title: 发布事项
+    role: matters
+  - type: heading
+    level: l1
+    title: 施行安排
+    role: implementation
+  - type: paragraph
+    role: validity
+    guidance: 明确施行日期、解释机关和废止关系

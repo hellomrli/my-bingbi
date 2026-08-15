@@ -1,0 +1,10 @@
+- id: request-has-closing
+  doc_type: request
+  assert:
+    template: templates/request.yaml
+    required_closing: 妥否，请批示。
+- id: notice-has-execution-fields
+  doc_type: notice
+  assert:
+    template: templates/notice.yaml
+    roles: [tasks, requirements, contact]

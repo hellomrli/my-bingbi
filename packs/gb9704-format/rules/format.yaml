@@ -1,0 +1,29 @@
+- id: title-required
+  name: 公文标题必填
+  severity: error
+  type: format
+  scope: body.title.text
+  required: true
+  message: 公文标题不能为空
+
+- id: wenhao-bracket
+  name: 发文字号须用六角括号
+  severity: error
+  type: regex
+  scope: header.documentNumber
+  pattern: '^.+〔\d{4}〕\d+号$'
+  match: required
+  when_present: true
+  message: 发文字号应使用六角括号〔〕并包含完整年份和序号
+  suggestion: 例如：云应急〔2026〕27号
+
+- id: official-date
+  name: 成文日期格式
+  severity: error
+  type: regex
+  scope: body.date.value
+  pattern: '^\d{4}年(?:1[0-2]|[1-9])月(?:3[01]|[12]\d|[1-9])日$'
+  match: required
+  when_present: true
+  message: 成文日期应使用阿拉伯数字全称
+  suggestion: 例如：2026年8月12日

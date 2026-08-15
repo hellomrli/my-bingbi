@@ -1,0 +1,5 @@
+doc_type: other
+blocks:
+  - type: paragraph
+    role: content
+    guidance: 按材料事实组织正文，未知信息保持为空

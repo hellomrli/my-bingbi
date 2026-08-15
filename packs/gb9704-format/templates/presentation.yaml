@@ -1,0 +1,20 @@
+doc_type: presentation
+blocks:
+  - type: paragraph
+    role: salutation
+    guidance: 说明发言身份、主题和交流目的
+  - type: heading
+    level: l1
+    title: 基本情况
+    role: context
+  - type: heading
+    level: l1
+    title: 认识与做法
+    role: practices
+  - type: heading
+    level: l1
+    title: 建议与打算
+    role: suggestions
+  - type: paragraph
+    role: closing
+    guidance: 使用符合会议场合的简洁结束语

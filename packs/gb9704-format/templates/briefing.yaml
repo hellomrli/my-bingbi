@@ -1,0 +1,17 @@
+doc_type: briefing
+blocks:
+  - type: paragraph
+    role: lead
+    guidance: 用事实概括事件、进展或经验，不写空泛导语
+  - type: heading
+    level: l1
+    title: 主要情况
+    role: situation
+  - type: heading
+    level: l1
+    title: 做法与成效
+    role: practices
+  - type: heading
+    level: l1
+    title: 工作提示
+    role: implications

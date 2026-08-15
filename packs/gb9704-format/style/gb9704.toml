@@ -1,0 +1,24 @@
+[page]
+size = "A4"
+width_mm = 210
+height_mm = 297
+margin_top_mm = 37
+margin_left_mm = 28
+body_width_mm = 156
+body_height_mm = 225
+line_spacing_pt = 28
+lines_per_page = 22
+chars_per_line = 28
+
+[fonts]
+title = { font = "方正小标宋简体", size_pt = 22 }
+body = { font = "仿宋_GB2312", size_pt = 16 }
+heading_l1 = { font = "黑体", size_pt = 16 }
+heading_l2 = { font = "楷体_GB2312", size_pt = 16 }
+heading_l3 = { font = "仿宋_GB2312", size_pt = 16 }
+heading_l4 = { font = "仿宋_GB2312", size_pt = 16 }
+document_number = { font = "仿宋_GB2312", size_pt = 16 }
+
+[header]
+organization_mark_color = "#C8362B"
+separator_line = true

@@ -1,0 +1,45 @@
+schema_version = "0.1"
+
+[pack]
+id = "gb9704-format"
+name = "GB/T 9704-2012 格式规范包"
+version = "0.1.0"
+description = "公文版式参数与首批确定性格式规则"
+license = "MIT"
+source = "https://github.com/KaguraNanaga/official-document-writing-skill"
+
+[capabilities]
+doc_types = [
+  "request", "notice", "report", "letter", "minutes", "summary", "decision",
+  "announcement", "regulation", "proclamation", "reply", "instruction", "proposal",
+  "work_plan", "work_report", "briefing", "speech", "presentation", "memo",
+  "invitation", "certificate", "other"
+]
+provides = ["format_rules", "templates", "references", "checklists", "style", "tests"]
+
+[[bindings]]
+stage = "outline"
+inject = ["templates/{doc_type}.yaml"]
+
+[[bindings]]
+stage = "draft"
+inject = ["references/writing-guidance.md"]
+retrieval = true
+
+[[bindings]]
+stage = "lint"
+rules = ["rules/format.yaml"]
+
+[[bindings]]
+stage = "export"
+styles = ["style/gb9704.toml"]
+
+[[bindings]]
+stage = "review"
+inject = ["checklists/quality-checklist.md"]
+retrieval = true
+
+[[bindings]]
+stage = "score"
+inject = ["checklists/quality-checklist.md"]
+retrieval = true

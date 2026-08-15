@@ -1,0 +1,644 @@
+use odoc_model::{Block, Fact, ODoc};
+use odoc_pack::{
+    LoadedPack, PackRegistry, RegexMatchMode, ResourceRole, RuleDefinition, RuleSeverity, RuleType,
+    StageId, StructureDetector,
+};
+use regex::Regex;
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
+use thiserror::Error;
+use ts_rs::TS;
+
+const MAX_RULES: usize = 512;
+
+#[derive(Debug, Error)]
+pub enum LintError {
+    #[error("knowledge-pack rule resource is invalid")]
+    InvalidRuleResource,
+    #[error("rule pattern is invalid")]
+    InvalidPattern,
+    #[error("rule set is too large")]
+    TooManyRules,
+    #[error("fact check pattern is invalid")]
+    InvalidFactPattern,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(rename_all = "snake_case")]
+pub enum Severity {
+    Error,
+    Warn,
+    Info,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct Finding {
+    pub id: String,
+    pub severity: Severity,
+    pub node_id: String,
+    pub message: String,
+    pub location: String,
+    pub suggestion: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct LintReport {
+    pub findings: Vec<Finding>,
+    pub error_count: u32,
+    pub warn_count: u32,
+    pub info_count: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct FactCheckReport {
+    pub findings: Vec<Finding>,
+    pub checked_tokens: u32,
+    pub unresolved_tokens: u32,
+}
+
+#[derive(Debug, Clone)]
+struct Target {
+    node_id: String,
+    location: String,
+    text: String,
+}
+
+/// Runs all deterministic rules declared by the knowledge packs for the lint stage.
+///
+/// # Errors
+///
+/// Returns [`LintError`] when a declared rule resource cannot be parsed or exceeds limits.
+pub fn lint_document(document: &ODoc, packs: &PackRegistry) -> Result<LintReport, LintError> {
+    let mut rules = Vec::new();
+    for pack in packs.iter() {
+        rules.extend(read_pack_rules(pack)?);
+        if rules.len() > MAX_RULES {
+            return Err(LintError::TooManyRules);
+        }
+    }
+    let mut findings = Vec::new();
+    for (pack_id, rule) in rules {
+        apply_rule(document, &pack_id, &rule, &mut findings)?;
+    }
+    apply_builtin_rules(document, &mut findings);
+    Ok(report(findings))
+}
+
+/// Checks numbers, dates and document numbers against verified facts in the `ODoc` ledger.
+///
+/// # Errors
+///
+/// Returns [`LintError`] when one of the bounded fact patterns cannot be compiled.
+pub fn fact_check_document(document: &ODoc) -> Result<FactCheckReport, LintError> {
+    let date =
+        Regex::new(r"\d{4}年\d{1,2}月\d{1,2}日").map_err(|_| LintError::InvalidFactPattern)?;
+    let document_number =
+        Regex::new(r"〔\d{4}〕\d+号").map_err(|_| LintError::InvalidFactPattern)?;
+    let number_with_unit = Regex::new(r"\d+(?:\.\d+)?(?:万|亿)?[年月日台件人次万元亿元%％号]")
+        .map_err(|_| LintError::InvalidFactPattern)?;
+    let bare_number = Regex::new(r"(?:^|[^0-9A-Za-z_])([0-9]+(?:\.[0-9]+)?)")
+        .map_err(|_| LintError::InvalidFactPattern)?;
+    let verified = verified_fact_terms(&document.facts.facts);
+    let mut findings = Vec::new();
+    let mut checked_tokens = 0_u32;
+    for target in fact_check_targets(document) {
+        let tokens = extract_fact_tokens(
+            &target.text,
+            &date,
+            &document_number,
+            &number_with_unit,
+            &bare_number,
+        );
+        checked_tokens = checked_tokens.saturating_add(tokens.len().try_into().unwrap_or(u32::MAX));
+        for token in tokens {
+            if verified
+                .iter()
+                .any(|term| token == *term || token.contains(term) || term.contains(&token))
+            {
+                continue;
+            }
+            findings.push(Finding {
+                id: if findings.is_empty() {
+                    "FACT-001".to_owned()
+                } else {
+                    format!("FACT-001-{}", findings.len() + 1)
+                },
+                severity: Severity::Error,
+                node_id: target.node_id.clone(),
+                message: format!("正文中的事实“{token}”未在已核实事实台账中找到。"),
+                location: target.location.clone(),
+                suggestion: Some("补充材料或在事实台账中核实该数据后再导出。".to_owned()),
+            });
+        }
+    }
+    let unresolved_tokens = findings.len().try_into().unwrap_or(u32::MAX);
+    Ok(FactCheckReport {
+        findings,
+        checked_tokens,
+        unresolved_tokens,
+    })
+}
+
+pub fn typescript_bindings() -> String {
+    let declarations = [
+        Severity::decl(),
+        Finding::decl(),
+        LintReport::decl(),
+        FactCheckReport::decl(),
+    ];
+    format!(
+        "// This file is generated from src-tauri/crates/odoc-lint. Do not edit by hand.\n\nexport {}\n",
+        declarations.join("\n\nexport ")
+    )
+}
+
+fn read_pack_rules(pack: &LoadedPack) -> Result<Vec<(String, RuleDefinition)>, LintError> {
+    let resources = pack
+        .resources_for_stage(StageId::Lint, None)
+        .map_err(|_| LintError::InvalidRuleResource)?;
+    let mut rules = Vec::new();
+    let pack_id = pack.manifest().pack.id.clone();
+    for resource in resources {
+        if resource.role != ResourceRole::Rule {
+            continue;
+        }
+        let parsed: Vec<RuleDefinition> = pack
+            .read_yaml(&resource.relative_path)
+            .map_err(|_| LintError::InvalidRuleResource)?;
+        rules.extend(parsed.into_iter().map(|rule| (pack_id.clone(), rule)));
+    }
+    Ok(rules)
+}
+
+fn apply_rule(
+    document: &ODoc,
+    pack_id: &str,
+    rule: &RuleDefinition,
+    findings: &mut Vec<Finding>,
+) -> Result<(), LintError> {
+    let targets = targets_for_scope(document, &rule.scope);
+    match rule.rule_type {
+        RuleType::Regex => apply_regex_rule(pack_id, rule, &targets, findings),
+        RuleType::LexiconDensity => apply_density_rule(pack_id, rule, &targets, findings),
+        RuleType::Structure => apply_structure_rule(pack_id, rule, &targets, findings),
+        RuleType::Format => apply_format_rule(document, pack_id, rule, &targets, findings),
+        RuleType::FactCheck => Ok(()),
+    }
+}
+
+fn apply_regex_rule(
+    pack_id: &str,
+    rule: &RuleDefinition,
+    targets: &[Target],
+    findings: &mut Vec<Finding>,
+) -> Result<(), LintError> {
+    let pattern = rule.pattern.as_deref().ok_or(LintError::InvalidPattern)?;
+    let regex = Regex::new(pattern).map_err(|_| LintError::InvalidPattern)?;
+    let present = targets.iter().any(|target| !target.text.trim().is_empty());
+    if rule.when_present && !present {
+        return Ok(());
+    }
+    match rule.match_mode {
+        Some(RegexMatchMode::Required) => {
+            if !targets.iter().any(|target| regex.is_match(&target.text)) {
+                let target = targets.first().cloned().unwrap_or_else(|| Target {
+                    node_id: document_fallback_id(),
+                    location: rule.scope.clone(),
+                    text: String::new(),
+                });
+                push_finding(findings, pack_id, rule, &target);
+            }
+        }
+        Some(RegexMatchMode::Forbidden) => {
+            for target in targets.iter().filter(|target| regex.is_match(&target.text)) {
+                push_finding(findings, pack_id, rule, target);
+            }
+        }
+        None => return Err(LintError::InvalidPattern),
+    }
+    Ok(())
+}
+
+fn apply_density_rule(
+    pack_id: &str,
+    rule: &RuleDefinition,
+    targets: &[Target],
+    findings: &mut Vec<Finding>,
+) -> Result<(), LintError> {
+    let threshold = rule.max_per_100_chars.ok_or(LintError::InvalidPattern)?;
+    let count = targets
+        .iter()
+        .map(|target| {
+            rule.lexicon
+                .iter()
+                .map(|term| target.text.matches(term).count())
+                .sum::<usize>()
+        })
+        .sum::<usize>();
+    let chars = targets
+        .iter()
+        .map(|target| target.text.chars().count())
+        .sum::<usize>();
+    let count_f = f64::from(u32::try_from(count).unwrap_or(u32::MAX));
+    let chars_f = f64::from(u32::try_from(chars).unwrap_or(u32::MAX));
+    if chars > 0 && count_f > threshold * (chars_f / 100.0) {
+        let target = targets.first().cloned().unwrap_or_else(|| Target {
+            node_id: document_fallback_id(),
+            location: rule.scope.clone(),
+            text: String::new(),
+        });
+        push_finding(findings, pack_id, rule, &target);
+    }
+    Ok(())
+}
+
+fn apply_structure_rule(
+    pack_id: &str,
+    rule: &RuleDefinition,
+    targets: &[Target],
+    findings: &mut Vec<Finding>,
+) -> Result<(), LintError> {
+    if rule.detect != Some(StructureDetector::ParallelPhrases) {
+        return Err(LintError::InvalidPattern);
+    }
+    let min_run = rule.min_run.unwrap_or(3) as usize;
+    for target in targets {
+        let max_run = target
+            .text
+            .split('、')
+            .map(str::trim)
+            .filter(|part| !part.is_empty() && part.chars().count() <= 24)
+            .fold((0_usize, 0_usize), |(run, max), part| {
+                let next = if part.contains(['，', '。', '；', '：']) {
+                    0
+                } else {
+                    run + 1
+                };
+                (next, max.max(next))
+            })
+            .1;
+        if max_run >= min_run {
+            push_finding(findings, pack_id, rule, target);
+        }
+    }
+    Ok(())
+}
+
+fn apply_format_rule(
+    document: &ODoc,
+    pack_id: &str,
+    rule: &RuleDefinition,
+    targets: &[Target],
+    findings: &mut Vec<Finding>,
+) -> Result<(), LintError> {
+    if rule.required != Some(true) {
+        return Err(LintError::InvalidPattern);
+    }
+    let present = match rule.scope.as_str() {
+        "body.mainRecipients" => document
+            .body
+            .main_recipients
+            .iter()
+            .any(|value| !value.trim().is_empty()),
+        _ => targets.iter().any(|target| !target.text.trim().is_empty()),
+    };
+    if !present {
+        let target = targets.first().cloned().unwrap_or_else(|| Target {
+            node_id: document_fallback_id(),
+            location: rule.scope.clone(),
+            text: String::new(),
+        });
+        push_finding(findings, pack_id, rule, &target);
+    }
+    Ok(())
+}
+
+fn push_finding(
+    findings: &mut Vec<Finding>,
+    pack_id: &str,
+    rule: &RuleDefinition,
+    target: &Target,
+) {
+    let base_id = format!("{pack_id}/{}", rule.id);
+    let id = if findings.iter().any(|finding| finding.id == base_id) {
+        format!(
+            "{}-{}",
+            base_id,
+            findings
+                .iter()
+                .filter(|finding| finding.id.starts_with(&base_id))
+                .count()
+                + 1
+        )
+    } else {
+        base_id
+    };
+    findings.push(Finding {
+        id,
+        severity: severity(rule.severity),
+        node_id: target.node_id.clone(),
+        message: rule.message.clone(),
+        location: target.location.clone(),
+        suggestion: rule.suggestion.clone(),
+    });
+}
+
+fn apply_builtin_rules(document: &ODoc, findings: &mut Vec<Finding>) {
+    let needs_recipient = document.meta.doc_type.requires_main_recipient();
+    if needs_recipient
+        && document
+            .body
+            .main_recipients
+            .iter()
+            .all(|value| value.trim().is_empty())
+    {
+        findings.push(Finding {
+            id: "FMT-004".to_owned(),
+            severity: Severity::Error,
+            node_id: document.body.id.clone(),
+            message: "公文缺少主送机关。".to_owned(),
+            location: "主体 · 主送机关".to_owned(),
+            suggestion: None,
+        });
+    }
+    if document
+        .body
+        .blocks
+        .iter()
+        .all(|block| block.plain_text().trim().is_empty())
+    {
+        findings.push(Finding {
+            id: "CNT-001".to_owned(),
+            severity: Severity::Info,
+            node_id: document.body.id.clone(),
+            message: "正文尚未填写。".to_owned(),
+            location: "主体 · 正文".to_owned(),
+            suggestion: None,
+        });
+    }
+}
+
+fn report(findings: Vec<Finding>) -> LintReport {
+    let error_count = findings
+        .iter()
+        .filter(|finding| finding.severity == Severity::Error)
+        .count()
+        .try_into()
+        .unwrap_or(u32::MAX);
+    let warn_count = findings
+        .iter()
+        .filter(|finding| finding.severity == Severity::Warn)
+        .count()
+        .try_into()
+        .unwrap_or(u32::MAX);
+    let info_count = findings
+        .iter()
+        .filter(|finding| finding.severity == Severity::Info)
+        .count()
+        .try_into()
+        .unwrap_or(u32::MAX);
+    LintReport {
+        findings,
+        error_count,
+        warn_count,
+        info_count,
+    }
+}
+
+fn severity(value: RuleSeverity) -> Severity {
+    match value {
+        RuleSeverity::Error => Severity::Error,
+        RuleSeverity::Warn => Severity::Warn,
+        RuleSeverity::Info => Severity::Info,
+    }
+}
+
+fn targets_for_scope(document: &ODoc, scope: &str) -> Vec<Target> {
+    match scope {
+        "body.title.text" => vec![Target {
+            node_id: document.body.title.id.clone(),
+            location: "主体 · 标题".to_owned(),
+            text: document.body.title.text.clone(),
+        }],
+        "header.documentNumber" => document
+            .header
+            .as_ref()
+            .map(|header| {
+                vec![Target {
+                    node_id: header.id.clone(),
+                    location: "版头 · 发文字号".to_owned(),
+                    text: header.document_number.clone().unwrap_or_default(),
+                }]
+            })
+            .unwrap_or_default(),
+        "body.date.value" => document
+            .body
+            .date
+            .as_ref()
+            .map(|date| {
+                vec![Target {
+                    node_id: date.id.clone(),
+                    location: "落款 · 成文日期".to_owned(),
+                    text: date.value.clone(),
+                }]
+            })
+            .unwrap_or_default(),
+        "body.mainRecipients" => vec![Target {
+            node_id: document.body.id.clone(),
+            location: "主体 · 主送机关".to_owned(),
+            text: document.body.main_recipients.join("、"),
+        }],
+        "body.blocks" => body_targets(document),
+        _ => vec![Target {
+            node_id: document.body.id.clone(),
+            location: scope.to_owned(),
+            text: document.to_plain_text(),
+        }],
+    }
+}
+
+fn body_targets(document: &ODoc) -> Vec<Target> {
+    document
+        .body
+        .blocks
+        .iter()
+        .enumerate()
+        .map(|(index, block)| Target {
+            node_id: block.id().to_owned(),
+            location: if matches!(block, Block::Heading { .. }) {
+                format!("正文 · 第 {} 节", index + 1)
+            } else {
+                format!("正文 · 第 {} 段", index + 1)
+            },
+            text: block.plain_text(),
+        })
+        .collect()
+}
+
+fn fact_check_targets(document: &ODoc) -> Vec<Target> {
+    let mut targets = Vec::new();
+    if let Some(header) = &document.header {
+        if let Some(number) = &header.document_number {
+            targets.push(Target {
+                node_id: header.id.clone(),
+                location: "版头 · 发文字号".to_owned(),
+                text: number.clone(),
+            });
+        }
+    }
+    targets.push(Target {
+        node_id: document.body.title.id.clone(),
+        location: "主体 · 标题".to_owned(),
+        text: document.body.title.text.clone(),
+    });
+    targets.extend(body_targets(document));
+    if let Some(date) = &document.body.date {
+        targets.push(Target {
+            node_id: date.id.clone(),
+            location: "落款 · 成文日期".to_owned(),
+            text: date.value.clone(),
+        });
+    }
+    targets
+}
+
+fn extract_fact_tokens(
+    text: &str,
+    date: &Regex,
+    document_number: &Regex,
+    number_with_unit: &Regex,
+    bare_number: &Regex,
+) -> Vec<String> {
+    let mut spans = date
+        .find_iter(text)
+        .map(|m| (m.start(), m.end(), m.as_str().to_owned()))
+        .chain(
+            document_number
+                .find_iter(text)
+                .map(|m| (m.start(), m.end(), m.as_str().to_owned())),
+        )
+        .chain(
+            number_with_unit
+                .find_iter(text)
+                .map(|m| (m.start(), m.end(), m.as_str().to_owned())),
+        )
+        .collect::<Vec<_>>();
+    for capture in bare_number.captures_iter(text) {
+        let Some(matched) = capture.get(1) else {
+            continue;
+        };
+        let next = text[matched.end()..].chars().next();
+        if next.is_some_and(|character| "年月日台件人次万元亿元%％号".contains(character))
+        {
+            continue;
+        }
+        spans.push((matched.start(), matched.end(), matched.as_str().to_owned()));
+    }
+    spans.sort_by_key(|(start, end, _)| (*start, std::cmp::Reverse(*end)));
+    let mut result = Vec::new();
+    let mut covered_until = 0;
+    for (start, end, token) in spans {
+        if start < covered_until {
+            continue;
+        }
+        covered_until = end;
+        result.push(token);
+    }
+    result
+}
+
+fn verified_fact_terms(facts: &[Fact]) -> BTreeSet<String> {
+    facts
+        .iter()
+        .filter(|fact| fact.verified)
+        .flat_map(|fact| {
+            let mut terms = vec![fact.value.clone()];
+            if let Some(unit) = fact.unit.as_deref() {
+                terms.push(format!("{}{}", fact.value, unit));
+            }
+            terms
+        })
+        .filter(|term| !term.trim().is_empty())
+        .collect()
+}
+
+fn document_fallback_id() -> String {
+    "document".to_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use odoc_model::{Block, FactKind, ODoc};
+    use odoc_pack::PackRegistry;
+    use std::path::Path;
+
+    fn packs() -> PackRegistry {
+        PackRegistry::load(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../packs"))
+            .expect("packs should load")
+    }
+
+    #[test]
+    fn runs_pack_rules_against_an_empty_document() {
+        let document = ODoc::empty();
+        let report = lint_document(&document, &packs()).expect("rules should run");
+        assert!(
+            report
+                .findings
+                .iter()
+                .any(|finding| finding.id == "gb9704-format/title-required")
+        );
+        assert!(
+            !report
+                .findings
+                .iter()
+                .any(|finding| finding.id == "gb9704-format/wenhao-bracket")
+        );
+    }
+
+    #[test]
+    fn detects_forbidden_language_and_density() {
+        let mut document = ODoc::empty();
+        document.body.title.text = "测试".to_owned();
+        document.body.blocks = vec![Block::paragraph(
+            "请相关部门走深走实、凝心聚力、开拓创新。".to_owned(),
+        )];
+        let report = lint_document(&document, &packs()).expect("rules should run");
+        assert!(
+            report
+                .findings
+                .iter()
+                .any(|finding| finding.id.starts_with("renmin-style/vague-actor"))
+        );
+        assert!(
+            report
+                .findings
+                .iter()
+                .any(|finding| finding.id.starts_with("renmin-style/slogan-density"))
+        );
+    }
+
+    #[test]
+    fn flags_unverified_numbers() {
+        let mut document = ODoc::empty();
+        document.body.blocks = vec![Block::paragraph("购置15万元设备。".to_owned())];
+        let report = fact_check_document(&document).expect("fact check should run");
+        assert_eq!(report.unresolved_tokens, 1);
+        document.facts.facts.push(Fact::from_user_input(
+            FactKind::Data,
+            "15".to_owned(),
+            Some("万元".to_owned()),
+            None,
+            None,
+        ));
+        let verified = fact_check_document(&document).expect("fact check should run");
+        assert_eq!(verified.unresolved_tokens, 0);
+    }
+}

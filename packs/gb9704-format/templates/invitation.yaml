@@ -1,0 +1,18 @@
+doc_type: invitation
+required:
+  main_recipients: true
+blocks:
+  - type: paragraph
+    role: invitation
+    guidance: 明确邀请对象、活动名称和邀请事由
+  - type: heading
+    level: l1
+    title: 时间地点
+    role: logistics
+  - type: heading
+    level: l1
+    title: 活动安排
+    role: agenda
+  - type: paragraph
+    role: response
+    guidance: 写明回执期限、联系人和联系方式

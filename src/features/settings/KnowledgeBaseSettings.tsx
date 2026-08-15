@@ -1,0 +1,522 @@
+import {
+  Check,
+  Database,
+  Eye,
+  EyeOff,
+  KeyRound,
+  LoaderCircle,
+  Radio,
+  RefreshCw,
+  SearchCheck,
+  Trash2,
+  Unplug,
+} from "lucide-react";
+import { FormEvent, ReactNode, useEffect, useState } from "react";
+import type { KbConfig, KbProviderKind } from "../../lib/kb";
+import {
+  defaultKbConfig,
+  deleteKbFnsToken,
+  deleteKbFnsWsToken,
+  deleteKbMcpToken,
+  hasKbFnsToken,
+  hasKbFnsWsToken,
+  hasKbMcpToken,
+  ipcErrorMessage,
+  kbClearIndex,
+  kbIndexState,
+  kbRebuildIndex,
+  kbSearch,
+  kbSyncOnce,
+  loadKbConfig,
+  saveKbConfig,
+  setKbFnsToken,
+  setKbFnsWsToken,
+  setKbMcpToken,
+  type KbIndexProgress,
+} from "../../lib/ipc";
+import type { KbIndexState } from "../../lib/store";
+
+interface KnowledgeBaseSettingsProps {
+  desktop: boolean;
+}
+
+type CredentialKind = "fns" | "fnsWs" | "mcp";
+type Operation = "save" | "test" | "index" | "sync" | "clear";
+
+interface CredentialState {
+  value: string;
+  visible: boolean;
+  exists: boolean;
+  busy: boolean;
+}
+
+const providerOptions: Array<{ value: KbProviderKind; label: string }> = [
+  { value: "fns", label: "FNS" },
+  { value: "local_vault", label: "本地 Vault" },
+  { value: "mcp", label: "MCP" },
+];
+
+const credentialActions = {
+  fns: { save: setKbFnsToken, remove: deleteKbFnsToken },
+  fnsWs: { save: setKbFnsWsToken, remove: deleteKbFnsWsToken },
+  mcp: { save: setKbMcpToken, remove: deleteKbMcpToken },
+} satisfies Record<CredentialKind, {
+  save: (token: string) => Promise<void>;
+  remove: () => Promise<boolean>;
+}>;
+
+const emptyCredential = (): CredentialState => ({
+  value: "",
+  visible: false,
+  exists: false,
+  busy: false,
+});
+
+function formatIndexTime(value: number): string {
+  if (!value) return "尚未建立";
+  return new Date(value).toLocaleString("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function stateLabel(state: KbIndexState | null): string {
+  if (!state) return "未建立";
+  if (state.status === "ready") return "可用";
+  if (state.status === "running") return "重建中";
+  if (state.status === "error") return "异常";
+  return state.status;
+}
+
+export function KnowledgeBaseSettings({ desktop }: KnowledgeBaseSettingsProps) {
+  const [config, setConfig] = useState<KbConfig>(defaultKbConfig);
+  const [loading, setLoading] = useState(true);
+  const [operation, setOperation] = useState<Operation | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [indexState, setIndexState] = useState<KbIndexState | null>(null);
+  const [indexProgress, setIndexProgress] = useState<KbIndexProgress | null>(null);
+  const [credentials, setCredentials] = useState<Record<CredentialKind, CredentialState>>({
+    fns: emptyCredential(),
+    fnsWs: emptyCredential(),
+    mcp: emptyCredential(),
+  });
+  const busy = loading || operation !== null;
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    Promise.all([
+      loadKbConfig(),
+      desktop ? hasKbFnsToken() : Promise.resolve(false),
+      desktop ? hasKbFnsWsToken() : Promise.resolve(false),
+      desktop ? hasKbMcpToken() : Promise.resolve(false),
+      desktop ? kbIndexState() : Promise.resolve(null),
+    ])
+      .then(([loaded, hasFns, hasFnsWs, hasMcp, loadedIndexState]) => {
+        if (!active) return;
+        setConfig(loaded);
+        setIndexState(loadedIndexState);
+        setCredentials((current) => ({
+          fns: { ...current.fns, exists: hasFns },
+          fnsWs: { ...current.fnsWs, exists: hasFnsWs },
+          mcp: { ...current.mcp, exists: hasMcp },
+        }));
+      })
+      .catch((error) => active && setMessage(ipcErrorMessage(error)))
+      .finally(() => active && setLoading(false));
+    return () => {
+      active = false;
+    };
+  }, [desktop]);
+
+  async function persistConfig(): Promise<KbConfig> {
+    const saved = await saveKbConfig(config);
+    setConfig(saved);
+    return saved;
+  }
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    setOperation("save");
+    setMessage(null);
+    try {
+      const saved = await persistConfig();
+      if (desktop) setIndexState(await kbIndexState(saved.vault));
+      setMessage("知识库配置已保存");
+    } catch (error) {
+      setMessage(ipcErrorMessage(error));
+    } finally {
+      setOperation(null);
+    }
+  }
+
+  async function testConnection() {
+    setOperation("test");
+    setMessage(null);
+    try {
+      const saved = await persistConfig();
+      if (!saved.enabled) {
+        setMessage("请先启用知识库");
+        return;
+      }
+      const hits = await kbSearch({
+        vault: null,
+        keyword: "",
+        searchContent: true,
+        searchMode: "content",
+        pathPrefix: null,
+        filters: {},
+        limit: 1,
+      });
+      setMessage(`连接成功${hits.length ? "，已读取素材" : "，当前库中没有素材"}`);
+    } catch (error) {
+      setMessage(ipcErrorMessage(error));
+    } finally {
+      setOperation(null);
+    }
+  }
+
+  async function saveCredential(kind: CredentialKind) {
+    const value = credentials[kind].value.trim();
+    if (!value) return;
+    updateCredential(kind, { busy: true });
+    setMessage(null);
+    try {
+      await credentialActions[kind].save(value);
+      updateCredential(kind, { value: "", exists: true });
+      setMessage("凭据已保存到系统凭据库");
+    } catch (error) {
+      setMessage(ipcErrorMessage(error));
+    } finally {
+      updateCredential(kind, { busy: false });
+    }
+  }
+
+  async function removeCredential(kind: CredentialKind) {
+    updateCredential(kind, { busy: true });
+    setMessage(null);
+    try {
+      await credentialActions[kind].remove();
+      updateCredential(kind, { value: "", exists: false });
+      setMessage("凭据已删除");
+    } catch (error) {
+      setMessage(ipcErrorMessage(error));
+    } finally {
+      updateCredential(kind, { busy: false });
+    }
+  }
+
+  async function rebuildIndex() {
+    setOperation("index");
+    setMessage(null);
+    setIndexProgress({ status: "running", processed: 0, total: 0, path: null, message: null });
+    try {
+      const saved = await persistConfig();
+      if (!saved.enabled || !saved.indexEnabled) {
+        setMessage("请先启用知识库和本地索引");
+        return;
+      }
+      const state = await kbRebuildIndex(undefined, setIndexProgress);
+      setIndexState(state);
+      setMessage(`索引已重建，共收录 ${state.noteCount} 篇素材`);
+    } catch (error) {
+      setMessage(ipcErrorMessage(error));
+    } finally {
+      setOperation(null);
+    }
+  }
+
+  async function syncOnce() {
+    setOperation("sync");
+    setMessage(null);
+    try {
+      const saved = await persistConfig();
+      if (saved.providerKind !== "fns" || !saved.syncEnabled) {
+        setMessage("请先启用 FNS 增量同步");
+        return;
+      }
+      const state = await kbSyncOnce();
+      setIndexState(state);
+      setMessage(`同步完成，当前游标 ${state.lastCursor}`);
+    } catch (error) {
+      setMessage(ipcErrorMessage(error));
+    } finally {
+      setOperation(null);
+    }
+  }
+
+  async function clearIndex() {
+    if (!window.confirm("确定清理当前知识库的本地索引吗？知识库原始笔记不会被删除。")) return;
+    setOperation("clear");
+    setMessage(null);
+    try {
+      await kbClearIndex(config.vault || undefined);
+      setIndexState(null);
+      setIndexProgress(null);
+      setMessage("本地索引已清理");
+    } catch (error) {
+      setMessage(ipcErrorMessage(error));
+    } finally {
+      setOperation(null);
+    }
+  }
+
+  function updateCredential(kind: CredentialKind, patch: Partial<CredentialState>) {
+    setCredentials((current) => ({
+      ...current,
+      [kind]: { ...current[kind], ...patch },
+    }));
+  }
+
+  function credentialEditor(kind: CredentialKind, label: string, placeholder: string): ReactNode {
+    const credential = credentials[kind];
+    return (
+      <div className="credential-panel" key={kind}>
+        <div className="settings-group">
+          <label htmlFor={`kb-${kind}-token`}>{label}</label>
+          <div className="secret-input">
+            <KeyRound size={15} />
+            <input
+              id={`kb-${kind}-token`}
+              type={credential.visible ? "text" : "password"}
+              value={credential.value}
+              onChange={(event) => updateCredential(kind, { value: event.target.value })}
+              disabled={!desktop || credential.busy}
+              autoComplete="new-password"
+              placeholder={credential.exists ? "已保存，输入新值可替换" : placeholder}
+            />
+            <button
+              className="icon-button tiny"
+              type="button"
+              onClick={() => updateCredential(kind, { visible: !credential.visible })}
+              disabled={!desktop || credential.busy}
+              title={credential.visible ? "隐藏凭据" : "显示凭据"}
+              aria-label={credential.visible ? "隐藏凭据" : "显示凭据"}
+            >
+              {credential.visible ? <EyeOff size={14} /> : <Eye size={14} />}
+            </button>
+          </div>
+        </div>
+        <div className="credential-actions">
+          <span className={`chip ${credential.exists ? "chip-ok" : "chip-neutral"}`}>
+            {credential.busy ? "处理中" : credential.exists ? "已保存" : "无凭据"}
+          </span>
+          <button
+            className="icon-button tiny"
+            type="button"
+            onClick={() => void removeCredential(kind)}
+            disabled={!desktop || !credential.exists || credential.busy}
+            title="删除凭据"
+            aria-label={`删除${label}`}
+          >
+            <Trash2 size={14} />
+          </button>
+          <button
+            className="command-button"
+            type="button"
+            onClick={() => void saveCredential(kind)}
+            disabled={!desktop || !credential.value.trim() || credential.busy}
+          >
+            <KeyRound size={14} />
+            保存
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const progressValue = indexProgress?.total
+    ? Math.min(100, Math.round((indexProgress.processed / indexProgress.total) * 100))
+    : 0;
+
+  return (
+    <form className="settings-form knowledge-form" onSubmit={submit}>
+      <label className="toggle-row">
+        <span>
+          <b>启用知识库</b>
+          <small>历史公文与政策素材</small>
+        </span>
+        <input
+          type="checkbox"
+          checked={config.enabled}
+          onChange={(event) => setConfig({ ...config, enabled: event.target.checked })}
+          disabled={busy}
+        />
+      </label>
+
+      <div className="settings-group">
+        <label>接入方式</label>
+        <div className="segmented-control kb-provider-control">
+          {providerOptions.map((option) => (
+            <button
+              className={config.providerKind === option.value ? "is-active" : ""}
+              type="button"
+              onClick={() => setConfig({ ...config, providerKind: option.value })}
+              disabled={busy}
+              key={option.value}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="provider-field-grid">
+        <div className="settings-group">
+          <label htmlFor="kb-vault">Vault 名称</label>
+          <input
+            id="kb-vault"
+            value={config.vault}
+            onChange={(event) => setConfig({ ...config, vault: event.target.value })}
+            placeholder="政务资料库"
+            maxLength={256}
+            required={config.enabled}
+          />
+        </div>
+        {config.providerKind === "local_vault" ? (
+          <div className="settings-group">
+            <label htmlFor="kb-local-path">Vault 目录</label>
+            <input
+              id="kb-local-path"
+              value={config.localPath}
+              onChange={(event) => setConfig({ ...config, localPath: event.target.value })}
+              placeholder="/data/ObsidianVault"
+              required={config.enabled}
+            />
+          </div>
+        ) : (
+          <div className="settings-group">
+            <label htmlFor={config.providerKind === "fns" ? "kb-base-url" : "kb-mcp-url"}>
+              {config.providerKind === "fns" ? "FNS 服务地址" : "MCP 地址"}
+            </label>
+            <input
+              id={config.providerKind === "fns" ? "kb-base-url" : "kb-mcp-url"}
+              type="url"
+              value={config.providerKind === "fns" ? config.baseUrl : config.mcpUrl}
+              onChange={(event) => setConfig(config.providerKind === "fns"
+                ? { ...config, baseUrl: event.target.value }
+                : { ...config, mcpUrl: event.target.value })}
+              placeholder={config.providerKind === "fns"
+                ? "http://127.0.0.1:9000"
+                : "http://127.0.0.1:9000/api/mcp"}
+              required={config.enabled}
+            />
+          </div>
+        )}
+      </div>
+
+      {config.providerKind === "fns" && (
+        <div className="credential-stack">
+          {credentialEditor("fns", "REST token", "输入带 REST 权限的 token")}
+          {credentialEditor("fnsWs", "WebSocket token", "输入带 p:ws 权限的 token")}
+        </div>
+      )}
+      {config.providerKind === "mcp" && credentialEditor("mcp", "MCP token", "输入 Bearer token")}
+
+      <div className="knowledge-options">
+        <label className="toggle-row">
+          <span><b>本地索引</b><small>离线缓存与全文检索</small></span>
+          <input
+            type="checkbox"
+            checked={config.indexEnabled}
+            onChange={(event) => setConfig({ ...config, indexEnabled: event.target.checked })}
+            disabled={busy}
+          />
+        </label>
+        <label className="toggle-row">
+          <span><b>自动打标</b><small>补全文种、年份与主题字段</small></span>
+          <input
+            type="checkbox"
+            checked={config.autoTaggingEnabled}
+            onChange={(event) => setConfig({ ...config, autoTaggingEnabled: event.target.checked })}
+            disabled={busy || !config.indexEnabled}
+          />
+        </label>
+        <label className="toggle-row">
+          <span><b>增量同步</b><small>FNS WebSocket 变更游标</small></span>
+          <input
+            type="checkbox"
+            checked={config.syncEnabled}
+            onChange={(event) => setConfig({ ...config, syncEnabled: event.target.checked })}
+            disabled={busy || config.providerKind !== "fns" || !config.indexEnabled}
+          />
+        </label>
+      </div>
+
+      <section className="index-panel" aria-label="本地索引状态">
+        <header>
+          <span><Database size={14} /> 本地索引</span>
+          <span className={`chip ${indexState?.status === "ready" ? "chip-ok" : "chip-neutral"}`}>
+            {stateLabel(indexState)}
+          </span>
+        </header>
+        <div className="index-metrics">
+          <span><b>{indexState?.noteCount ?? 0}</b> 篇素材</span>
+          <span><b>{indexState?.chunkCount ?? 0}</b> 个片段</span>
+          <span><b>{indexState?.lastCursor ?? 0}</b> 同步游标</span>
+          <span>{formatIndexTime(indexState?.updatedAt ?? 0)}</span>
+        </div>
+        {indexState?.errorMessage && <div className="index-error">{indexState.errorMessage}</div>}
+        {indexProgress && operation === "index" && (
+          <div className="index-progress">
+            <progress max={100} value={progressValue} />
+            <span>{indexProgress.total ? `${indexProgress.processed} / ${indexProgress.total}` : "正在读取素材"}</span>
+            {indexProgress.path && <small>{indexProgress.path}</small>}
+          </div>
+        )}
+        <div className="index-actions">
+          <button
+            className="command-button"
+            type="button"
+            onClick={() => void rebuildIndex()}
+            disabled={!desktop || busy || !config.enabled || !config.indexEnabled}
+          >
+            {operation === "index" ? <LoaderCircle className="spin" size={14} /> : <RefreshCw size={14} />}
+            重建索引
+          </button>
+          <button
+            className="command-button"
+            type="button"
+            onClick={() => void syncOnce()}
+            disabled={!desktop || busy || config.providerKind !== "fns" || !config.syncEnabled}
+          >
+            {operation === "sync" ? <LoaderCircle className="spin" size={14} /> : <Radio size={14} />}
+            立即同步
+          </button>
+          <button
+            className="icon-button small danger-action"
+            type="button"
+            onClick={() => void clearIndex()}
+            disabled={!desktop || busy || !indexState}
+            title="清理本地索引"
+            aria-label="清理本地索引"
+          >
+            <Trash2 size={14} />
+          </button>
+        </div>
+      </section>
+
+      <div className="provider-status" role="status">
+        {!desktop && <span><Unplug size={13} /> 桌面应用中可连接知识库和保存凭据</span>}
+        {message && <span>{message}</span>}
+      </div>
+      <footer className="modal-footer">
+        <button
+          className="command-button"
+          type="button"
+          onClick={() => void testConnection()}
+          disabled={!desktop || busy || !config.enabled}
+        >
+          {operation === "test" ? <LoaderCircle className="spin" size={14} /> : <SearchCheck size={14} />}
+          测试连接
+        </button>
+        <button className="command-button primary" type="submit" disabled={busy}>
+          {operation === "save" ? <LoaderCircle className="spin" size={14} /> : <Check size={15} />}
+          保存配置
+        </button>
+      </footer>
+    </form>
+  );
+}

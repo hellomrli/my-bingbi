@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="Bingbi app icon">
+  <rect width="1024" height="1024" rx="184" fill="#fcfcfa"/>
+  <rect x="26" y="26" width="972" height="972" rx="158" fill="none" stroke="#d8d6cf" stroke-width="24"/>
+  <path d="M278 220h468c36 0 65 29 65 65v274c0 36-29 65-65 65H278c-36 0-65-29-65-65V285c0-36 29-65 65-65Z" fill="#e2eef4"/>
+  <path d="M331 309h362M331 407h362M331 505h230" fill="none" stroke="#1b5e7e" stroke-linecap="round" stroke-width="46"/>
+  <path d="m731 425 87 87-241 241-116 29 29-116 241-241Z" fill="#1b5e7e"/>
+  <path d="m731 425 87 87 41-41c24-24 24-63 0-87l-1-1c-24-24-63-24-87 0l-40 42Z" fill="#141821"/>
+  <path d="m461 782 29-116 87 87-116 29Z" fill="#141821"/>
+  <rect x="688" y="702" width="174" height="174" rx="12" fill="#c8362b"/>
+  <path d="M730 746h90M730 788h90M730 830h90" fill="none" stroke="#fcfcfa" stroke-linecap="square" stroke-width="18"/>
+</svg>

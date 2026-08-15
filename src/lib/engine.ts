@@ -1,0 +1,70 @@
+import { Channel, invoke } from "@tauri-apps/api/core";
+import type {
+  DraftEvent,
+  DraftOutcome,
+  Score,
+} from "./generated/engine";
+
+export type { Score };
+import type { DocumentType } from "./odoc";
+import { isDesktopRuntime } from "./ipc";
+
+/** The persisted draft pipeline order used by both the engine and workbench UI. */
+export const draftStages = [
+  "doctype",
+  "facts",
+  "retrieve",
+  "outline",
+  "draft",
+  "deai",
+  "lint",
+  "factcheck",
+  "score",
+] as const;
+
+export type DraftStageId = (typeof draftStages)[number];
+
+export const draftStageLabels: Record<DraftStageId, string> = {
+  doctype: "文种",
+  facts: "事实",
+  retrieve: "检索",
+  outline: "骨架",
+  draft: "起草",
+  deai: "降 AI 味",
+  lint: "校验",
+  factcheck: "事实回查",
+  score: "评分",
+};
+
+export * from "./generated/engine";
+
+export interface DraftStartInput {
+  documentId: string;
+  material: string;
+  providerId: string;
+  confirmedDocType?: DocumentType | null;
+}
+
+/** Starts the persisted desktop drafting pipeline and forwards ordered stage events. */
+export async function startDraft(
+  input: DraftStartInput,
+  onEvent: (event: DraftEvent) => void,
+): Promise<DraftOutcome> {
+  if (!isDesktopRuntime()) {
+    throw {
+      code: "model_runtime_unavailable",
+      message: "模型调用仅在桌面应用中可用。",
+    };
+  }
+  const channel = new Channel<DraftEvent>();
+  channel.onmessage = onEvent;
+  return invoke<DraftOutcome>("draft_start", {
+    request: {
+      documentId: input.documentId,
+      material: input.material,
+      providerId: input.providerId,
+      confirmedDocType: input.confirmedDocType ?? null,
+    },
+    onEvent: channel,
+  });
+}
