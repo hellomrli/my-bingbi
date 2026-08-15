@@ -313,7 +313,7 @@ async fn apply_update<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(),
             message: "当前已是最新版本。",
         })?;
     update
-        .download_and_install(|_| {}, |_| {})
+        .download_and_install(|_bytes, _total| {}, || {})
         .await
         .map_err(|_| IpcError {
         code: "update_install_failed",
