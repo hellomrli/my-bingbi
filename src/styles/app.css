@@ -1663,6 +1663,76 @@ textarea::placeholder {
   text-align: center;
 }
 
+.pack-list {
+  display: grid;
+  gap: 8px;
+}
+
+.pack-card {
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  padding: 10px;
+}
+
+.pack-card.is-enabled {
+  border-color: var(--ok-soft, var(--line-strong));
+}
+
+.pack-card-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.pack-card-main input[type="checkbox"] {
+  margin-top: 3px;
+}
+
+.pack-card-text {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+  flex: 1;
+}
+
+.pack-card-text strong {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.pack-card-text strong svg {
+  color: var(--ink-3);
+}
+
+.pack-card-meta,
+.pack-card-description {
+  color: var(--ink-3);
+  font-size: var(--fs-micro);
+}
+
+.pack-card-capabilities {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.pack-empty {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink-3);
+  font-size: var(--fs-micro);
+  padding: 12px 4px;
+}
+
+.settings-hint {
+  color: var(--ink-3);
+  font-size: var(--fs-micro);
+}
+
 .version-layout {
   display: grid;
   min-width: 0;

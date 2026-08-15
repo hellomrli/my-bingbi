@@ -30,8 +30,9 @@ import {
 import type { ProviderKind, ProviderProfile, ProviderProfileInput } from "../../lib/llm";
 import type { AppConfig, AppTheme } from "../../lib/store";
 import { KnowledgeBaseSettings } from "./KnowledgeBaseSettings";
+import { PackSettings } from "./PackSettings";
 
-type SettingsTab = "general" | "providers" | "knowledge";
+type SettingsTab = "general" | "providers" | "knowledge" | "packs";
 
 interface SettingsDialogProps {
   open: boolean;
@@ -318,6 +319,9 @@ export function SettingsDialog({ open, config, onClose, onSave }: SettingsDialog
             <button className={tab === "knowledge" ? "is-active" : ""} type="button" onClick={() => setTab("knowledge")}>
               知识库
             </button>
+            <button className={tab === "packs" ? "is-active" : ""} type="button" onClick={() => setTab("packs")}>
+              知识包
+            </button>
           </nav>
           {tab === "general" ? (
             <form className="settings-form" onSubmit={submitGeneral}>
@@ -596,6 +600,14 @@ export function SettingsDialog({ open, config, onClose, onSave }: SettingsDialog
                 <div className="modal-empty">{providerBusy ? "正在加载" : "没有可用的模型服务"}</div>
               )}
             </form>
+          ) : tab === "packs" ? (
+            <PackSettings
+              activePackIds={draft.activePackIds}
+              onSave={async (activePackIds) => {
+                await onSave({ ...draft, activePackIds });
+                onClose();
+              }}
+            />
           ) : <KnowledgeBaseSettings desktop={desktop} />}
         </div>
       </section>
