@@ -29,11 +29,12 @@
 ## 特性
 
 - **跨平台** — Windows / Linux，Tauri 2 构建，安装包体积小、内存占用低
-- **对接 Obsidian** — 主通道走 [Fast Note Sync Service](https://github.com/haierkeys/fast-note-sync-service) REST API，复用其 SQLite FTS5 全文检索与双链接口；也支持直读 vault 目录离线兜底，WebSocket 增量订阅待补
-- **模型可插拔** — OpenAI 兼容（DeepSeek / 通义 / Kimi / 智谱 / vLLM 自建）、Anthropic、Ollama 本地模型。可按流水线阶段分配不同模型：便宜模型做提取，强模型做起草
+- **对接 Obsidian** — 主通道走 [Fast Note Sync Service](https://github.com/haierkeys/fast-note-sync-service) REST API，复用其 SQLite FTS5 全文检索与双链接口；WebSocket 增量订阅已接入（后台同步守护 + 设置页开关）；也支持直读 vault 目录离线兜底
+- **模型可插拔** — 内置 DeepSeek / Claude（Anthropic）预设并支持上游模型嗅探；OpenAI 兼容（通义 / Kimi / 智谱 / vLLM 自建）、Ollama 本地模型。可按流水线阶段分配不同模型：便宜模型做提取，强模型做起草
 - **涉密可控** — 密级达到秘密及以上时强制走本地模型，密钥存系统 Keyring，全本地存储，无遥测
-- **知识包机制** — 公文规范、文种模板、校验规则都是可装卸的 Skill Pack，可自建"本单位公文包"
-- **严格排版** — 按 GB/T 9704-2012 导出 docx：版心 156×225mm、天头 37mm、订口 28mm、行距 28pt 固定值、每面 22 行 × 28 字
+- **知识包机制** — 公文规范、文种模板、校验规则都是可装卸的 Skill Pack，设置页可启用/停用；用户包目录（`config_dir/packs`）支持自建"本单位公文包"，首个空目录自动放入 `local-corpus` 示例包
+- **严格排版** — 按 GB/T 9704-2012 导出 docx：版心 156×225mm、天头 37mm、订口 28mm、行距 28pt 固定值、每面 22 行 × 28 字；支持机关 Word 模板注入与 LibreOffice PDF
+- **成本可见** — 每次起草/仿写/审核的 token 消耗按会话记录，最近文档可打开「起草记录」查看阶段明细
 
 ---
 
@@ -64,18 +65,13 @@ npm run dev
 运行测试和生产构建：
 
 ```bash
-npm test
+npm test                 # 前端单元测试（vitest + testing-library）
+npm run test:e2e         # Playwright 端到端（浏览器模式）
 npm run build
 cd src-tauri
-cargo test -p odoc-model
-cargo test -p odoc-store
-cargo test -p odoc-llm
-cargo test -p odoc-pack
-cargo test -p odoc-lint
-cargo test -p odoc-export
-cargo test -p odoc-kb
-cargo test -p odoc-engine
-cargo clippy -p odoc-lint -p odoc-export -p odoc-kb -p odoc-engine -p odoc-store --all-targets -- -D warnings
+cargo test --workspace   # 除 Tauri 壳外的全部 crate（壳需桌面系统依赖，见下）
+cargo clippy --workspace --all-targets -- -D warnings
+cargo fmt --all -- --check
 ```
 
 桌面版还需要 Tauri 2 的平台依赖。Ubuntu/Debian 安装 `libwebkit2gtk-4.1-dev`、`libayatana-appindicator3-dev`、`librsvg2-dev`、`libxdo-dev`、`libssl-dev`、`patchelf` 和构建工具后运行：
@@ -130,12 +126,14 @@ git push origin v0.1.0
   └─ odoc-store    SQLite + Keyring
 ```
 
-起草流水线共九步，每步可单独重跑：
+起草流水线共九步，每步可单独重跑（工具栏点击已完成阶段）：
 
 ```
 文种路由 → 事实提取 → 知识库检索 → 骨架生成 → 逐节起草
         → 降 AI 味 → 规则校验 → 事实回查 → 质量评分
 ```
+
+仿写流水线在检索与骨架之间多一步**笔法分析**：指定一篇范文，提炼其结构、句式、用词与惯用表述，再按新材料起草。
 
 审核流水线共五步，只出意见、不改原文：
 
@@ -145,11 +143,22 @@ git push origin v0.1.0
 
 ---
 
+## 快速开始
+
+1. **首次运行**：桌面版会弹出三步引导（欢迎 → 选择模型服务 → 开始使用），设置页可随时重新查看。
+2. **起草**：左侧填入公文要素（文种/机关/发文字号等）与起草材料，选择模型服务后点「开始起草」；提供范文并点「仿写起草」可模仿本单位笔法。
+3. **质检与回查**：右侧面板显示规则校验与事实回查结果，模型编造的数字/日期/文号标红，存在错误时导出被阻断。
+4. **审核**：工具栏「审核」对当前公文跑只读体检，报告可逐条定位到正文。
+5. **交付**：导出符合 GB/T 9704-2012 的 DOCX（或 PDF / 打印），版本历史可 diff 与恢复。
+6. **自定义规则**：把规则 YAML 写进用户包目录（设置 → 知识包页可见路径）中 `local-corpus` 示例包的 `rules/`，重启生效。
+
+---
+
 ## 状态
 
-**M2 知识库接入进行中。** 当前已有可运行的 React 工作台、A4 国标版心预览、结构化正文编辑、首批确定性质检、事实台账、最近文档、自动保存、版本快照与版本 diff；桌面版可在内核完成 lint/factcheck 后导出简化 DOCX，浏览器版保留 ODoc JSON 导出。桌面版另有**审核模式**：对已打开或导入的公文跑一遍只读的五步体检流水线，产出可逐条定位的报告。Rust 侧已建立 Tauri 壳、`odoc-model` AST、`odoc-store` SQLite 持久化、`odoc-llm` 的 OpenAI 兼容/Ollama 普通及流式调用，以及 FNS/本地 Vault 知识库配置、Keyring token、素材检索和起草阶段有界召回。模型凭据只存系统 Keyring，秘密及以上公文在内核层禁止远程调用；FNS 远程检索同样受密级边界保护。Linux `.deb` 已在本机生成并校验，CI 已加入原生 Linux/Windows 壳检查与安装包产物。
+**M0–M4 主线功能已闭环。** 当前已有可运行的 React 工作台、A4 国标版心预览、结构化正文编辑、确定性质检、事实台账与回查标红、最近文档、自动保存、版本快照与 diff、起草/仿写/审核三种流水线、单步重跑、会话成本记录、知识包管理、字体检测、首次运行引导与自定义规则；桌面版可导出 GB/T 9704 严格 docx（支持机关模板注入）与 LibreOffice PDF。Rust 侧已建立 Tauri 壳、`odoc-model` AST、`odoc-store` SQLite 持久化、`odoc-llm` 多 Provider、`odoc-kb`（FNS/本地 Vault/MCP + WebSocket 增量订阅）、`odoc-lint` 规则引擎与 `odoc-export` 排版。模型凭据只存系统 Keyring，秘密及以上公文在内核层禁止远程调用。Linux `.deb` 与本机验证、CI 原生 Linux/Windows 壳检查与安装包产物均已就绪。
 
-首次 CI 运行完成 Windows NSIS 产物验证后，M0 即可闭环；M1 的知识包、流水线、规则引擎和导出按 [`docs/PLAN.md` §9](docs/PLAN.md) 继续实现。
+剩余项：M2 检索管线的双链扩展与向量重排、M4 自动更新。里程碑明细见 [`docs/PLAN.md` §9](docs/PLAN.md)。
 
 ---
 
