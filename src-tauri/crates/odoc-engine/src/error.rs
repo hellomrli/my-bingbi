@@ -23,6 +23,8 @@ pub enum EngineError {
     Cancelled,
     #[error("draft journal is unavailable")]
     Journal,
+    #[error("draft session or stage run was not found")]
+    SessionNotFound,
     #[error("deterministic lint failed: {0}")]
     Lint(#[from] odoc_lint::LintError),
     #[error("knowledge-base retrieval failed: {0}")]
@@ -43,6 +45,7 @@ impl EngineError {
             Self::LowConfidence(_) => "document_type_confirmation_required",
             Self::Cancelled => "draft_cancelled",
             Self::Journal => "store_unavailable",
+            Self::SessionNotFound => "session_not_found",
             Self::Lint(_) => "lint_unavailable",
             Self::KnowledgeBase(error) => error.code(),
             Self::Llm(error) => error.code(),
@@ -59,6 +62,7 @@ impl EngineError {
             Self::LowConfidence(_) => "材料不足以确定文种，请先确认文种。",
             Self::Cancelled => "起草已取消。",
             Self::Journal => "本地起草记录暂不可用。",
+            Self::SessionNotFound => "未找到对应的起草记录或该阶段尚未运行。",
             Self::Lint(_) => "确定性质检暂不可用。",
             Self::KnowledgeBase(error) => error.user_message(),
             Self::Llm(error) => error.user_message(),

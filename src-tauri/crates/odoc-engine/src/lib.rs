@@ -8,9 +8,9 @@ pub use pipeline::{DraftEngine, DraftJournal, NoopJournal, PipelineDefinition};
 pub use review::ReviewEngine;
 pub use types::{
     DraftEvent, DraftInput, DraftOutcome, FactExtraction, FactInput, LoopBackConfig,
-    LowConfidenceAction, PipelineKind, ReviewDimension, ReviewEvent, ReviewFinding, ReviewInput,
-    ReviewOutcome, ReviewReport, Score, ScoreDimension, StageConfig, StageKind, StageOutput,
-    StageStatus, StageSummary, TypeDecision,
+    LowConfidenceAction, PipelineKind, RerunOutcome, ReviewDimension, ReviewEvent, ReviewFinding,
+    ReviewInput, ReviewOutcome, ReviewReport, Score, ScoreDimension, StageConfig, StageKind,
+    StageOutput, StageStatus, StageSummary, TypeDecision,
 };
 
 pub fn typescript_bindings() -> String {
@@ -30,6 +30,7 @@ pub fn typescript_bindings() -> String {
         Score::decl(),
         StageOutput::decl(),
         StageSummary::decl(),
+        RerunOutcome::decl(),
         DraftInput::decl(),
         DraftOutcome::decl(),
         DraftEvent::decl(),

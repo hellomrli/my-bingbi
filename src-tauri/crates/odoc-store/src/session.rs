@@ -198,6 +198,83 @@ impl DocumentStore {
             .ok_or_else(|| StoreError::SessionNotFound(session_id.to_owned()))
     }
 
+    /// Loads the input snapshot of the latest run of one pipeline stage.
+    ///
+    /// Used by single-stage rerun to reconstruct the exact context the stage originally saw.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for invalid IDs or a `SQLite` read failure.
+    pub fn stage_run_input(
+        &self,
+        session_id: &str,
+        stage_id: &str,
+    ) -> Result<Option<String>, StoreError> {
+        validate_identifier(session_id, MAX_SESSION_ID_BYTES, "session ID")?;
+        validate_identifier(stage_id, MAX_STAGE_ID_BYTES, "stage ID")?;
+        self.connection
+            .query_row(
+                "SELECT input_json FROM stage_runs
+                 WHERE session_id = ?1 AND stage_id = ?2
+                 ORDER BY id DESC LIMIT 1",
+                params![session_id, stage_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(StoreError::from)
+    }
+
+    /// Replaces the output of the latest run of one stage with a re-run result,
+    /// keeping the session token total consistent with the new usage.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for invalid metadata, a missing session or stage run, values
+    /// that overflow, or a `SQLite` write failure.
+    pub fn replace_stage_run(
+        &self,
+        session_id: &str,
+        stage_id: &str,
+        output_json: &str,
+        tokens: u64,
+        duration_ms: u64,
+    ) -> Result<(), StoreError> {
+        validate_identifier(session_id, MAX_SESSION_ID_BYTES, "session ID")?;
+        validate_identifier(stage_id, MAX_STAGE_ID_BYTES, "stage ID")?;
+        validate_json_text(output_json)?;
+        let tokens = i64::try_from(tokens)
+            .map_err(|_| StoreError::InvalidSession("token count overflow".to_owned()))?;
+        let duration_ms = i64::try_from(duration_ms)
+            .map_err(|_| StoreError::InvalidSession("duration overflow".to_owned()))?;
+        let now = unix_millis()?;
+        let transaction = self.connection.unchecked_transaction()?;
+        let target: Option<(i64, i64)> = transaction
+            .query_row(
+                "SELECT id, tokens FROM stage_runs
+                 WHERE session_id = ?1 AND stage_id = ?2
+                 ORDER BY id DESC LIMIT 1",
+                params![session_id, stage_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        let Some((run_id, previous_tokens)) = target else {
+            return Err(StoreError::SessionNotFound(session_id.to_owned()));
+        };
+        transaction.execute(
+            "UPDATE stage_runs SET output_json = ?1, tokens = ?2, duration_ms = ?3, created_at = ?4
+             WHERE id = ?5",
+            params![output_json, tokens, duration_ms, now, run_id],
+        )?;
+        transaction.execute(
+            "UPDATE sessions
+             SET cost_tokens = cost_tokens - ?1 + ?2, updated_at = ?3
+             WHERE id = ?4",
+            params![previous_tokens, tokens, now, session_id],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
     /// Lists completed stage runs for a drafting session in execution order.
     ///
     /// # Errors
@@ -321,6 +398,57 @@ mod tests {
         assert!(matches!(
             store.start_session("session-1", "missing", "draft", "\0"),
             Err(StoreError::InvalidSession(_))
+        ));
+    }
+
+    #[test]
+    fn stage_run_input_and_replace_keep_the_latest_run_consistent() {
+        let mut store = DocumentStore::open_in_memory().expect("store should open");
+        let document = ODoc::empty();
+        store
+            .save_document(&document, Some("initial"))
+            .expect("document should save");
+        store
+            .start_session("session-1", &document.id, "draft", "{}")
+            .expect("session should start");
+        store
+            .record_stage_run(
+                "session-1",
+                "deai",
+                "{\"stage\":\"in\"}",
+                Some("{\"v\":1}"),
+                Some("ollama"),
+                7,
+                12,
+            )
+            .expect("stage should record");
+
+        let input = store
+            .stage_run_input("session-1", "deai")
+            .expect("stage input should load");
+        assert_eq!(input.as_deref(), Some("{\"stage\":\"in\"}"));
+        assert!(
+            store
+                .stage_run_input("session-1", "score")
+                .expect("missing stage input should load")
+                .is_none()
+        );
+
+        store
+            .replace_stage_run("session-1", "deai", "{\"v\":2}", 9, 20)
+            .expect("stage should replace");
+        let summary = store.get_session("session-1").expect("session should load");
+        assert_eq!(summary.cost_tokens, 9);
+        let runs = store
+            .list_stage_runs("session-1")
+            .expect("stage runs should load");
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].tokens, 9);
+        assert_eq!(runs[0].output_json.as_deref(), Some("{\"v\":2}"));
+
+        assert!(matches!(
+            store.replace_stage_run("session-1", "facts", "{}", 1, 1),
+            Err(StoreError::SessionNotFound(_))
         ));
     }
 }

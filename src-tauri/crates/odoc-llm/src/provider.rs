@@ -675,8 +675,7 @@ struct OllamaMessage {
     content: String,
 }
 
-const ANTHROPIC_JSON_MODE_NOTE: &str =
-    "\n只输出合法的 JSON，不要输出任何解释、前缀或前后缀文本。";
+const ANTHROPIC_JSON_MODE_NOTE: &str = "\n只输出合法的 JSON，不要输出任何解释、前缀或前后缀文本。";
 
 #[derive(Serialize)]
 struct AnthropicRequest<'a> {

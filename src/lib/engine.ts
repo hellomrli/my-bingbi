@@ -2,10 +2,11 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import type {
   DraftEvent,
   DraftOutcome,
+  RerunOutcome,
   Score,
 } from "./generated/engine";
 
-export type { Score };
+export type { RerunOutcome, Score };
 import type { DocumentType } from "./odoc";
 import { isDesktopRuntime } from "./ipc";
 
@@ -65,6 +66,31 @@ export async function startDraft(
       providerId: input.providerId,
       confirmedDocType: input.confirmedDocType ?? null,
     },
+    onEvent: channel,
+  });
+}
+
+/**
+ * Re-executes one draft stage from the input snapshot its session recorded.
+ *
+ * The kernel replays the same provider, knowledge pack and knowledge-base configuration the
+ * stage originally ran with; the caller only names the session and the stage.
+ */
+export async function rerunStage(
+  sessionId: string,
+  stageId: DraftStageId,
+  onEvent: (event: DraftEvent) => void,
+): Promise<RerunOutcome> {
+  if (!isDesktopRuntime()) {
+    throw {
+      code: "model_runtime_unavailable",
+      message: "模型调用仅在桌面应用中可用。",
+    };
+  }
+  const channel = new Channel<DraftEvent>();
+  channel.onmessage = onEvent;
+  return invoke<RerunOutcome>("rerun_stage", {
+    request: { sessionId, stageId },
     onEvent: channel,
   });
 }

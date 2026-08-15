@@ -138,6 +138,22 @@ button:disabled {
   color: var(--ink-2);
 }
 
+.pipeline-stage.is-rerunnable {
+  background: none;
+  border: none;
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.pipeline-stage.is-rerunnable:hover {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.pipeline-stage.is-rerunnable svg {
+  opacity: 0.65;
+}
+
 .pipeline-stage.is-active {
   color: var(--accent);
   font-weight: 600;

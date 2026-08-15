@@ -8,6 +8,7 @@ import {
   History,
   Moon,
   Printer,
+  RotateCw,
   Save,
   ScanSearch,
   Settings,
@@ -45,6 +46,9 @@ interface ToolbarProps {
   canReview?: boolean;
   canArchive?: boolean;
   hasVersions?: boolean;
+  /** Completed draft stages call this to re-run that single stage from its recorded snapshot. */
+  onRerunStage?: (stage: DraftStageId) => void;
+  canRerunStage?: boolean;
 }
 
 export function Toolbar({
@@ -71,6 +75,8 @@ export function Toolbar({
   canReview = false,
   canArchive = false,
   hasVersions = false,
+  onRerunStage,
+  canRerunStage = false,
 }: ToolbarProps) {
   const document = useWorkbenchStore((state) => state.document);
   const showGrid = useWorkbenchStore((state) => state.showGrid);
@@ -109,11 +115,28 @@ export function Toolbar({
                 : index < 2 && !current && completed.length === 0
                   ? "is-ready"
                   : "";
-          return (
-          <span className={`pipeline-stage ${stateClass}`.trim()} key={stage.id}>
-            <i />
-            {stage.label}
-          </span>
+          const rerunnable = !reviewing
+            && canRerunStage
+            && stateClass === "is-complete"
+            && current === null;
+          return rerunnable ? (
+            <button
+              className={`pipeline-stage is-complete is-rerunnable`}
+              type="button"
+              key={stage.id}
+              onClick={() => onRerunStage?.(stage.id as DraftStageId)}
+              title={`仅重跑「${stage.label}」这一阶段`}
+              aria-label={`重跑${stage.label}阶段`}
+            >
+              <i />
+              {stage.label}
+              <RotateCw size={10} />
+            </button>
+          ) : (
+            <span className={`pipeline-stage ${stateClass}`.trim()} key={stage.id}>
+              <i />
+              {stage.label}
+            </span>
           );
         })}
       </div>

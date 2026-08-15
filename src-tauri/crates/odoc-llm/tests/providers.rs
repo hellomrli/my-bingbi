@@ -382,10 +382,7 @@ async fn anthropic_chat_uses_messages_endpoint_with_api_key_header() {
         security_level: SecurityLevel::Internal,
     };
 
-    let response = client
-        .chat(request)
-        .await
-        .expect("chat should succeed");
+    let response = client.chat(request).await.expect("chat should succeed");
     assert_eq!(response.content, "收到");
     assert_eq!(response.finish_reason.as_deref(), Some("end_turn"));
     assert_eq!(response.usage.expect("usage should exist").total_tokens, 10);
@@ -393,8 +390,16 @@ async fn anthropic_chat_uses_messages_endpoint_with_api_key_header() {
     let request = request_rx.await.expect("request should be captured");
     let request = String::from_utf8_lossy(&request);
     assert!(request.starts_with("POST /v1/messages HTTP/1.1\r\n"));
-    assert!(request.to_ascii_lowercase().contains("x-api-key: top-secret-key"));
-    assert!(request.to_ascii_lowercase().contains("anthropic-version: 2023-06-01"));
+    assert!(
+        request
+            .to_ascii_lowercase()
+            .contains("x-api-key: top-secret-key")
+    );
+    assert!(
+        request
+            .to_ascii_lowercase()
+            .contains("anthropic-version: 2023-06-01")
+    );
     let body = request.split("\r\n\r\n").nth(1).expect("body should exist");
     assert!(!body.contains("top-secret-key"));
     assert!(body.contains("\"model\":\"test-model\""));
@@ -407,14 +412,10 @@ async fn anthropic_chat_uses_messages_endpoint_with_api_key_header() {
 
 #[tokio::test]
 async fn anthropic_stream_parses_content_block_deltas_and_stop() {
-    let event_one =
-        "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":8,\"output_tokens\":0}}}\n\n";
-    let event_two =
-        "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"你\"}}\n\n";
-    let event_three =
-        "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"好\"}}\n\n";
-    let event_four =
-        "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":4,\"input_tokens\":8}}\n\n";
+    let event_one = "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":8,\"output_tokens\":0}}}\n\n";
+    let event_two = "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"你\"}}\n\n";
+    let event_three = "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"好\"}}\n\n";
+    let event_four = "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":4,\"input_tokens\":8}}\n\n";
     let event_five = "data: {\"type\":\"message_stop\"}\n\n";
     let split = event_two.find('你').expect("UTF-8 content should exist") + 1;
     let (base_url, _request_rx, task) = spawn_server(MockResponse {
@@ -543,6 +544,10 @@ async fn list_models_parses_each_provider_kind() {
     let request = request_rx.await.expect("request should arrive");
     let request = String::from_utf8_lossy(&request);
     assert!(request.starts_with("GET /v1/models HTTP/1.1\r\n"));
-    assert!(request.to_ascii_lowercase().contains("x-api-key: top-secret-key"));
+    assert!(
+        request
+            .to_ascii_lowercase()
+            .contains("x-api-key: top-secret-key")
+    );
     task.await.expect("mock server should finish");
 }

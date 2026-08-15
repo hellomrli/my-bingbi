@@ -98,6 +98,24 @@ pub enum StageId {
     Export,
 }
 
+impl StageId {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Doctype => "doctype",
+            Self::Facts => "facts",
+            Self::Retrieve => "retrieve",
+            Self::Outline => "outline",
+            Self::Draft => "draft",
+            Self::Deai => "deai",
+            Self::Lint => "lint",
+            Self::Factcheck => "factcheck",
+            Self::Review => "review",
+            Self::Score => "score",
+            Self::Export => "export",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StageBinding {
     pub stage: StageId,

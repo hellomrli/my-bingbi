@@ -154,6 +154,21 @@ pub struct StageSummary {
     pub duration_ms: u64,
 }
 
+/// The result of re-executing a single pipeline stage from its recorded snapshot.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct RerunOutcome {
+    pub session_id: String,
+    pub stage_id: StageId,
+    pub document: ODoc,
+    pub output: StageOutput,
+    #[serde(default)]
+    pub lint_report: Option<LintReport>,
+    #[serde(default)]
+    pub fact_check_report: Option<FactCheckReport>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(rename_all = "camelCase")]

@@ -1,6 +1,7 @@
 use odoc_engine::{
     DraftEngine, DraftEvent, DraftInput, DraftJournal, DraftOutcome, EngineError,
-    PipelineDefinition, ReviewEngine, ReviewEvent, ReviewInput, ReviewOutcome, StageOutput,
+    PipelineDefinition, RerunOutcome, ReviewEngine, ReviewEvent, ReviewInput, ReviewOutcome,
+    StageOutput, StageStatus,
 };
 use odoc_export::{
     ExportError, Gb9704Style, print_html, read_docx, validate_docx_template, write_docx_with_style,
@@ -16,7 +17,7 @@ use odoc_llm::{
     LlmProvider, ProviderClient, ProviderKind, ProviderProfile, ProviderProfileInput,
 };
 use odoc_model::{DocumentType, ODoc, SecurityLevel};
-use odoc_pack::{PackRegistry, PackSummary};
+use odoc_pack::{PackRegistry, PackSummary, StageId};
 use odoc_store::{
     AppConfig, DEFAULT_SECRET_SERVICE, DocumentStore, DocumentSummary, DocumentVersionSummary,
     KeyringSecretStore, SaveDocumentResult, SecretError, SecretStore, StoreError,
@@ -58,6 +59,13 @@ struct ReviewStartRequest {
     /// Optional reviewer focus, e.g. 只看格式.
     #[serde(default)]
     focus: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RerunStageRequest {
+    session_id: String,
+    stage_id: String,
 }
 
 const MAX_DRAFT_MATERIAL_BYTES: usize = 2 * 1024 * 1024;
@@ -182,6 +190,39 @@ impl DraftJournal for StoreDraftJournal<'_> {
             .and_then(|store| {
                 store
                     .complete_session(session_id, outcome_json)
+                    .map_err(map_store_error)
+            })
+            .map_err(|_| EngineError::Journal)
+    }
+
+    fn stage_input(&self, session_id: &str, stage_id: &str) -> Result<Option<String>, EngineError> {
+        lock_documents(self.state)
+            .and_then(|store| {
+                store
+                    .stage_run_input(session_id, stage_id)
+                    .map_err(map_store_error)
+            })
+            .map_err(|_| EngineError::Journal)
+    }
+
+    fn rerun_record(
+        &self,
+        session_id: &str,
+        stage_id: &str,
+        output: &StageOutput,
+    ) -> Result<(), EngineError> {
+        let output_json = serde_json::to_string(output).map_err(|_| EngineError::Journal)?;
+        let tokens = output.usage.map_or(0, |usage| usage.total_tokens);
+        lock_documents(self.state)
+            .and_then(|store| {
+                store
+                    .replace_stage_run(
+                        session_id,
+                        stage_id,
+                        &output_json,
+                        u64::from(tokens),
+                        output.duration_ms,
+                    )
                     .map_err(map_store_error)
             })
             .map_err(|_| EngineError::Journal)
@@ -937,6 +978,103 @@ async fn draft_start<R: tauri::Runtime>(
     }
 }
 
+/// Re-executes one draft-pipeline stage from the input snapshot recorded in its session.
+///
+/// The provider, pipeline, knowledge pack and knowledge-base configuration are taken from the
+/// session record rather than from the request, so a rerun always reproduces the configuration
+/// the stage originally ran with. Only draft sessions support single-stage rerun; a review must
+/// be re-run as a whole because the kernel cannot rebuild a review-only pipeline stage here.
+#[tauri::command]
+async fn rerun_stage<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, AppState>,
+    packs: State<'_, PackRegistry>,
+    request: RerunStageRequest,
+    on_event: Channel<DraftEvent>,
+) -> Result<RerunOutcome, IpcError> {
+    validate_rerun_stage_request(&request)?;
+    let session = lock_documents(&state)?
+        .get_session(&request.session_id)
+        .map_err(map_store_error)?;
+    if session.pipeline != "draft" {
+        return Err(IpcError {
+            code: "rerun_unsupported",
+            message: "审核流程暂不支持单步重跑，请整体重新审核。",
+        });
+    }
+    let document = lock_documents(&state)?
+        .get_document(&session.document_id)
+        .map_err(map_store_error)?;
+    let provider_id = lock_documents(&state)?
+        .list_stage_runs(&request.session_id)
+        .map_err(map_store_error)?
+        .into_iter()
+        .rev()
+        .find(|run| run.stage_id == request.stage_id)
+        .and_then(|run| run.provider)
+        .ok_or(IpcError {
+            code: "rerun_unavailable",
+            message: "该阶段尚未运行过，或其模型服务已被删除。",
+        })?;
+    let client = provider_client(&state, &provider_id)?;
+    if !document.meta.security_level.allows_remote_provider() && !client.capabilities().is_local {
+        return Err(IpcError {
+            code: "model_security_blocked",
+            message: "当前密级仅允许本地模型，无法重跑该阶段。",
+        });
+    }
+    let pipeline_path = builtin_pipeline_path(&app, "draft.yaml").map_err(map_tauri_error)?;
+    let pipeline = PipelineDefinition::load(pipeline_path).map_err(map_engine_error)?;
+    let journal = StoreDraftJournal {
+        state: &state,
+        provider_id,
+    };
+    let knowledge_base = optional_kb_provider(&state, document.meta.security_level)?;
+    let mut engine =
+        DraftEngine::new(pipeline, &packs, &client, &journal).map_err(map_engine_error)?;
+    if let Some(knowledge_base) = knowledge_base.as_deref() {
+        engine = engine.with_knowledge_base(knowledge_base);
+    }
+    let stage_id: StageId = serde_json::from_value(serde_json::Value::String(
+        request.stage_id.clone(),
+    ))
+    .map_err(|_| IpcError {
+        code: "invalid_input",
+        message: "起草阶段标识无效。",
+    })?;
+    let (event_sender, mut event_receiver) = tokio::sync::mpsc::channel(32);
+    let engine_run = engine.rerun_stage(&request.session_id, stage_id, Some(event_sender));
+    tokio::pin!(engine_run);
+    let mut document_saved = false;
+    loop {
+        tokio::select! {
+            result = &mut engine_run => {
+                let mut outcome = result.map_err(map_engine_error)?;
+                // A rerun of an old session may replace a document that has since been
+                // re-drafted; never let the replacement regress the stored revision.
+                if outcome.document.revision < document.revision {
+                    outcome.document.revision = document.revision;
+                }
+                if !document_saved {
+                    save_draft_document(&state, &outcome.document)?;
+                }
+                while let Some(event) = event_receiver.recv().await {
+                    persist_completed_event(&state, &event, &mut document_saved)?;
+                    on_event.send(event).map_err(|_| map_engine_error(EngineError::Cancelled))?;
+                }
+                return Ok(outcome);
+            }
+            event = event_receiver.recv() => match event {
+                Some(event) => {
+                    persist_completed_event(&state, &event, &mut document_saved)?;
+                    on_event.send(event).map_err(|_| map_engine_error(EngineError::Cancelled))?;
+                }
+                None => return Err(map_engine_error(EngineError::Cancelled)),
+            }
+        }
+    }
+}
+
 /// Inspects a stored document and streams the review report back to the workbench.
 ///
 /// The document is read from the store rather than taken from the request, so a review always
@@ -1162,6 +1300,25 @@ fn validate_draft_start_request(request: &DraftStartRequest) -> Result<(), IpcEr
         })
     } else {
         Ok(())
+    }
+}
+
+fn validate_rerun_stage_request(request: &RerunStageRequest) -> Result<(), IpcError> {
+    const MAX_STAGE_ID_BYTES: usize = 64;
+    let session_valid = !request.session_id.is_empty() && request.session_id.len() <= 128;
+    let stage_valid = !request.stage_id.is_empty()
+        && request.stage_id.len() <= MAX_STAGE_ID_BYTES
+        && request
+            .stage_id
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_');
+    if session_valid && stage_valid {
+        Ok(())
+    } else {
+        Err(IpcError {
+            code: "invalid_input",
+            message: "起草阶段重跑请求格式无效。",
+        })
     }
 }
 
@@ -2152,6 +2309,7 @@ pub fn run() {
             chat_with_provider,
             chat_stream_with_provider,
             draft_start,
+            rerun_stage,
             review_start,
             export_docx,
             import_docx,
@@ -2298,6 +2456,113 @@ mod tests {
             ..empty
         };
         assert!(validate_draft_start_request(&oversized).is_err());
+    }
+
+    #[test]
+    fn rerun_journal_reads_and_replaces_stage_snapshots() {
+        let mut store = DocumentStore::open_in_memory().expect("store should open");
+        let document = ODoc::empty();
+        store
+            .save_document(&document, Some("initial"))
+            .expect("document should save");
+        store
+            .start_session("session-1", &document.id, "draft", "{}")
+            .expect("session should start");
+        store
+            .record_stage_run(
+                "session-1",
+                "deai",
+                "{\"stage\":\"in\"}",
+                Some("{\"v\":1}"),
+                Some("ollama"),
+                7,
+                12,
+            )
+            .expect("stage should record");
+        let state = AppState {
+            documents: Mutex::new(store),
+            secrets: Box::new(odoc_store::MemorySecretStore::default()),
+            kb_sync_generation: tokio::sync::watch::channel(0_u64).0,
+        };
+        let journal = StoreDraftJournal {
+            state: &state,
+            provider_id: "ollama".to_owned(),
+        };
+        assert_eq!(
+            journal
+                .stage_input("session-1", "deai")
+                .expect("input should load")
+                .as_deref(),
+            Some("{\"stage\":\"in\"}")
+        );
+        assert!(
+            journal
+                .stage_input("session-1", "score")
+                .expect("missing input should load")
+                .is_none()
+        );
+        let output = StageOutput {
+            stage_id: StageId::Deai,
+            status: StageStatus::Completed,
+            content: "新内容".to_owned(),
+            json: None,
+            usage: Some(odoc_llm::TokenUsage {
+                prompt_tokens: 1,
+                completion_tokens: 2,
+                total_tokens: 3,
+            }),
+            duration_ms: 9,
+        };
+        journal
+            .rerun_record("session-1", "deai", &output)
+            .expect("rerun should record");
+        let runs = state
+            .documents
+            .lock()
+            .expect("store lock")
+            .list_stage_runs("session-1")
+            .expect("stage runs should load");
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].tokens, 3);
+        assert_eq!(runs[0].duration_ms, 9);
+        assert_eq!(
+            runs[0].output_json.as_deref(),
+            Some(&serde_json::to_string(&output).expect("output should serialize"))
+        );
+        assert_eq!(
+            state
+                .documents
+                .lock()
+                .expect("store lock")
+                .get_session("session-1")
+                .expect("session should load")
+                .cost_tokens,
+            3
+        );
+    }
+
+    #[test]
+    fn rerun_request_rejects_unknown_or_oversized_stage_ids() {
+        let valid = RerunStageRequest {
+            session_id: "session-1".to_owned(),
+            stage_id: "factcheck".to_owned(),
+        };
+        assert!(validate_rerun_stage_request(&valid).is_ok());
+        let unknown_stage = RerunStageRequest {
+            stage_id: "Deai".to_owned(),
+            ..valid
+        };
+        assert!(validate_rerun_stage_request(&unknown_stage).is_err());
+        let oversized = RerunStageRequest {
+            stage_id: "x".repeat(65),
+            ..valid
+        };
+        assert!(validate_rerun_stage_request(&oversized).is_err());
+        let empty_session = RerunStageRequest {
+            session_id: String::new(),
+            ..valid
+        };
+        assert!(validate_rerun_stage_request(&empty_session).is_err());
     }
 
     #[test]

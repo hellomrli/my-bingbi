@@ -11,7 +11,7 @@ import { ReviewReportDialog } from "./features/review/ReviewReportDialog";
 import { SettingsDialog } from "./features/settings/SettingsDialog";
 import { Toolbar } from "./features/workbench/Toolbar";
 import { countChineseCharacters, documentTypeLabels } from "./lib/document";
-import { draftStageLabels, startDraft, type DraftStageId } from "./lib/engine";
+import { draftStageLabels, draftStages, rerunStage, startDraft, type DraftStageId } from "./lib/engine";
 import { isReviewStage, startReview, type ReviewStageId } from "./lib/review";
 import {
   backendVersion,
@@ -35,7 +35,7 @@ import {
   type ArchiveResult,
   type RestoreVersionResult,
 } from "./lib/ipc";
-import type { DraftEvent, DraftOutcome, ReviewEvent, ReviewOutcome, TypeDecision } from "./lib/generated/engine";
+import type { DraftEvent, DraftOutcome, RerunOutcome, ReviewEvent, ReviewOutcome, TypeDecision } from "./lib/generated/engine";
 import type { FactCheckReport, LintReport } from "./lib/generated/lint";
 import type { ProviderProfile } from "./lib/llm";
 import type { KbConfig } from "./lib/kb";
@@ -106,6 +106,8 @@ function App() {
   const [draftStage, setDraftStage] = useState<DraftStageId | null>(null);
   const [completedStages, setCompletedStages] = useState<DraftStageId[]>([]);
   const [failedStage, setFailedStage] = useState<DraftStageId | null>(null);
+  // The session id returned by the last completed draft; single stages can be re-run from it.
+  const [draftSessionId, setDraftSessionId] = useState<string | null>(null);
   const [draftText, setDraftText] = useState("");
   const [draftError, setDraftError] = useState<string | null>(null);
   const [typeDecision, setTypeDecision] = useState<TypeDecision | null>(null);
@@ -405,6 +407,7 @@ function App() {
   }
 
   function applyDraftOutcome(outcome: DraftOutcome) {
+    setDraftSessionId(outcome.sessionId);
     setDocument(outcome.document, Date.now());
     setUnverifiedTokens(unverifiedTokenMap(outcome.factCheckReport?.findings ?? []));
     setEngineLintReport(outcome.lintReport);
@@ -416,6 +419,30 @@ function App() {
     setDraftError(null);
     setDraftStage(null);
     setFailedStage(null);
+    void refreshDocuments().then((loaded) => {
+      setSavedVersion(loaded.find((item) => item.id === outcome.document.id)?.versionCount ?? null);
+    });
+  }
+
+  function applyRerunOutcome(outcome: RerunOutcome, rerunStageId: DraftStageId) {
+    setDocument(outcome.document, Date.now());
+    // Only lint and factcheck report fresh results from a rerun; the panel falls back to live
+    // deterministic findings while their reports are null, which also drops stale highlights.
+    setUnverifiedTokens(unverifiedTokenMap(outcome.factCheckReport?.findings ?? []));
+    setEngineLintReport(outcome.lintReport);
+    setEngineFactCheckReport(outcome.factCheckReport);
+    setEngineReportRevision(outcome.document.revision);
+    setTypeDecision(null);
+    setConfirmedDocType(null);
+    setDraftText("");
+    setDraftError(null);
+    setDraftStage(null);
+    setFailedStage(null);
+    // Downstream stages ran against the previous output, so their records no longer hold.
+    const rerunIndex = draftStages.indexOf(rerunStageId);
+    setCompletedStages((current) =>
+      current.filter((stage) => draftStages.indexOf(stage) <= rerunIndex),
+    );
     void refreshDocuments().then((loaded) => {
       setSavedVersion(loaded.find((item) => item.id === outcome.document.id)?.versionCount ?? null);
     });
@@ -468,6 +495,7 @@ function App() {
     setFailedStage(null);
     setDraftText("");
     setDraftError(null);
+    setDraftSessionId(null);
     if (nextConfirmedDocType === null) {
       setTypeDecision(null);
       setConfirmedDocType(null);
@@ -487,6 +515,39 @@ function App() {
       // Older runtimes may return the outcome without delivering the final channel event.
       if (useWorkbenchStore.getState().document.id !== outcome.document.id || useWorkbenchStore.getState().document.revision !== outcome.document.revision) {
         applyDraftOutcome(outcome);
+      }
+    } catch (error) {
+      const code = errorCode(error);
+      if (code === "document_type_confirmation_required") {
+        setDraftError(null);
+      } else {
+        setDraftError(ipcErrorMessage(error));
+        if (isDraftStage(draftStage ?? "")) setFailedStage(draftStage);
+      }
+    } finally {
+      setDrafting(false);
+    }
+  }
+
+  async function rerunPipelineStage(stageId: DraftStageId) {
+    if (drafting || reviewing || !draftSessionId) return;
+    if (!desktopRuntime) {
+      setDraftError("模型调用仅在桌面应用中可用。");
+      return;
+    }
+    setDrafting(true);
+    setPipeline("draft");
+    setDraftStage(stageId);
+    setFailedStage(null);
+    setDraftError(null);
+    if (stageId === "draft" || stageId === "deai") setDraftText("");
+    try {
+      const outcome = await rerunStage(draftSessionId, stageId, handleDraftEvent);
+      // The rerun streams only stage events, so the returned document is applied here; the
+      // content guard keeps this idempotent if a future runtime also delivers a final event.
+      const current = useWorkbenchStore.getState().document;
+      if (current.id !== outcome.document.id || JSON.stringify(current) !== JSON.stringify(outcome.document)) {
+        applyRerunOutcome(outcome, stageId);
       }
     } catch (error) {
       const code = errorCode(error);
@@ -709,6 +770,8 @@ function App() {
         canReview={canReview}
         canArchive={desktopRuntime && kbConfig.enabled}
         hasVersions={savedVersion !== null && savedVersion > 0}
+        onRerunStage={(stage) => void rerunPipelineStage(stage)}
+        canRerunStage={desktopRuntime && !drafting && !reviewing && draftSessionId !== null}
       />
       <input
         ref={importInputRef}

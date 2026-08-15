@@ -1,8 +1,8 @@
 use crate::error::EngineError;
 use crate::types::{
     DraftEvent, DraftInput, DraftOutcome, FactExtraction, FactInput, LowConfidenceAction,
-    PipelineKind, Score, StageConfig, StageKind, StageOutput, StageStatus, StageSummary,
-    TypeDecision,
+    PipelineKind, RerunOutcome, Score, StageConfig, StageKind, StageOutput, StageStatus,
+    StageSummary, TypeDecision,
 };
 use futures_util::future::try_join_all;
 use odoc_kb::{KbError, KbHit, KbProvider, KbQuery, SearchMode, hybrid_search};
@@ -231,6 +231,38 @@ pub trait DraftJournal: Send + Sync {
     ///
     /// Returns [`EngineError::Journal`] when persistence is unavailable.
     fn complete(&self, session_id: &str, outcome_json: &str) -> Result<(), EngineError>;
+
+    /// Loads the input snapshot recorded for the latest run of one stage.
+    ///
+    /// Returns `None` when the session or that stage has no recorded run. The default
+    /// implementation is a no-op so stateless journals remain usable.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EngineError::Journal`] when persistence is unavailable.
+    fn stage_input(
+        &self,
+        _session_id: &str,
+        _stage_id: &str,
+    ) -> Result<Option<String>, EngineError> {
+        Ok(None)
+    }
+
+    /// Replaces the latest run of one stage with a re-run result.
+    ///
+    /// The default implementation is a no-op so stateless journals remain usable.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EngineError::Journal`] when persistence is unavailable.
+    fn rerun_record(
+        &self,
+        _session_id: &str,
+        _stage_id: &str,
+        _output: &StageOutput,
+    ) -> Result<(), EngineError> {
+        Ok(())
+    }
 }
 
 #[derive(Debug, Default)]
@@ -417,6 +449,63 @@ impl<'a, J: DraftJournal, P: LlmProvider + ?Sized> DraftEngine<'a, J, P> {
         )
         .await?;
         Ok(outcome)
+    }
+
+    /// Re-executes one stage from its recorded input snapshot and applies the new
+    /// output to the stored document.
+    ///
+    /// The stage must have been run at least once; [`EngineError::SessionNotFound`] is
+    /// returned when the journal has no snapshot for it. The re-run uses the same
+    /// pipeline, knowledge pack, provider, and knowledge-base configuration as the
+    /// original run.
+    ///
+    /// # Errors
+    ///
+    /// Returns an engine error for missing snapshots, model failures, invalid model
+    /// output, journal failures, or cancellation.
+    pub async fn rerun_stage(
+        &self,
+        session_id: &str,
+        stage_id: StageId,
+        event_sender: Option<Sender<DraftEvent>>,
+    ) -> Result<RerunOutcome, EngineError> {
+        let snapshot = self
+            .journal
+            .stage_input(session_id, stage_id.as_str())?
+            .ok_or(EngineError::SessionNotFound)?;
+        let stage = self
+            .pipeline
+            .stages
+            .iter()
+            .find(|candidate| candidate.id == stage_id)
+            .ok_or_else(|| invalid_pipeline("rerun stage is not part of this pipeline"))?;
+        let mut context = snapshot_context(&snapshot)?;
+        emit(event_sender.as_ref(), DraftEvent::StageStarted { stage_id }).await?;
+        let started = Instant::now();
+        let mut output = self
+            .execute_stage(stage, &mut context, event_sender.as_ref())
+            .await?;
+        output.duration_ms = elapsed_ms(started);
+        self.journal
+            .rerun_record(session_id, stage_id.as_str(), &output)?;
+        emit(
+            event_sender.as_ref(),
+            DraftEvent::StageCompleted {
+                output: output.clone(),
+            },
+        )
+        .await?;
+        // The snapshot predates the original run's final increment, so the replacement
+        // document counts as one more revision, matching what a full run would produce.
+        context.document.revision = context.document.revision.saturating_add(1);
+        Ok(RerunOutcome {
+            session_id: session_id.to_owned(),
+            stage_id,
+            document: context.document,
+            output,
+            lint_report: context.lint_report,
+            fact_check_report: context.fact_check_report,
+        })
     }
 
     async fn execute_stage(
@@ -884,6 +973,41 @@ fn stage_input_json(stage_id: StageId, context: &RunContext) -> Result<String, E
         "facts": context.facts,
         "packContext": context.pack_context,
     }))?)
+}
+
+/// Rebuilds the stage execution context from a recorded input snapshot.
+fn snapshot_context(snapshot: &str) -> Result<RunContext, EngineError> {
+    let value: serde_json::Value = serde_json::from_str(snapshot)?;
+    let material = value
+        .get("material")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    let document = serde_json::from_value(value.get("document").cloned().unwrap_or_default())?;
+    let facts = serde_json::from_value(value.get("facts").cloned().unwrap_or_default())?;
+    let pack_context = value
+        .get("packContext")
+        .and_then(serde_json::Value::as_array)
+        .map(|entries| {
+            entries
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default();
+    Ok(RunContext {
+        material,
+        confirmed_doc_type: None,
+        document,
+        type_decision: None,
+        facts,
+        pack_context,
+        lint_report: None,
+        fact_check_report: None,
+        score: None,
+        revision_iterations: 0,
+    })
 }
 
 pub(crate) fn json_output<T: serde::Serialize>(
@@ -1500,6 +1624,141 @@ mod tests {
                 .iter()
                 .all(|request| request.security_level == odoc_model::SecurityLevel::Confidential)
         );
+    }
+
+    /// A journal that keeps the input snapshot per session and stage so `rerun_stage` can
+    /// replay it.
+    #[derive(Default)]
+    struct RecordingJournal {
+        inputs: Arc<Mutex<Vec<(String, String, String)>>>,
+        reruns: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl DraftJournal for RecordingJournal {
+        fn start(
+            &self,
+            _session_id: &str,
+            _document_id: &str,
+            _pipeline: &str,
+            _state_json: &str,
+        ) -> Result<(), EngineError> {
+            Ok(())
+        }
+
+        fn record(
+            &self,
+            session_id: &str,
+            input_json: &str,
+            output: &StageOutput,
+        ) -> Result<(), EngineError> {
+            let stage_id = serde_json::to_value(output.stage_id)
+                .ok()
+                .and_then(|value| value.as_str().map(str::to_owned))
+                .unwrap_or_default();
+            self.inputs.lock().expect("input lock").push((
+                session_id.to_owned(),
+                stage_id,
+                input_json.to_owned(),
+            ));
+            Ok(())
+        }
+
+        fn complete(&self, _session_id: &str, _outcome_json: &str) -> Result<(), EngineError> {
+            Ok(())
+        }
+
+        fn stage_input(
+            &self,
+            session_id: &str,
+            stage_id: &str,
+        ) -> Result<Option<String>, EngineError> {
+            Ok(self
+                .inputs
+                .lock()
+                .expect("input lock")
+                .iter()
+                .rev()
+                .find(|(recorded_session, recorded_stage, _)| {
+                    recorded_session == session_id && recorded_stage == stage_id
+                })
+                .map(|(_, _, input)| input.clone()))
+        }
+
+        fn rerun_record(
+            &self,
+            _session_id: &str,
+            _stage_id: &str,
+            output: &StageOutput,
+        ) -> Result<(), EngineError> {
+            self.reruns
+                .lock()
+                .expect("rerun lock")
+                .push(serde_json::to_string(output).unwrap_or_default());
+            Ok(())
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn rerun_stage_replays_the_recorded_snapshot_and_emits_stage_events() {
+        let provider = FakeProvider::default();
+        let pack_registry = packs();
+        let journal = RecordingJournal::default();
+        let engine = DraftEngine::new(pipeline(), &pack_registry, &provider, &journal)
+            .expect("engine should construct");
+        let outcome = engine
+            .run(
+                DraftInput {
+                    material: "申请购置应急排水设备经费，15万元。".to_owned(),
+                    initial_document: None,
+                    confirmed_doc_type: None,
+                },
+                None,
+            )
+            .await
+            .expect("pipeline should complete");
+
+        let requests_before = provider.requests.lock().expect("request lock").len();
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(8);
+        let rerun = engine
+            .rerun_stage(&outcome.session_id, StageId::Deai, Some(sender))
+            .await
+            .expect("stage should rerun");
+        assert_eq!(rerun.stage_id, StageId::Deai);
+        assert_eq!(rerun.session_id, outcome.session_id);
+        assert_eq!(
+            rerun.document.revision, outcome.document.revision,
+            "a rerun counts as one more revision, like a full run"
+        );
+        assert!(
+            provider.requests.lock().expect("request lock").len() > requests_before,
+            "rerun should call the model again"
+        );
+        assert!(matches!(
+            receiver.recv().await,
+            Some(DraftEvent::StageStarted {
+                stage_id: StageId::Deai
+            })
+        ));
+        assert!(matches!(
+            receiver.recv().await,
+            Some(DraftEvent::StageCompleted { output })
+                if output.stage_id == StageId::Deai
+        ));
+        assert_eq!(journal.reruns.lock().expect("rerun lock").len(), 1);
+
+        // Deterministic stages return their reports so the panel can refresh.
+        let lint_rerun = engine
+            .rerun_stage(&outcome.session_id, StageId::Lint, None)
+            .await
+            .expect("lint should rerun");
+        assert!(lint_rerun.lint_report.is_some());
+        assert_eq!(lint_rerun.output.stage_id, StageId::Lint);
+
+        // A session with no recorded snapshot is reported instead of fabricating one.
+        let missing = engine
+            .rerun_stage("missing-session", StageId::Doctype, None)
+            .await;
+        assert!(matches!(missing, Err(EngineError::SessionNotFound)));
     }
 
     #[test]

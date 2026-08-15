@@ -10,6 +10,7 @@ import {
   hasKbFnsToken,
   hasProviderSecret,
   listPackSummaries,
+  listProviderModels,
   listProviderProfiles,
   listDocuments,
   loadKbConfig,
@@ -105,7 +106,9 @@ describe("browser document repository", () => {
 
   it("round-trips only non-sensitive provider metadata in browser preview", async () => {
     const builtins = await listProviderProfiles();
-    expect(builtins.map((profile) => profile.id)).toEqual(expect.arrayContaining(["ollama", "openai-compatible"]));
+    expect(builtins.map((profile) => profile.id)).toEqual(
+      expect.arrayContaining(["ollama", "openai-compatible", "deepseek", "anthropic"]),
+    );
 
     const saved = await saveProviderProfile({
       id: "local-test",
@@ -122,6 +125,7 @@ describe("browser document repository", () => {
 
   it("does not allow model calls to bypass the Rust security boundary", async () => {
     await expect(testProviderConnection("ollama")).rejects.toMatchObject({ code: "model_runtime_unavailable" });
+    await expect(listProviderModels("anthropic")).rejects.toMatchObject({ code: "model_runtime_unavailable" });
   });
 
   it("keeps DOCX export behind the desktop boundary", async () => {

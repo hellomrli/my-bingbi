@@ -31,6 +31,8 @@ export type StageOutput = { stageId: StageId, status: StageStatus, content: stri
 
 export type StageSummary = { stageId: StageId, status: StageStatus, usage: TokenUsage | null, durationMs: number, };
 
+export type RerunOutcome = { sessionId: string, stageId: StageId, document: ODoc, output: StageOutput, lintReport: LintReport | null, factCheckReport: FactCheckReport | null, };
+
 export type DraftInput = { material: string, initialDocument: ODoc | null, confirmedDocType: DocumentType | null, };
 
 export type DraftOutcome = { sessionId: string, document: ODoc, typeDecision: TypeDecision, facts: FactExtraction, stages: Array<StageSummary>, lintReport: LintReport | null, factCheckReport: FactCheckReport | null, score: Score | null, revisionIterations: number, };
