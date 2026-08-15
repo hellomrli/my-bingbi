@@ -800,8 +800,8 @@ CI 用 GitHub Actions matrix（`windows-latest` + `ubuntu-22.04`）交叉产出�
 
 - [ ] `LocalVaultProvider` + `McpProvider`（离线与通用通道）
 - [x] Anthropic Provider（内置预设 + 上游模型嗅探）；成本统计面板（起草记录对话框：token 汇总 + 阶段明细，金额换算待定价表）
-- [x] 知识包管理 UI（启用/停用；安装/更新/自建待补）
-- [ ] 用户自定义规则、自定义机关 docx 模板
+- [x] 知识包管理 UI（启用/停用；用户包目录 + local-corpus 示例包自建；安装/更新待补）
+- [x] 用户自定义规则（编辑示例包 rules/ 或复制为新包，重启生效）、自定义机关 docx 模板（模板注入法 + 设置页上传）
 - [x] 字体检测与映射（FontFaceSet 探测国标字体缺失 + 设置页提示与映射）；首次运行引导（桌面端三步向导：欢迎 → 模型服务 → 开始使用）
 - [ ] 自动更新（tauri-plugin-updater）、崩溃上报（本地）
 - [ ] 文档与示例包
