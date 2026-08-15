@@ -574,7 +574,7 @@ stages:
 - **成本核算**：按 stage 统计 token 与费用。
 - **取消与恢复**：长流程可中断，断点续跑。
 
-**其他流水线**：`polish.yaml`（润色/降 AI 味）、`review.yaml`（审核已有公文，已实现）、`imitate.yaml`（仿写指定范文）。
+**其他流水线**：`polish.yaml`（润色/降 AI 味，已实现：文种路由 → 润色改写 → 规则校验 → 事实回查）、`review.yaml`（审核已有公文，已实现）、`imitate.yaml`（仿写指定范文，已实现）。
 
 流水线用 `kind` 区分阶段集合：`draft`（默认，向后兼容不写该字段的旧定义）必须含 `doctype`/`facts`/`outline`/`draft`；`review` 必须含 `doctype`/`lint`/`factcheck`/`review`/`score`，且**禁止声明任何会改写文档的阶段**（`facts`/`outline`/`draft`/`deai`/`export`）——审核只出意见，不动原文，这条边界在内核校验层强制，而不是靠提示词约束。
 
