@@ -758,7 +758,7 @@ CI 用 GitHub Actions matrix（`windows-latest` + `ubuntu-22.04`）交叉产出�
 
 ### M0 — 骨架与规范（约 2 周）
 
-- [ ] Tauri 2 + React + Vite 工程搭起来，两平台各出一个能跑的包（CI 打通）
+- [ ] Tauri 2 + React + Vite 工程搭起来，两平台各出一个能跑的包（CI 打通）——工程与 CI 矩阵已就绪、Linux `.deb` 本机已验；**仅差一次实际发布**：打 `v*` tag 触发 `release.yml` 产出 Windows NSIS + Linux deb 双平台安装包
 - [x] `odoc-model` 定义完成，`ODOC-SPEC.md` 写清楚，`ts-rs` 类型导出打通
 - [x] `PACK-SPEC.md` 知识包格式定稿
 - [x] SQLite 初始化、配置读写、Keyring 打通
@@ -798,7 +798,7 @@ CI 用 GitHub Actions matrix（`windows-latest` + `ubuntu-22.04`）交叉产出�
 
 ### M4 — 打磨与开放（约 3 周）
 
-- [ ] `LocalVaultProvider` + `McpProvider`（离线与通用通道）
+- [x] `LocalVaultProvider`（直读 vault 目录离线兜底）+ `McpProvider`（StreamableHTTP 通用通道，token 走 Keyring）
 - [x] Anthropic Provider（内置预设 + 上游模型嗅探）；成本统计面板（起草记录对话框：token 汇总 + 阶段明细，金额换算待定价表）
 - [x] 知识包管理 UI（启用/停用；用户包目录 + local-corpus 示例包自建；安装/更新待补）
 - [x] 用户自定义规则（编辑示例包 rules/ 或复制为新包，重启生效）、自定义机关 docx 模板（模板注入法 + 设置页上传）
