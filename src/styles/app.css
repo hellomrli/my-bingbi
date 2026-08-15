@@ -1733,6 +1733,18 @@ textarea::placeholder {
   font-size: var(--fs-micro);
 }
 
+.font-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  border: 1px solid var(--warning, var(--line-strong));
+  border-radius: var(--r-md);
+  padding: 7px 9px;
+  color: var(--ink-2);
+  font-size: var(--fs-micro);
+  line-height: 1.5;
+}
+
 .version-layout {
   display: grid;
   min-width: 0;

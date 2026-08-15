@@ -8,6 +8,7 @@ import {
   Plus,
   RefreshCw,
   ServerCog,
+  ShieldAlert,
   Trash2,
   Unplug,
   X,
@@ -28,6 +29,7 @@ import {
   testProviderConnection,
 } from "../../lib/ipc";
 import type { ProviderKind, ProviderProfile, ProviderProfileInput } from "../../lib/llm";
+import { probeGbFonts, type FontProbe } from "../../lib/fonts";
 import type { AppConfig, AppTheme } from "../../lib/store";
 import { KnowledgeBaseSettings } from "./KnowledgeBaseSettings";
 import { PackSettings } from "./PackSettings";
@@ -91,6 +93,7 @@ export function SettingsDialog({ open, config, onClose, onSave }: SettingsDialog
   const [models, setModels] = useState<string[]>([]);
   const [sniffing, setSniffing] = useState(false);
   const [sniffMessage, setSniffMessage] = useState<string | null>(null);
+  const [fontProbe, setFontProbe] = useState<FontProbe | null>(null);
   const desktop = isDesktopRuntime();
 
   const selectedProfile = useMemo(
@@ -102,6 +105,7 @@ export function SettingsDialog({ open, config, onClose, onSave }: SettingsDialog
     if (!open) return;
     setDraft(structuredClone(config));
     setTab("general");
+    setFontProbe(probeGbFonts());
     setProviderBusy(true);
     setProviderMessage(null);
     setCreatingProvider(false);
@@ -353,6 +357,19 @@ export function SettingsDialog({ open, config, onClose, onSave }: SettingsDialog
               </label>
               <div className="settings-group">
                 <label>字体映射</label>
+                {fontProbe?.supported && fontProbe.missing.length > 0 && (
+                  <div className="font-warning" role="status">
+                    <ShieldAlert size={13} />
+                    系统缺少：{fontProbe.missing.join("、")}。预览使用替代字体，导出的 DOCX 仍写入标准字体名，
+                    请在装有正版字体的机器上定稿，或在下方为缺失字体指定替代字体。
+                  </div>
+                )}
+                {fontProbe && !fontProbe.supported && (
+                  <div className="font-warning">
+                    <ShieldAlert size={13} />
+                    当前运行环境无法探测系统字体，字体提示不可用。
+                  </div>
+                )}
                 <div className="font-mapping-list">
                   {fontFields.map((font) => (
                     <label className="font-mapping-row" key={font}>
