@@ -2800,9 +2800,11 @@ mod tests {
         assert_eq!(runs[0].duration_ms, 9);
         assert_eq!(
             runs[0].output_json.as_deref(),
-            serde_json::to_string(&output)
-                .expect("output should serialize")
-                .as_deref()
+            Some(
+                serde_json::to_string(&output)
+                    .expect("output should serialize")
+                    .as_str()
+            )
         );
         assert_eq!(
             state
