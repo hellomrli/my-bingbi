@@ -39,12 +39,12 @@ export type DraftEvent = { "type": "stage_started", stageId: StageId, } | { "typ
 
 export type ReviewDimension = "format" | "content" | "language" | "logic" | "detail";
 
-export type ReviewFinding = { dimension: ReviewDimension, severity: Severity,
+export type ReviewFinding = { dimension: ReviewDimension, severity: Severity, 
 /**
  * `ODoc` node the finding points at, or `None` when it concerns the document as a whole.
  * The engine clears identifiers that are absent from the reviewed document.
  */
-nodeId: string | null, message: string,
+nodeId: string | null, message: string, 
 /**
  * Text quoted from the document, kept so the reader can judge the finding without hunting.
  */
@@ -52,17 +52,17 @@ evidence: string | null, suggestion: string | null, };
 
 export type ReviewReport = { findings: Array<ReviewFinding>, summary: string, missingInformation: Array<string>, };
 
-export type ReviewInput = { document: ODoc,
+export type ReviewInput = { document: ODoc, 
 /**
  * Optional reviewer focus, e.g. 只看格式. Empty means a full inspection.
  */
 focus: string | null, };
 
-export type ReviewOutcome = { sessionId: string, documentId: string, revision: number,
+export type ReviewOutcome = { sessionId: string, documentId: string, revision: number, 
 /**
  * Type declared on the document under review.
  */
-declaredDocType: DocumentType,
+declaredDocType: DocumentType, 
 /**
  * Type the model considers correct for this content.
  */
