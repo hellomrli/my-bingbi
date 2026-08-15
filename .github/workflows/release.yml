@@ -81,7 +81,9 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           BINGBI_UPDATER_PUBKEY: ${{ secrets.TAURI_SIGNING_PUBLIC_KEY }}
-        run: npm run tauri -- build --bundles ${{ matrix.bundle }} --ci --config '{"bundle":{"createUpdaterArtifacts":true}}'
+        run: |
+          CONFIG=$(printf '{"bundle":{"createUpdaterArtifacts":true},"plugins":{"updater":{"pubkey":"%s"}}}' "$BINGBI_UPDATER_PUBKEY")
+          npm run tauri -- build --bundles ${{ matrix.bundle }} --ci --config "$CONFIG"
 
       - name: Upload installer and update artifacts
         uses: actions/upload-artifact@v4
