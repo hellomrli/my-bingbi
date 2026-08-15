@@ -2,7 +2,7 @@
 
 import type { SecurityLevel } from "./bindings";
 
-export type ProviderKind = "openai_compatible" | "ollama";
+export type ProviderKind = "openai_compatible" | "anthropic" | "ollama";
 
 export type ProviderProfileInput = { id: string, kind: ProviderKind, displayName: string, baseUrl: string, model: string, enabled: boolean, };
 

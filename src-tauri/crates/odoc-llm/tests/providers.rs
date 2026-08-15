@@ -348,3 +348,201 @@ async fn timeout_cancellation_and_security_checks_happen_safely() {
         Err(LlmError::Cancelled)
     );
 }
+
+#[tokio::test]
+async fn anthropic_chat_uses_messages_endpoint_with_api_key_header() {
+    let body = r#"{"id":"msg_01","type":"message","role":"assistant","model":"test-model","content":[{"type":"text","text":"收到"}],"stop_reason":"end_turn","stop_sequence":null,"usage":{"input_tokens":8,"output_tokens":2}}"#;
+    let (base_url, request_rx, task) = spawn_server(MockResponse {
+        status: "200 OK",
+        content_type: "application/json",
+        chunks: vec![body.as_bytes().to_vec()],
+        initial_delay: Duration::ZERO,
+        chunk_delay: Duration::ZERO,
+    })
+    .await;
+    let client = ProviderClient::new(
+        profile(ProviderKind::Anthropic, format!("{base_url}/v1")),
+        Some("top-secret-key".to_owned()),
+    )
+    .expect("client should build");
+    let request = ChatRequest {
+        messages: vec![
+            ChatMessage {
+                role: ChatRole::System,
+                content: "你是公文助手".to_owned(),
+            },
+            ChatMessage {
+                role: ChatRole::User,
+                content: "请回复：收到".to_owned(),
+            },
+        ],
+        temperature: Some(0.2),
+        max_tokens: Some(4096),
+        json_mode: false,
+        security_level: SecurityLevel::Internal,
+    };
+
+    let response = client
+        .chat(request)
+        .await
+        .expect("chat should succeed");
+    assert_eq!(response.content, "收到");
+    assert_eq!(response.finish_reason.as_deref(), Some("end_turn"));
+    assert_eq!(response.usage.expect("usage should exist").total_tokens, 10);
+
+    let request = request_rx.await.expect("request should be captured");
+    let request = String::from_utf8_lossy(&request);
+    assert!(request.starts_with("POST /v1/messages HTTP/1.1\r\n"));
+    assert!(request.to_ascii_lowercase().contains("x-api-key: top-secret-key"));
+    assert!(request.to_ascii_lowercase().contains("anthropic-version: 2023-06-01"));
+    let body = request.split("\r\n\r\n").nth(1).expect("body should exist");
+    assert!(!body.contains("top-secret-key"));
+    assert!(body.contains("\"model\":\"test-model\""));
+    assert!(body.contains("\"max_tokens\":4096"));
+    assert!(body.contains("\"system\":\"你是公文助手\""));
+    assert!(!body.contains("temperature"));
+    assert!(!body.contains("\"role\":\"system\""));
+    task.await.expect("mock server should finish");
+}
+
+#[tokio::test]
+async fn anthropic_stream_parses_content_block_deltas_and_stop() {
+    let event_one =
+        "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":8,\"output_tokens\":0}}}\n\n";
+    let event_two =
+        "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"你\"}}\n\n";
+    let event_three =
+        "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"好\"}}\n\n";
+    let event_four =
+        "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":4,\"input_tokens\":8}}\n\n";
+    let event_five = "data: {\"type\":\"message_stop\"}\n\n";
+    let split = event_two.find('你').expect("UTF-8 content should exist") + 1;
+    let (base_url, _request_rx, task) = spawn_server(MockResponse {
+        status: "200 OK",
+        content_type: "text/event-stream",
+        chunks: vec![
+            event_one.as_bytes().to_vec(),
+            event_two.as_bytes()[..split].to_vec(),
+            event_two.as_bytes()[split..].to_vec(),
+            event_three.as_bytes().to_vec(),
+            event_four.as_bytes().to_vec(),
+            event_five.as_bytes().to_vec(),
+        ],
+        initial_delay: Duration::ZERO,
+        chunk_delay: Duration::from_millis(5),
+    })
+    .await;
+    let client = ProviderClient::new(
+        profile(ProviderKind::Anthropic, base_url),
+        Some("top-secret-key".to_owned()),
+    )
+    .expect("client should build");
+    let (sender, mut receiver) = tokio::sync::mpsc::channel(8);
+
+    client
+        .chat_stream(chat_request(SecurityLevel::Internal), sender)
+        .await
+        .expect("stream should complete");
+    let mut deltas = Vec::new();
+    while let Some(delta) = receiver.recv().await {
+        deltas.push(delta);
+    }
+    assert_eq!(
+        deltas
+            .iter()
+            .map(|delta| delta.content.as_str())
+            .collect::<String>(),
+        "你好"
+    );
+    assert_eq!(
+        deltas
+            .last()
+            .and_then(|delta| delta.finish_reason.as_deref()),
+        Some("end_turn")
+    );
+    assert_eq!(
+        deltas
+            .last()
+            .and_then(|delta| delta.usage.as_ref())
+            .expect("usage should exist")
+            .total_tokens,
+        12
+    );
+    task.await.expect("mock server should finish");
+}
+
+#[tokio::test]
+async fn list_models_parses_each_provider_kind() {
+    let openai_body = r#"{"object":"list","data":[{"id":"gpt-4o"},{"id":"gpt-4.1-mini"}]}"#;
+    let (base_url, request_rx, task) = spawn_server(MockResponse {
+        status: "200 OK",
+        content_type: "application/json",
+        chunks: vec![openai_body.as_bytes().to_vec()],
+        initial_delay: Duration::ZERO,
+        chunk_delay: Duration::ZERO,
+    })
+    .await;
+    let client = ProviderClient::new(
+        profile(ProviderKind::OpenAiCompatible, format!("{base_url}/v1")),
+        None,
+    )
+    .expect("client should build");
+    let models = client
+        .list_models()
+        .await
+        .expect("openai model list should parse");
+    assert_eq!(models, ["gpt-4.1-mini", "gpt-4o"]);
+    let request = request_rx.await.expect("request should arrive");
+    assert!(String::from_utf8_lossy(&request).starts_with("GET /v1/models HTTP/1.1\r\n"));
+    task.await.expect("mock server should finish");
+    drop(models);
+
+    let ollama_body = r#"{"models":[{"name":"qwen3:8b"},{"name":"llama3:8b"}]}"#;
+    let (base_url, request_rx, task) = spawn_server(MockResponse {
+        status: "200 OK",
+        content_type: "application/json",
+        chunks: vec![ollama_body.as_bytes().to_vec()],
+        initial_delay: Duration::ZERO,
+        chunk_delay: Duration::ZERO,
+    })
+    .await;
+    let client = ProviderClient::new(profile(ProviderKind::Ollama, base_url), None)
+        .expect("client should build");
+    assert_eq!(
+        client
+            .list_models()
+            .await
+            .expect("ollama model list should parse"),
+        ["llama3:8b", "qwen3:8b"]
+    );
+    let request = request_rx.await.expect("request should arrive");
+    assert!(String::from_utf8_lossy(&request).starts_with("GET /api/tags HTTP/1.1\r\n"));
+    task.await.expect("mock server should finish");
+
+    let anthropic_body = r#"{"data":[{"id":"claude-opus-5"},{"id":"claude-sonnet-5"}]}"#;
+    let (base_url, request_rx, task) = spawn_server(MockResponse {
+        status: "200 OK",
+        content_type: "application/json",
+        chunks: vec![anthropic_body.as_bytes().to_vec()],
+        initial_delay: Duration::ZERO,
+        chunk_delay: Duration::ZERO,
+    })
+    .await;
+    let client = ProviderClient::new(
+        profile(ProviderKind::Anthropic, base_url),
+        Some("top-secret-key".to_owned()),
+    )
+    .expect("client should build");
+    assert_eq!(
+        client
+            .list_models()
+            .await
+            .expect("anthropic model list should parse"),
+        ["claude-opus-5", "claude-sonnet-5"]
+    );
+    let request = request_rx.await.expect("request should arrive");
+    let request = String::from_utf8_lossy(&request);
+    assert!(request.starts_with("GET /v1/models HTTP/1.1\r\n"));
+    assert!(request.to_ascii_lowercase().contains("x-api-key: top-secret-key"));
+    task.await.expect("mock server should finish");
+}

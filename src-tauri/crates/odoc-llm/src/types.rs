@@ -18,6 +18,9 @@ pub enum ProviderKind {
     #[serde(rename = "openai_compatible")]
     #[ts(rename = "openai_compatible")]
     OpenAiCompatible,
+    #[serde(rename = "anthropic")]
+    #[ts(rename = "anthropic")]
+    Anthropic,
     Ollama,
 }
 
@@ -25,6 +28,7 @@ impl ProviderKind {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::OpenAiCompatible => "openai_compatible",
+            Self::Anthropic => "anthropic",
             Self::Ollama => "ollama",
         }
     }
@@ -36,6 +40,7 @@ impl FromStr for ProviderKind {
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value {
             "openai_compatible" => Ok(Self::OpenAiCompatible),
+            "anthropic" => Ok(Self::Anthropic),
             "ollama" => Ok(Self::Ollama),
             _ => Err(LlmError::InvalidConfiguration),
         }
@@ -125,6 +130,24 @@ pub fn builtin_provider_profiles() -> Vec<ProviderProfile> {
             display_name: "OpenAI 兼容".to_owned(),
             base_url: "https://api.openai.com".to_owned(),
             model: "gpt-4.1-mini".to_owned(),
+            enabled: true,
+            is_local: false,
+        },
+        ProviderProfile {
+            id: "deepseek".to_owned(),
+            kind: ProviderKind::OpenAiCompatible,
+            display_name: "DeepSeek".to_owned(),
+            base_url: "https://api.deepseek.com".to_owned(),
+            model: "deepseek-chat".to_owned(),
+            enabled: true,
+            is_local: false,
+        },
+        ProviderProfile {
+            id: "anthropic".to_owned(),
+            kind: ProviderKind::Anthropic,
+            display_name: "Claude (Anthropic)".to_owned(),
+            base_url: "https://api.anthropic.com".to_owned(),
+            model: "claude-opus-5".to_owned(),
             enabled: true,
             is_local: false,
         },

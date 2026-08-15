@@ -35,6 +35,24 @@ const builtinProviderProfiles: ProviderProfile[] = [
     isLocal: false,
   },
   {
+    id: "deepseek",
+    kind: "openai_compatible",
+    displayName: "DeepSeek",
+    baseUrl: "https://api.deepseek.com",
+    model: "deepseek-chat",
+    enabled: true,
+    isLocal: false,
+  },
+  {
+    id: "anthropic",
+    kind: "anthropic",
+    displayName: "Claude (Anthropic)",
+    baseUrl: "https://api.anthropic.com",
+    model: "claude-opus-5",
+    enabled: true,
+    isLocal: false,
+  },
+  {
     id: "ollama",
     kind: "ollama",
     displayName: "Ollama",
@@ -466,6 +484,11 @@ export async function saveProviderProfile(input: ProviderProfileInput): Promise<
 export async function testProviderConnection(providerId: string): Promise<ConnectionTestResult> {
   requireDesktopModelRuntime();
   return invoke<ConnectionTestResult>("test_provider_connection", { providerId });
+}
+
+export async function listProviderModels(providerId: string): Promise<string[]> {
+  requireDesktopModelRuntime();
+  return invoke<string[]>("list_provider_models", { providerId });
 }
 
 export async function chatWithProvider(

@@ -1,8 +1,8 @@
 use crate::decoder::{LineDecoder, SseDecoder};
 use crate::error::map_reqwest_error;
 use crate::{
-    Capabilities, ChatDelta, ChatMessage, ChatRequest, ChatResponse, LlmError, ProviderKind,
-    ProviderProfile, TokenUsage,
+    Capabilities, ChatDelta, ChatMessage, ChatRequest, ChatResponse, ChatRole, LlmError,
+    ProviderKind, ProviderProfile, TokenUsage,
 };
 use async_trait::async_trait;
 use futures_util::StreamExt;
@@ -41,6 +41,19 @@ pub trait LlmProvider: Send + Sync {
         request: ChatRequest,
         sender: Sender<ChatDelta>,
     ) -> Result<(), LlmError>;
+
+    /// Lists the model identifiers the upstream service currently exposes.
+    ///
+    /// The default implementation returns an empty list so lightweight test providers do not need
+    /// to implement model discovery.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable, redacted [`LlmError`] for validation, network, HTTP, timeout, and response
+    /// parsing failures.
+    async fn list_models(&self) -> Result<Vec<String>, LlmError> {
+        Ok(Vec::new())
+    }
 }
 
 pub struct ProviderClient {
@@ -106,13 +119,14 @@ impl ProviderClient {
         request.validate()
     }
 
-    fn endpoint(&self) -> Result<Url, LlmError> {
-        let base = Url::parse(&format!("{}/", self.profile.base_url.trim_end_matches('/')))
-            .map_err(|_| LlmError::InvalidConfiguration)?;
+    fn chat_endpoint(&self) -> Result<Url, LlmError> {
+        let base = self.base_url()?;
         let base_path = base.path().trim_end_matches('/');
         let endpoint = match self.profile.kind {
             ProviderKind::OpenAiCompatible if base_path.ends_with("/v1") => "chat/completions",
             ProviderKind::OpenAiCompatible => "v1/chat/completions",
+            ProviderKind::Anthropic if base_path.ends_with("/v1") => "messages",
+            ProviderKind::Anthropic => "v1/messages",
             ProviderKind::Ollama if base_path.ends_with("/api") => "chat",
             ProviderKind::Ollama => "api/chat",
         };
@@ -120,17 +134,58 @@ impl ProviderClient {
             .map_err(|_| LlmError::InvalidConfiguration)
     }
 
-    fn post(&self, body: &impl Serialize) -> Result<reqwest::RequestBuilder, LlmError> {
-        let mut builder = self.client.post(self.endpoint()?).json(body);
-        if let Some(api_key) = self.api_key.as_deref() {
-            builder = builder.bearer_auth(api_key);
+    fn models_endpoint(&self) -> Result<Url, LlmError> {
+        let base = self.base_url()?;
+        let base_path = base.path().trim_end_matches('/');
+        let endpoint = match self.profile.kind {
+            ProviderKind::OpenAiCompatible | ProviderKind::Anthropic
+                if base_path.ends_with("/v1") =>
+            {
+                "models"
+            }
+            ProviderKind::OpenAiCompatible | ProviderKind::Anthropic => "v1/models",
+            ProviderKind::Ollama if base_path.ends_with("/api") => "tags",
+            ProviderKind::Ollama => "api/tags",
+        };
+        base.join(endpoint)
+            .map_err(|_| LlmError::InvalidConfiguration)
+    }
+
+    fn base_url(&self) -> Result<Url, LlmError> {
+        Url::parse(&format!("{}/", self.profile.base_url.trim_end_matches('/')))
+            .map_err(|_| LlmError::InvalidConfiguration)
+    }
+
+    fn authorize(&self, mut builder: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        if self.profile.kind == ProviderKind::Anthropic {
+            if let Some(api_key) = self.api_key.as_deref() {
+                builder = builder.header("x-api-key", api_key);
+            }
+            builder.header("anthropic-version", "2023-06-01")
+        } else {
+            if let Some(api_key) = self.api_key.as_deref() {
+                builder = builder.bearer_auth(api_key);
+            }
+            builder
         }
-        Ok(builder)
+    }
+
+    fn post(&self, body: &impl Serialize) -> Result<reqwest::RequestBuilder, LlmError> {
+        Ok(self.authorize(self.client.post(self.chat_endpoint()?).json(body)))
     }
 
     async fn send(&self, body: &impl Serialize) -> Result<Response, LlmError> {
         let response = self
             .post(body)?
+            .send()
+            .await
+            .map_err(|error| map_reqwest_error(&error))?;
+        ensure_success(response)
+    }
+
+    async fn send_models(&self) -> Result<Response, LlmError> {
+        let response = self
+            .authorize(self.client.get(self.models_endpoint()?))
             .send()
             .await
             .map_err(|error| map_reqwest_error(&error))?;
@@ -243,6 +298,97 @@ impl ProviderClient {
         }
         Err(LlmError::InvalidResponse)
     }
+
+    async fn chat_anthropic(&self, request: ChatRequest) -> Result<ChatResponse, LlmError> {
+        let body = AnthropicRequest::new(&self.profile.model, request, false);
+        let response = self.send(&body).await?;
+        let response: AnthropicResponse = response
+            .json()
+            .await
+            .map_err(|_| LlmError::InvalidResponse)?;
+        Ok(response.into_chat_response())
+    }
+
+    async fn stream_anthropic(
+        &self,
+        request: ChatRequest,
+        sender: Sender<ChatDelta>,
+    ) -> Result<(), LlmError> {
+        let body = AnthropicRequest::new(&self.profile.model, request, true);
+        let response = self.send(&body).await?;
+        let mut stream = response.bytes_stream();
+        let mut decoder = SseDecoder::default();
+        let mut terminal = false;
+
+        loop {
+            tokio::select! {
+                () = sender.closed() => return Err(LlmError::Cancelled),
+                next = stream.next() => match next {
+                    Some(Ok(chunk)) => {
+                        for event in decoder.push(&chunk)? {
+                            if process_anthropic_event(&event, &sender).await? {
+                                return Ok(());
+                            }
+                            terminal |= anthropic_event_is_terminal(&event)?;
+                        }
+                    }
+                    Some(Err(error)) => return Err(map_reqwest_error(&error)),
+                    None => break,
+                }
+            }
+        }
+        for event in decoder.finish()? {
+            if process_anthropic_event(&event, &sender).await? {
+                return Ok(());
+            }
+            terminal |= anthropic_event_is_terminal(&event)?;
+        }
+        if terminal {
+            Ok(())
+        } else {
+            Err(LlmError::InvalidResponse)
+        }
+    }
+
+    async fn list_models_impl(&self) -> Result<Vec<String>, LlmError> {
+        self.validate_profile()?;
+        let response = self.send_models().await?;
+        let body: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|_| LlmError::InvalidResponse)?;
+        let entries = match self.profile.kind {
+            ProviderKind::Ollama => body.get("models").and_then(serde_json::Value::as_array),
+            ProviderKind::OpenAiCompatible | ProviderKind::Anthropic => {
+                body.get("data").and_then(serde_json::Value::as_array)
+            }
+        };
+        let Some(entries) = entries else {
+            return Err(LlmError::InvalidResponse);
+        };
+        let mut models = Vec::new();
+        for entry in entries {
+            let key = if self.profile.kind == ProviderKind::Ollama {
+                "name"
+            } else {
+                "id"
+            };
+            if let Some(name) = entry.get(key).and_then(serde_json::Value::as_str) {
+                if !name.is_empty() && !models.iter().any(|model: &String| model == name) {
+                    models.push(name.to_owned());
+                }
+            }
+        }
+        models.sort();
+        Ok(models)
+    }
+
+    fn validate_profile(&self) -> Result<(), LlmError> {
+        if !self.profile.enabled {
+            return Err(LlmError::ProviderDisabled);
+        }
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -255,7 +401,10 @@ impl LlmProvider for ProviderClient {
         Capabilities {
             streaming: true,
             json_mode: true,
-            tool_calling: self.profile.kind == ProviderKind::OpenAiCompatible,
+            tool_calling: matches!(
+                self.profile.kind,
+                ProviderKind::OpenAiCompatible | ProviderKind::Anthropic
+            ),
             embeddings: false,
             context_window: None,
             is_local: self.profile.is_local,
@@ -266,6 +415,7 @@ impl LlmProvider for ProviderClient {
         self.validate_request(&request)?;
         match self.profile.kind {
             ProviderKind::OpenAiCompatible => self.chat_openai(request).await,
+            ProviderKind::Anthropic => self.chat_anthropic(request).await,
             ProviderKind::Ollama => self.chat_ollama(request).await,
         }
     }
@@ -281,8 +431,13 @@ impl LlmProvider for ProviderClient {
         }
         match self.profile.kind {
             ProviderKind::OpenAiCompatible => self.stream_openai(request, sender).await,
+            ProviderKind::Anthropic => self.stream_anthropic(request, sender).await,
             ProviderKind::Ollama => self.stream_ollama(request, sender).await,
         }
+    }
+
+    async fn list_models(&self) -> Result<Vec<String>, LlmError> {
+        self.list_models_impl().await
     }
 }
 
@@ -518,4 +673,163 @@ impl OllamaResponse {
 #[derive(Deserialize)]
 struct OllamaMessage {
     content: String,
+}
+
+const ANTHROPIC_JSON_MODE_NOTE: &str =
+    "\n只输出合法的 JSON，不要输出任何解释、前缀或前后缀文本。";
+
+#[derive(Serialize)]
+struct AnthropicRequest<'a> {
+    model: &'a str,
+    max_tokens: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    system: Option<String>,
+    messages: Vec<AnthropicMessage>,
+    stream: bool,
+}
+
+impl<'a> AnthropicRequest<'a> {
+    fn new(model: &'a str, request: ChatRequest, stream: bool) -> Self {
+        let mut system = request
+            .messages
+            .iter()
+            .filter(|message| message.role == ChatRole::System)
+            .map(|message| message.content.as_str())
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        if request.json_mode {
+            system.push_str(ANTHROPIC_JSON_MODE_NOTE);
+        }
+        let messages = request
+            .messages
+            .into_iter()
+            .filter(|message| message.role != ChatRole::System)
+            .map(|message| AnthropicMessage {
+                role: match message.role {
+                    ChatRole::System => unreachable!("system messages were filtered out"),
+                    ChatRole::User => "user",
+                    ChatRole::Assistant => "assistant",
+                },
+                content: message.content,
+            })
+            .collect();
+        Self {
+            model,
+            // The Anthropic Messages API requires max_tokens and rejects sampling parameters
+            // (temperature, top_p) on current models, so neither is forwarded here.
+            max_tokens: request.max_tokens.unwrap_or(8192),
+            system: (!system.is_empty()).then_some(system),
+            messages,
+            stream,
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct AnthropicMessage {
+    role: &'static str,
+    content: String,
+}
+
+#[derive(Deserialize)]
+struct AnthropicResponse {
+    content: Vec<AnthropicContent>,
+    stop_reason: Option<String>,
+    usage: Option<AnthropicUsage>,
+}
+
+impl AnthropicResponse {
+    fn into_chat_response(self) -> ChatResponse {
+        ChatResponse {
+            content: self
+                .content
+                .into_iter()
+                .map(|block| block.text)
+                .collect::<String>(),
+            finish_reason: self.stop_reason,
+            usage: self.usage.map(AnthropicUsage::into_usage),
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct AnthropicContent {
+    text: String,
+}
+
+#[derive(Deserialize)]
+struct AnthropicUsage {
+    #[serde(rename = "input_tokens")]
+    input: u32,
+    #[serde(rename = "output_tokens")]
+    output: u32,
+}
+
+impl AnthropicUsage {
+    const fn into_usage(self) -> TokenUsage {
+        TokenUsage {
+            prompt_tokens: self.input,
+            completion_tokens: self.output,
+            total_tokens: self.input.saturating_add(self.output),
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct AnthropicStreamEvent {
+    #[serde(rename = "type")]
+    kind: String,
+    delta: Option<AnthropicStreamDelta>,
+    usage: Option<AnthropicUsage>,
+}
+
+#[derive(Deserialize)]
+struct AnthropicStreamDelta {
+    #[serde(rename = "type")]
+    kind: Option<String>,
+    text: Option<String>,
+    stop_reason: Option<String>,
+}
+
+fn anthropic_event_is_terminal(event: &str) -> Result<bool, LlmError> {
+    let event: AnthropicStreamEvent =
+        serde_json::from_str(event).map_err(|_| LlmError::InvalidResponse)?;
+    Ok(event.kind == "message_stop")
+}
+
+async fn process_anthropic_event(
+    event: &str,
+    sender: &Sender<ChatDelta>,
+) -> Result<bool, LlmError> {
+    let event: AnthropicStreamEvent =
+        serde_json::from_str(event).map_err(|_| LlmError::InvalidResponse)?;
+    let delta = match event.kind.as_str() {
+        "message_stop" => return Ok(true),
+        "content_block_delta" => {
+            let text = event
+                .delta
+                .as_ref()
+                .filter(|delta| delta.kind.as_deref() == Some("text_delta"))
+                .and_then(|delta| delta.text.clone())
+                .unwrap_or_default();
+            ChatDelta {
+                content: text,
+                finish_reason: None,
+                usage: None,
+            }
+        }
+        "message_delta" => ChatDelta {
+            content: String::new(),
+            finish_reason: event
+                .delta
+                .as_ref()
+                .and_then(|delta| delta.stop_reason.clone()),
+            usage: event.usage.map(AnthropicUsage::into_usage),
+        },
+        // message_start, content_block_start, content_block_stop, ping, and any future
+        // event types carry no user-visible text.
+        _ => return Ok(false),
+    };
+    send_delta(sender, delta).await?;
+    Ok(false)
 }

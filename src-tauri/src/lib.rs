@@ -827,6 +827,17 @@ async fn test_provider_connection(
 }
 
 #[tauri::command]
+async fn list_provider_models(
+    state: State<'_, AppState>,
+    provider_id: String,
+) -> Result<Vec<String>, IpcError> {
+    provider_client(&state, &provider_id)?
+        .list_models()
+        .await
+        .map_err(map_llm_error)
+}
+
+#[tauri::command]
 async fn chat_with_provider(
     state: State<'_, AppState>,
     provider_id: String,
@@ -1797,7 +1808,10 @@ fn provider_client(state: &AppState, provider_id: &str) -> Result<ProviderClient
     let profile = lock_documents(state)?
         .provider_profile(provider_id)
         .map_err(map_store_error)?;
-    let api_key = if profile.kind == ProviderKind::OpenAiCompatible {
+    let api_key = if matches!(
+        profile.kind,
+        ProviderKind::OpenAiCompatible | ProviderKind::Anthropic
+    ) {
         let account = provider_secret_account(provider_id)?;
         state
             .secrets
@@ -2134,6 +2148,7 @@ pub fn run() {
             has_provider_secret,
             delete_provider_secret,
             test_provider_connection,
+            list_provider_models,
             chat_with_provider,
             chat_stream_with_provider,
             draft_start,

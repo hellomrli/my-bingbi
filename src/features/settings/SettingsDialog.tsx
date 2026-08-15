@@ -6,6 +6,7 @@ import {
   LoaderCircle,
   FileUp,
   Plus,
+  RefreshCw,
   ServerCog,
   Trash2,
   Unplug,
@@ -19,6 +20,7 @@ import {
   hasProviderSecret,
   ipcErrorMessage,
   isDesktopRuntime,
+  listProviderModels,
   listProviderProfiles,
   saveProviderProfile,
   saveDocxTemplate,
@@ -46,6 +48,7 @@ const themeOptions: Array<{ value: AppTheme; label: string }> = [
 
 const providerKindOptions: Array<{ value: ProviderKind; label: string }> = [
   { value: "openai_compatible", label: "OpenAI 兼容" },
+  { value: "anthropic", label: "Anthropic (Claude)" },
   { value: "ollama", label: "Ollama" },
 ];
 
@@ -84,6 +87,9 @@ export function SettingsDialog({ open, config, onClose, onSave }: SettingsDialog
   const [templateConfigured, setTemplateConfigured] = useState(false);
   const [templateBusy, setTemplateBusy] = useState(false);
   const [templateMessage, setTemplateMessage] = useState<string | null>(null);
+  const [models, setModels] = useState<string[]>([]);
+  const [sniffing, setSniffing] = useState(false);
+  const [sniffMessage, setSniffMessage] = useState<string | null>(null);
   const desktop = isDesktopRuntime();
 
   const selectedProfile = useMemo(
@@ -148,6 +154,8 @@ export function SettingsDialog({ open, config, onClose, onSave }: SettingsDialog
     setProviderMessage(null);
     setSecret("");
     setSecretMessage(null);
+    setModels([]);
+    setSniffMessage(null);
   }
 
   function addProvider() {
@@ -157,6 +165,8 @@ export function SettingsDialog({ open, config, onClose, onSave }: SettingsDialog
     setSecret("");
     setSecretExists(false);
     setSecretMessage(null);
+    setModels([]);
+    setSniffMessage(null);
   }
 
   async function persistProvider(): Promise<ProviderProfile | null> {
@@ -262,6 +272,26 @@ export function SettingsDialog({ open, config, onClose, onSave }: SettingsDialog
       setTemplateMessage(ipcErrorMessage(error));
     } finally {
       setTemplateBusy(false);
+    }
+  }
+
+  async function sniffModels() {
+    if (!providerDraft || !desktop) return;
+    setSniffing(true);
+    setSniffMessage(null);
+    try {
+      const saved = await persistProvider();
+      if (!saved) return;
+      const discovered = await listProviderModels(saved.id);
+      setModels(discovered);
+      setSniffMessage(
+        discovered.length > 0 ? `发现 ${discovered.length} 个可用模型` : "上游未返回可用模型",
+      );
+    } catch (error) {
+      setModels([]);
+      setSniffMessage(ipcErrorMessage(error));
+    } finally {
+      setSniffing(false);
     }
   }
 
@@ -453,13 +483,30 @@ export function SettingsDialog({ open, config, onClose, onSave }: SettingsDialog
                   </div>
                   <div className="settings-group">
                     <label htmlFor="provider-model">模型</label>
-                    <input
-                      id="provider-model"
-                      value={providerDraft.model}
-                      onChange={(event) => setProviderDraft({ ...providerDraft, model: event.target.value })}
-                      placeholder="model-name"
-                      required
-                    />
+                    <div className="model-sniff-row">
+                      <input
+                        id="provider-model"
+                        value={providerDraft.model}
+                        onChange={(event) => setProviderDraft({ ...providerDraft, model: event.target.value })}
+                        placeholder="model-name"
+                        list="provider-model-list"
+                        required
+                      />
+                      <button
+                        className="icon-button"
+                        type="button"
+                        onClick={() => void sniffModels()}
+                        disabled={!desktop || sniffing || !providerDraft.enabled}
+                        title="嗅探上游可用模型"
+                        aria-label="嗅探上游可用模型"
+                      >
+                        {sniffing ? <LoaderCircle className="spin" size={15} /> : <RefreshCw size={15} />}
+                      </button>
+                    </div>
+                    <datalist id="provider-model-list">
+                      {models.map((model) => <option value={model} key={model} />)}
+                    </datalist>
+                    {sniffMessage && <span className="field-message">{sniffMessage}</span>}
                   </div>
                   <label className="toggle-row provider-enabled-row">
                     <span><b>启用服务</b></span>
@@ -470,7 +517,7 @@ export function SettingsDialog({ open, config, onClose, onSave }: SettingsDialog
                     />
                   </label>
 
-                  {providerDraft.kind === "openai_compatible" && (
+                  {(providerDraft.kind === "openai_compatible" || providerDraft.kind === "anthropic") && (
                     <div className="credential-panel">
                       <div className="settings-group">
                         <label htmlFor="credential-secret">API Key</label>
