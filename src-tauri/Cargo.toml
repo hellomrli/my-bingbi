@@ -28,6 +28,9 @@ tauri = { version = "2.9", features = [] }
 tauri-plugin-updater = "2"
 tokio = { version = "1.43", features = ["sync", "time"] }
 
+[dev-dependencies]
+tempfile = "3.15"
+
 [workspace]
 members = ["crates/odoc-engine", "crates/odoc-export", "crates/odoc-kb", "crates/odoc-llm", "crates/odoc-lint", "crates/odoc-model", "crates/odoc-pack", "crates/odoc-store"]
 resolver = "2"

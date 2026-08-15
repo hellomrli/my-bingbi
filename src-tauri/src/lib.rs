@@ -316,9 +316,9 @@ async fn apply_update<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(),
         .download_and_install(|_bytes, _total| {}, || {})
         .await
         .map_err(|_| IpcError {
-        code: "update_install_failed",
-        message: "更新下载或安装失败，请稍后重试。",
-    })?;
+            code: "update_install_failed",
+            message: "更新下载或安装失败，请稍后重试。",
+        })?;
     app.request_restart();
     Ok(())
 }
@@ -2695,18 +2695,30 @@ mod tests {
         };
         assert!(validate_draft_start_request(&base).is_ok());
         let imitating = DraftStartRequest {
+            document_id: "doc".to_owned(),
+            material: "申请事项".to_owned(),
+            provider_id: "ollama".to_owned(),
+            confirmed_doc_type: None,
             model_text: Some("范文正文".to_owned()),
-            ..base
+            polish: false,
         };
         assert!(validate_draft_start_request(&imitating).is_ok());
         let oversized_model = DraftStartRequest {
+            document_id: "doc".to_owned(),
+            material: "申请事项".to_owned(),
+            provider_id: "ollama".to_owned(),
+            confirmed_doc_type: None,
             model_text: Some("x".repeat(2 * 1024 * 1024 + 1)),
-            ..base
+            polish: false,
         };
         assert!(validate_draft_start_request(&oversized_model).is_err());
         let control_character_model = DraftStartRequest {
+            document_id: "doc".to_owned(),
+            material: "申请事项".to_owned(),
+            provider_id: "ollama".to_owned(),
+            confirmed_doc_type: None,
             model_text: Some("范文\0正文".to_owned()),
-            ..base
+            polish: false,
         };
         assert!(validate_draft_start_request(&control_character_model).is_err());
 
@@ -2788,7 +2800,9 @@ mod tests {
         assert_eq!(runs[0].duration_ms, 9);
         assert_eq!(
             runs[0].output_json.as_deref(),
-            Some(&serde_json::to_string(&output).expect("output should serialize"))
+            serde_json::to_string(&output)
+                .expect("output should serialize")
+                .as_deref()
         );
         assert_eq!(
             state
@@ -2810,18 +2824,18 @@ mod tests {
         };
         assert!(validate_rerun_stage_request(&valid).is_ok());
         let unknown_stage = RerunStageRequest {
+            session_id: "session-1".to_owned(),
             stage_id: "Deai".to_owned(),
-            ..valid
         };
         assert!(validate_rerun_stage_request(&unknown_stage).is_err());
         let oversized = RerunStageRequest {
+            session_id: "session-1".to_owned(),
             stage_id: "x".repeat(65),
-            ..valid
         };
         assert!(validate_rerun_stage_request(&oversized).is_err());
         let empty_session = RerunStageRequest {
             session_id: String::new(),
-            ..valid
+            stage_id: "factcheck".to_owned(),
         };
         assert!(validate_rerun_stage_request(&empty_session).is_err());
     }
