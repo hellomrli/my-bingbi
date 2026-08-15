@@ -1,8 +1,8 @@
 use crate::error::EngineError;
 use crate::types::{
-    DraftEvent, DraftInput, DraftOutcome, FactExtraction, FactInput, LowConfidenceAction,
-    PipelineKind, RerunOutcome, Score, StageConfig, StageKind, StageOutput, StageStatus,
-    StageSummary, StyleProfile, TypeDecision,
+    Correction, DraftEvent, DraftInput, DraftOutcome, FactExtraction, FactInput,
+    LowConfidenceAction, PipelineKind, RerunOutcome, Score, StageConfig, StageKind, StageOutput,
+    StageStatus, StageSummary, StyleProfile, TypeDecision,
 };
 use futures_util::future::try_join_all;
 use odoc_kb::{KbError, KbHit, KbProvider, KbQuery, SearchMode, hybrid_search_with_semantic};
@@ -61,6 +61,7 @@ const REVIEW_FORBIDDEN_STAGES: &[StageId] = &[
     StageId::Outline,
     StageId::Draft,
     StageId::Deai,
+    StageId::Correct,
     StageId::Export,
 ];
 /// Polishing rewrites the material in place; retrieval and skeleton stages do not apply.
@@ -159,6 +160,7 @@ fn validate_stage(stage: &StageConfig, kind: PipelineKind) -> Result<(), EngineE
         | StageId::Facts
         | StageId::Style
         | StageId::Deai
+        | StageId::Correct
         | StageId::Review
         | StageId::Score => StageKind::Llm,
         StageId::Draft => StageKind::Draft,
@@ -571,6 +573,7 @@ impl<'a, J: DraftJournal, P: LlmProvider + ?Sized> DraftEngine<'a, J, P> {
             }
             StageId::Deai => self.execute_draft(stage, context, event_sender, true).await,
             StageId::Lint => Self::execute_lint(stage, context, self.packs),
+            StageId::Correct => self.execute_correct(stage, context).await,
             StageId::Factcheck => Self::execute_factcheck(stage, context),
             StageId::Score => self.execute_score(stage, context).await,
             _ if stage.kind == StageKind::Llm => {
@@ -786,6 +789,52 @@ impl<'a, J: DraftJournal, P: LlmProvider + ?Sized> DraftEngine<'a, J, P> {
         })
     }
 
+    async fn execute_correct(
+        &self,
+        stage: &StageConfig,
+        context: &mut RunContext,
+    ) -> Result<StageOutput, EngineError> {
+        let (corrections, response) = self.llm_json::<Vec<Correction>>(stage, context).await?;
+        let document_text = context.document.to_plain_text();
+        let mut findings = Vec::new();
+        for (index, correction) in corrections.iter().enumerate() {
+            let original = correction.original.trim();
+            let corrected = correction.corrected.trim();
+            if original.is_empty()
+                || corrected.is_empty()
+                || original == corrected
+                || !document_text.contains(original)
+            {
+                continue;
+            }
+            let message = match correction.reason.trim() {
+                "" => format!("文本纠错建议：{original} → {corrected}。"),
+                reason => format!("文本纠错建议：{original} → {corrected}（{reason}）。"),
+            };
+            findings.push(odoc_lint::Finding {
+                id: if index == 0 {
+                    "CORR-001".to_owned()
+                } else {
+                    format!("CORR-001-{}", index + 1)
+                },
+                severity: odoc_lint::Severity::Warn,
+                node_id: context.document.body.id.clone(),
+                message,
+                location: "正文 · 文本纠错".to_owned(),
+                suggestion: Some(corrected.to_owned()),
+                token: Some(original.to_owned()),
+            });
+        }
+        if !findings.is_empty()
+            && let Some(report) = &mut context.lint_report
+        {
+            let added = u32::try_from(findings.len()).unwrap_or(u32::MAX);
+            report.warn_count = report.warn_count.saturating_add(added);
+            report.findings.extend(findings);
+        }
+        json_output(stage.id, &corrections, Some(&response))
+    }
+
     fn execute_lint(
         stage: &StageConfig,
         context: &mut RunContext,
@@ -827,7 +876,7 @@ impl<'a, J: DraftJournal, P: LlmProvider + ?Sized> DraftEngine<'a, J, P> {
             .provider
             .chat(self.model_request(stage, context)?)
             .await?;
-        let value = serde_json::from_str(&response.content).map_err(|_| {
+        let value = odoc_llm::parse_model_json(&response.content).map_err(|_| {
             EngineError::InvalidModelOutput {
                 stage: stage.id,
                 reason: "expected valid JSON",
@@ -1370,6 +1419,8 @@ mod tests {
             } else if system.contains("事实提取器") {
                 r#"{"facts":[{"kind":"data","value":"15万元","unit":"元","role":"金额"}],"missingInformation":[]}"#
                     .to_owned()
+            } else if system.contains("校对员") {
+                "[]".to_owned()
             } else if system.contains("笔法分析师") {
                 r#"{"structure":"先总后分，结尾以妥否请示收束","sentencePatterns":"多用短句","vocabulary":"规范化称谓","commonPhrases":"经研究、现就","taboos":"避免空泛口号"}"#
                     .to_owned()
@@ -2008,7 +2059,11 @@ mod tests {
             .any(|block| matches!(block, Block::Paragraph { content, .. } if content.contains("具体工作安排如下"))));
         assert!(outcome.stages.iter().all(|stage| matches!(
             stage.stage_id,
-            StageId::Doctype | StageId::Deai | StageId::Lint | StageId::Factcheck
+            StageId::Doctype
+                | StageId::Deai
+                | StageId::Lint
+                | StageId::Correct
+                | StageId::Factcheck
         )));
     }
 
@@ -2040,6 +2095,77 @@ mod tests {
             definition.validate(),
             Err(EngineError::InvalidPipeline(_))
         ));
+    }
+
+    /// A provider that returns real corrections for the correct stage.
+    struct CorrectingProvider(FakeProvider);
+
+    #[async_trait]
+    impl LlmProvider for CorrectingProvider {
+        fn id(&self) -> &'static str {
+            "correcting"
+        }
+        fn capabilities(&self) -> Capabilities {
+            self.0.capabilities()
+        }
+        async fn chat(&self, request: ChatRequest) -> Result<ChatResponse, LlmError> {
+            let system = request
+                .messages
+                .first()
+                .map(|message| message.content.as_str())
+                .unwrap_or_default();
+            if system.contains("校对员") {
+                return Ok(ChatResponse {
+                    content: r#"[{"original":"具体工作安排如下","corrected":"现将工作安排如下","reason":"开头表述更正式"}]"#
+                        .to_owned(),
+                    finish_reason: Some("stop".to_owned()),
+                    usage: None,
+                });
+            }
+            self.0.chat(request).await
+        }
+        async fn chat_stream(
+            &self,
+            request: ChatRequest,
+            sender: Sender<ChatDelta>,
+        ) -> Result<(), LlmError> {
+            self.0.chat_stream(request, sender).await
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn correct_stage_merges_verified_corrections_into_the_lint_report() {
+        let provider = CorrectingProvider(FakeProvider::default());
+        let pack_registry = packs();
+        let engine = DraftEngine::new(pipeline(), &pack_registry, &provider, &NoopJournal)
+            .expect("engine should construct");
+        let outcome = engine
+            .run(
+                DraftInput {
+                    material: "申请购置应急排水设备经费，15万元。".to_owned(),
+                    model_text: None,
+                    initial_document: None,
+                    confirmed_doc_type: None,
+                },
+                None,
+            )
+            .await
+            .expect("pipeline should complete");
+        let report = outcome.lint_report.expect("lint report should exist");
+        let correction = report
+            .findings
+            .iter()
+            .find(|finding| finding.id.starts_with("CORR-001"))
+            .expect("correction finding should be merged");
+        assert_eq!(correction.token.as_deref(), Some("具体工作安排如下"));
+        assert_eq!(correction.suggestion.as_deref(), Some("现将工作安排如下"));
+        assert_eq!(correction.severity, odoc_lint::Severity::Warn);
+        assert!(
+            outcome
+                .stages
+                .iter()
+                .any(|stage| stage.stage_id == StageId::Correct)
+        );
     }
 
     #[test]

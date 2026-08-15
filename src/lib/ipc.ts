@@ -486,7 +486,6 @@ export async function archiveDocumentToKb(
 export interface UpdateCheckResult {
   available: boolean;
   version: string | null;
-  notes: string | null;
   installed: boolean;
 }
 

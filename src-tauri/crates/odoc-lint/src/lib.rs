@@ -391,6 +391,105 @@ fn apply_builtin_rules(document: &ODoc, findings: &mut Vec<Finding>) {
             token: None,
         });
     }
+    apply_typo_rules(document, findings);
+    apply_chinese_date_rule(document, findings);
+}
+
+/// High-frequency official-document typos with their corrections, checked as exact word matches.
+const TYPO_PAIRS: &[(&str, &str)] = &[
+    ("布署", "部署"),
+    ("部暑", "部署"),
+    ("再接再励", "再接再厉"),
+    ("一如继往", "一如既往"),
+    ("幅射", "辐射"),
+    ("帐蓬", "帐篷"),
+    ("松驰", "松弛"),
+    ("亲睐", "青睐"),
+    ("编篡", "编纂"),
+    ("急待", "亟待"),
+    ("划拔", "划拨"),
+    ("迫不急待", "迫不及待"),
+    ("穿流不息", "川流不息"),
+    ("名符其实", "名副其实"),
+    ("相辅相承", "相辅相成"),
+];
+
+fn apply_typo_rules(document: &ODoc, findings: &mut Vec<Finding>) {
+    let targets = fact_check_targets(document);
+    let mut counter = 0_u32;
+    for target in targets {
+        for (wrong, right) in TYPO_PAIRS {
+            let mut start = 0;
+            while let Some(offset) = target.text[start..].find(wrong) {
+                let index = start + offset;
+                counter += 1;
+                findings.push(Finding {
+                    id: if counter == 1 {
+                        "SPL-001".to_owned()
+                    } else {
+                        format!("SPL-001-{counter}")
+                    },
+                    severity: Severity::Warn,
+                    node_id: target.node_id.clone(),
+                    message: format!("疑似错别字“{wrong}”，应为“{right}”。"),
+                    location: target.location.clone(),
+                    suggestion: Some(right.to_string()),
+                    token: Some(wrong.to_string()),
+                });
+                start = index + wrong.len();
+            }
+        }
+    }
+}
+
+/// Maps Chinese numerals to digits for date conversion (e.g. 二〇二五 → 2025).
+fn chinese_to_digits(value: &str) -> String {
+    let digit = |character: char| match character {
+        '〇' | '零' => '0',
+        '一' => '1',
+        '二' | '两' => '2',
+        '三' => '3',
+        '四' => '4',
+        '五' => '5',
+        '六' => '6',
+        '七' => '7',
+        '八' => '8',
+        '九' => '9',
+        _ => character,
+    };
+    value.chars().map(digit).collect()
+}
+
+fn apply_chinese_date_rule(document: &ODoc, findings: &mut Vec<Finding>) {
+    let Ok(date_pattern) = Regex::new(
+        r"[一二两三四五六七八九十〇零]+年[一二三四五六七八九十〇零]+月(?:[一二三四五六七八九十]+日)?",
+    ) else {
+        return;
+    };
+    let targets = fact_check_targets(document);
+    let mut counter = 0_u32;
+    for target in targets {
+        let mut start = 0;
+        while let Some(found) = date_pattern.find(&target.text[start..]) {
+            let matched = found.as_str();
+            let converted = chinese_to_digits(matched);
+            counter += 1;
+            findings.push(Finding {
+                id: if counter == 1 {
+                    "SPL-002".to_owned()
+                } else {
+                    format!("SPL-002-{counter}")
+                },
+                severity: Severity::Warn,
+                node_id: target.node_id.clone(),
+                message: format!("中文数字日期建议改为阿拉伯数字：{converted}。"),
+                location: target.location.clone(),
+                suggestion: Some(converted),
+                token: Some(matched.to_owned()),
+            });
+            start += found.end();
+        }
+    }
 }
 
 fn report(findings: Vec<Finding>) -> LintReport {

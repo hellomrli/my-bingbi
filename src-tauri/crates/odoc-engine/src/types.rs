@@ -200,6 +200,17 @@ pub struct DraftInput {
     pub confirmed_doc_type: Option<DocumentType>,
 }
 
+/// One suggested text correction: replace `original` with `corrected` where it appears.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct Correction {
+    pub original: String,
+    pub corrected: String,
+    #[serde(default)]
+    pub reason: String,
+}
+
 /// The reusable writing-style profile an imitate pipeline distills from a model text.
 ///
 /// It describes the reference text's own craft, never its facts: numbers, dates, names and

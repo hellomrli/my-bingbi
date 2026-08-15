@@ -27,3 +27,23 @@
   when_present: true
   message: 成文日期应使用阿拉伯数字全称
   suggestion: 例如：2026年8月12日
+
+- id: halfwidth-punctuation
+  name: 中文语境半角标点
+  severity: warn
+  type: regex
+  scope: body.blocks
+  pattern: '[一-鿿][,;?!]|[,;?!][一-鿿]'
+  match: forbidden
+  message: 中文语句应使用全角标点（，。；：？！），不得混用半角逗号句号
+  suggestion: 将半角 , ; ? ! 替换为全角 ，；？！等对应标点
+
+- id: doubled-punctuation
+  name: 连续重复标点
+  severity: warn
+  type: regex
+  scope: body.blocks
+  pattern: '[、，。；：]{2,}'
+  match: forbidden
+  message: 标点不得连续重复使用
+  suggestion: 删除多余的重复标点，保留一个

@@ -1,4 +1,5 @@
 mod decoder;
+pub use decoder::parse_model_json;
 mod error;
 mod provider;
 mod types;

@@ -28,7 +28,6 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tauri::ipc::Channel;
 use tauri::{Manager, State};
-use tauri_plugin_process::Restart;
 use tauri_plugin_updater::UpdaterExt;
 
 struct AppState {
@@ -149,7 +148,6 @@ struct ExportCapabilities {
 struct UpdateCheckResult {
     available: bool,
     version: Option<String>,
-    notes: Option<String>,
     installed: bool,
 }
 
@@ -286,13 +284,11 @@ async fn check_for_update<R: tauri::Runtime>(
         UpdateCheckResult {
             available: false,
             version: None,
-            notes: None,
             installed: false,
         },
         |update| UpdateCheckResult {
             available: true,
             version: Some(update.version.to_string()),
-            notes: update.notes,
             installed: false,
         },
     ))
@@ -320,7 +316,7 @@ async fn apply_update<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(),
         code: "update_install_failed",
         message: "更新下载或安装失败，请稍后重试。",
     })?;
-    app.restart();
+    app.request_restart();
     Ok(())
 }
 
@@ -2461,7 +2457,7 @@ pub fn run() {
                         .build(),
                 )?;
             }
-            let user_pack_root = odoc_store::default_config_dir()?.join("packs");
+            let user_pack_root = DocumentStore::default_config_dir()?.join("packs");
             ensure_user_pack_root(&user_pack_root)?;
             let (packs, pack_issues) =
                 PackRegistry::load_with_user_root(builtin_pack_root(app)?, &user_pack_root)?;

@@ -67,6 +67,7 @@ jobs:
         run: npm ci
 
       - name: Verify update signing key
+        shell: bash
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: |

@@ -139,3 +139,142 @@ mod tests {
         assert_eq!(decoder.finish().unwrap(), ["{\"b\":2"]);
     }
 }
+
+/// Parses model JSON output with tolerant fallbacks for common LLM formatting slips.
+///
+/// Attempts in order: the raw text, the text inside a code fence, the text with unescaped
+/// newlines inside string values repaired, and finally the substring between the first `{`
+/// and the last `}`. Any successful attempt returns the parsed value.
+///
+/// # Errors
+///
+/// Returns the parse error of the raw text when every fallback fails.
+pub fn parse_model_json<T: serde::de::DeserializeOwned>(
+    content: &str,
+) -> Result<T, serde_json::Error> {
+    let trimmed = content.trim();
+    let escaped = escape_string_newlines(trimmed);
+    let braced = brace_substring(trimmed);
+    let candidates = [
+        trimmed,
+        strip_code_fence(trimmed),
+        escaped.as_str(),
+        braced.as_str(),
+    ];
+    for candidate in candidates {
+        if let Ok(value) = serde_json::from_str(candidate) {
+            return Ok(value);
+        }
+    }
+    serde_json::from_str(content)
+}
+
+fn strip_code_fence(content: &str) -> &str {
+    let body = content
+        .strip_prefix("```json")
+        .or_else(|| content.strip_prefix("```"))
+        .unwrap_or(content);
+    body.strip_suffix("```").unwrap_or(body).trim()
+}
+
+/// Replaces unescaped newlines inside JSON string values with the `\n` escape.
+fn escape_string_newlines(content: &str) -> String {
+    let mut output = String::with_capacity(content.len());
+    let mut in_string = false;
+    let mut escaped = false;
+    for character in content.chars() {
+        if in_string {
+            if escaped {
+                output.push(character);
+                escaped = false;
+                continue;
+            }
+            match character {
+                '\\' => {
+                    output.push(character);
+                    escaped = true;
+                }
+                '"' => {
+                    in_string = false;
+                    output.push(character);
+                }
+                '\n' | '\r' => output.push_str("\\n"),
+                _ => output.push(character),
+            }
+        } else {
+            if character == '"' {
+                in_string = true;
+            }
+            output.push(character);
+        }
+    }
+    output
+}
+
+fn brace_substring(content: &str) -> String {
+    let Some(start) = content.find('{') else {
+        return content.to_owned();
+    };
+    let Some(end) = content.rfind('}') else {
+        return content.to_owned();
+    };
+    if end > start {
+        content[start..=end].to_owned()
+    } else {
+        content.to_owned()
+    }
+}
+
+#[cfg(test)]
+mod json_tests {
+    use super::*;
+    use serde::Deserialize;
+
+    #[derive(Debug, PartialEq, Deserialize)]
+    struct Sample {
+        value: String,
+    }
+
+    #[test]
+    fn parses_plain_json() {
+        assert_eq!(
+            parse_model_json::<Sample>(r#"{"value":"ok"}"#).expect("plain json should parse"),
+            Sample {
+                value: "ok".to_owned()
+            }
+        );
+    }
+
+    #[test]
+    fn strips_code_fences() {
+        let fenced = "```json\n{\"value\":\"ok\"}\n```";
+        assert_eq!(
+            parse_model_json::<Sample>(fenced).expect("fenced json should parse"),
+            Sample {
+                value: "ok".to_owned()
+            }
+        );
+    }
+
+    #[test]
+    fn repairs_unescaped_newlines_inside_strings() {
+        let broken = "{\"value\":\"第一行\n第二行\"}";
+        assert_eq!(
+            parse_model_json::<Sample>(broken).expect("newlines should be repaired"),
+            Sample {
+                value: "第一行\n第二行".to_owned()
+            }
+        );
+    }
+
+    #[test]
+    fn extracts_the_brace_substring_from_trailing_prose() {
+        let noisy = "好的，结果如下：{\"value\":\"ok\"} 以上。";
+        assert_eq!(
+            parse_model_json::<Sample>(noisy).expect("substring should parse"),
+            Sample {
+                value: "ok".to_owned()
+            }
+        );
+    }
+}

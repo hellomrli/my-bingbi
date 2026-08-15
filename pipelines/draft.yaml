@@ -51,6 +51,15 @@ stages:
       - pack://gb9704-format#rules/format.yaml
       - pack://renmin-style#rules/anti-ai.yaml
 
+  - id: correct
+    kind: llm
+    prompt: |
+      你是公文文本校对员。对照原文检查错别字、漏字、标点错误和明显的用词不当，
+      只输出 JSON 数组：[{"original":"原文片段","corrected":"修正后片段","reason":"简要原因"}]。
+      纪律：只修改确实有错误的地方，不得改动事实、数字、日期、文号、人名、机构名；
+      原文未出现的片段不得输出；无错误时输出空数组 []。
+    json_mode: true
+
   - id: factcheck
     kind: pack
 
