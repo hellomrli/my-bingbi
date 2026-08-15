@@ -118,3 +118,26 @@ jobs:
             --repo "${GITHUB_REPOSITORY}" \
             --title "${GITHUB_REF_NAME}" \
             --generate-notes
+
+      - name: Generate and upload the updater manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          LINUX_DEB=$(basename release-assets/deb/*.deb)
+          LINUX_SIG=$(tr -d '\n' < release-assets/deb/*.sig)
+          WINDOWS_EXE=$(basename release-assets/nsis/*.exe)
+          WINDOWS_SIG=$(tr -d '\n' < release-assets/nsis/*.sig)
+          jq -n \
+            --arg version "${GITHUB_REF_NAME#v}" \
+            --arg pub_date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg linux_url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/${LINUX_DEB}" \
+            --arg linux_sig "$LINUX_SIG" \
+            --arg windows_url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/${WINDOWS_EXE}" \
+            --arg windows_sig "$WINDOWS_SIG" \
+            '{version: $version, pub_date: $pub_date,
+              platforms: {
+                "linux-x86_64": {url: $linux_url, signature: $linux_sig},
+                "windows-x86_64": {url: $windows_url, signature: $windows_sig}
+              }}' > latest.json
+          gh release upload "${GITHUB_REF_NAME}" latest.json \
+            --repo "${GITHUB_REPOSITORY}" --clobber
