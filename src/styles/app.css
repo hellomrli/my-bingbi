@@ -433,7 +433,8 @@ textarea::placeholder {
   width: 100%;
 }
 
-.imitate-start-button {
+.imitate-start-button,
+.polish-start-button {
   width: 100%;
   color: var(--accent);
 }

@@ -54,6 +54,9 @@ struct DraftStartRequest {
     /// Reference text for imitate mode; its presence selects the imitate pipeline.
     #[serde(default)]
     model_text: Option<String>,
+    /// Polish mode rewrites the supplied material in place.
+    #[serde(default)]
+    polish: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1029,7 +1032,7 @@ async fn draft_start<R: tauri::Runtime>(
             .map_err(map_store_error)
     })?;
     let provider = provider_client(&state, &request.provider_id)?;
-    let pipeline_file = draft_pipeline_file(request.model_text.as_deref());
+    let pipeline_file = draft_pipeline_file(request.model_text.as_deref(), request.polish);
     let pipeline_path = builtin_pipeline_path(&app, pipeline_file).map_err(map_tauri_error)?;
     let pipeline = PipelineDefinition::load(pipeline_path).map_err(map_engine_error)?;
     let journal = StoreDraftJournal {
@@ -1097,6 +1100,7 @@ async fn rerun_stage<R: tauri::Runtime>(
     let pipeline_file = match session.pipeline.as_str() {
         "draft" => "draft.yaml",
         "imitate" => "imitate.yaml",
+        "polish" => "polish.yaml",
         _ => {
             return Err(IpcError {
                 code: "rerun_unsupported",
@@ -1428,9 +1432,12 @@ fn validate_rerun_stage_request(request: &RerunStageRequest) -> Result<(), IpcEr
     }
 }
 
-/// Selects the pipeline file a draft request runs: a non-blank model text means imitate mode.
-fn draft_pipeline_file(model_text: Option<&str>) -> &'static str {
-    if model_text.is_some_and(|text| !text.trim().is_empty()) {
+/// Selects the pipeline file a draft request runs: polish mode wins, then a non-blank model
+/// text means imitate mode.
+fn draft_pipeline_file(model_text: Option<&str>, polish: bool) -> &'static str {
+    if polish {
+        "polish.yaml"
+    } else if model_text.is_some_and(|text| !text.trim().is_empty()) {
         "imitate.yaml"
     } else {
         "draft.yaml"
@@ -2582,6 +2589,7 @@ mod tests {
             provider_id: "ollama".to_owned(),
             confirmed_doc_type: None,
             model_text: None,
+            polish: false,
         };
         assert!(validate_draft_start_request(&empty).is_err());
         let oversized = DraftStartRequest {
@@ -2599,6 +2607,7 @@ mod tests {
             provider_id: "ollama".to_owned(),
             confirmed_doc_type: None,
             model_text: None,
+            polish: false,
         };
         assert!(validate_draft_start_request(&base).is_ok());
         let imitating = DraftStartRequest {
@@ -2617,9 +2626,11 @@ mod tests {
         };
         assert!(validate_draft_start_request(&control_character_model).is_err());
 
-        assert_eq!(draft_pipeline_file(None), "draft.yaml");
-        assert_eq!(draft_pipeline_file(Some("   ")), "draft.yaml");
-        assert_eq!(draft_pipeline_file(Some("范文正文")), "imitate.yaml");
+        assert_eq!(draft_pipeline_file(None, false), "draft.yaml");
+        assert_eq!(draft_pipeline_file(Some("   "), false), "draft.yaml");
+        assert_eq!(draft_pipeline_file(Some("范文正文"), false), "imitate.yaml");
+        assert_eq!(draft_pipeline_file(Some("范文正文"), true), "polish.yaml");
+        assert_eq!(draft_pipeline_file(None, true), "polish.yaml");
     }
 
     #[test]

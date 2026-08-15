@@ -1,4 +1,4 @@
-import { BookOpen, Check, Database, FilePlus2, LoaderCircle, Play, Search, ShieldAlert } from "lucide-react";
+import { BookOpen, Check, Database, FilePlus2, LoaderCircle, Play, Search, ShieldAlert, Sparkles } from "lucide-react";
 import { FormEvent, useState } from "react";
 import { documentTypeLabels, securityLabels } from "../../lib/document";
 import { ipcErrorMessage, kbGet, kbSearch } from "../../lib/ipc";
@@ -15,6 +15,7 @@ interface IntakeSidebarProps {
   modelText: string;
   onModelTextChange: (value: string) => void;
   onStartImitate: () => void;
+  onStartPolish: () => void;
   providers: ProviderProfile[];
   providerId: string;
   onProviderChange: (value: string) => void;
@@ -37,6 +38,7 @@ export function IntakeSidebar({
   modelText,
   onModelTextChange,
   onStartImitate,
+  onStartPolish,
   providers,
   providerId,
   onProviderChange,
@@ -298,6 +300,16 @@ export function IntakeSidebar({
           >
             {drafting ? <LoaderCircle size={15} className="is-spinning" /> : <FilePlus2 size={15} />}
             仿写起草
+          </button>
+          <button
+            className="command-button polish-start-button"
+            type="button"
+            onClick={onStartPolish}
+            disabled={drafting || !material.trim() || !providerId || providerBlocked || !selectedProvider?.enabled}
+            title={providerBlocked ? "当前密级禁止使用云端模型" : "把起草材料原地润色为具体、稳妥的公文表达"}
+          >
+            {drafting ? <LoaderCircle size={15} className="is-spinning" /> : <Sparkles size={15} />}
+            润色改写
           </button>
         </div>
       </section>

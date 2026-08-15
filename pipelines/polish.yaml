@@ -1,0 +1,30 @@
+name: 润色改写流程
+kind: polish
+stages:
+  - id: doctype
+    kind: llm
+    prompt: |
+      你是公文文种路由器。仅输出 JSON：{"value":"request|notice|report|letter|minutes|summary|decision|announcement|regulation|proclamation|reply|instruction|proposal|work_plan|work_report|briefing|speech|presentation|memo|invitation|certificate|other","confidence":0.0,"alternatives":[],"missingInformation":[]}。
+      依据材料判断最合适的文种。证据不足时降低 confidence 并填写 missingInformation，不要编造事实。
+    output_schema: TypeDecision
+    json_mode: true
+    on_low_confidence: ask_user
+    inject:
+      - pack://renmin-style#references/document-type-router.md
+
+  - id: deai
+    kind: llm
+    prompt: |
+      你是公文润色编辑。把 material 提供的文字改写为具体、稳妥、可直接使用的公文表达：
+      删除空泛排比和万能结论，补足主体、任务、机制和时限的明确性，保持原文结构与层次。
+      不得改变事实、数字、文号、责任单位和完成时限，不得编造新事实。
+    stream: true
+
+  - id: lint
+    kind: pack
+    inject:
+      - pack://gb9704-format#rules/format.yaml
+      - pack://renmin-style#rules/anti-ai.yaml
+
+  - id: factcheck
+    kind: pack

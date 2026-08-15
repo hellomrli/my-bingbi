@@ -5,9 +5,11 @@ import {
   draftStageLabels,
   draftStages,
   imitateStages,
+  polishStages,
   rerunStage,
   startDraft,
   startImitate,
+  startPolish,
 } from "./engine";
 
 it("does not run or rerun the draft pipeline in browser preview", async () => {
@@ -20,6 +22,12 @@ it("does not run or rerun the draft pipeline in browser preview", async () => {
   await expect(
     startImitate(
       { documentId: "doc-browser", material: "申请事项", providerId: "ollama", modelText: "范文" },
+      () => undefined,
+    ),
+  ).rejects.toMatchObject({ code: "model_runtime_unavailable" });
+  await expect(
+    startPolish(
+      { documentId: "doc-browser", material: "为进一步贯彻落实上级精神", providerId: "ollama" },
       () => undefined,
     ),
   ).rejects.toMatchObject({ code: "model_runtime_unavailable" });
@@ -63,5 +71,12 @@ describe("draft stage identity", () => {
       "score",
     ]);
     expect(draftStageLabels.style).toBeTruthy();
+  });
+
+  it("keeps the polish pipeline to decide, humanize and hard-check", () => {
+    expect([...polishStages]).toEqual(["doctype", "deai", "lint", "factcheck"]);
+    for (const stage of polishStages) {
+      expect(draftStageLabels[stage]).toBeTruthy();
+    }
   });
 });

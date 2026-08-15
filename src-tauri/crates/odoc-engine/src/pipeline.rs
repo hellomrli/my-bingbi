@@ -40,6 +40,14 @@ const IMITATE_REQUIRED_STAGES: &[StageId] = &[
     StageId::Outline,
     StageId::Draft,
 ];
+/// Polish mode rewrites the supplied material with the humanizer pass, then hard-checks it;
+/// it must not retrieve, outline, or re-draft from scratch.
+const POLISH_REQUIRED_STAGES: &[StageId] = &[
+    StageId::Doctype,
+    StageId::Deai,
+    StageId::Lint,
+    StageId::Factcheck,
+];
 const REVIEW_REQUIRED_STAGES: &[StageId] = &[
     StageId::Doctype,
     StageId::Lint,
@@ -53,6 +61,16 @@ const REVIEW_FORBIDDEN_STAGES: &[StageId] = &[
     StageId::Outline,
     StageId::Draft,
     StageId::Deai,
+    StageId::Export,
+];
+/// Polishing rewrites the material in place; retrieval and skeleton stages do not apply.
+const POLISH_FORBIDDEN_STAGES: &[StageId] = &[
+    StageId::Facts,
+    StageId::Retrieve,
+    StageId::Style,
+    StageId::Outline,
+    StageId::Draft,
+    StageId::Review,
     StageId::Export,
 ];
 
@@ -108,6 +126,7 @@ impl PipelineDefinition {
         let (required, forbidden) = match self.kind {
             PipelineKind::Draft => (DRAFT_REQUIRED_STAGES, DRAFT_FORBIDDEN_STAGES),
             PipelineKind::Imitate => (IMITATE_REQUIRED_STAGES, DRAFT_FORBIDDEN_STAGES),
+            PipelineKind::Polish => (POLISH_REQUIRED_STAGES, POLISH_FORBIDDEN_STAGES),
             PipelineKind::Review => (REVIEW_REQUIRED_STAGES, REVIEW_FORBIDDEN_STAGES),
         };
         if !required.iter().all(|stage| ids.contains(stage)) {
@@ -116,6 +135,7 @@ impl PipelineDefinition {
                 PipelineKind::Imitate => {
                     "doctype, facts, style, outline and draft stages are required"
                 }
+                PipelineKind::Polish => "doctype, deai, lint and factcheck stages are required",
                 PipelineKind::Review => {
                     "doctype, lint, factcheck, review and score stages are required"
                 }
@@ -1494,6 +1514,11 @@ mod tests {
         PipelineDefinition::load(path).expect("imitate pipeline should load")
     }
 
+    fn polish_pipeline() -> PipelineDefinition {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../pipelines/polish.yaml");
+        PipelineDefinition::load(path).expect("polish pipeline should load")
+    }
+
     #[test]
     fn pipeline_rejects_duplicate_or_unsafe_stages() {
         let mut definition = pipeline();
@@ -1948,6 +1973,70 @@ mod tests {
         assert!(matches!(
             unexpected_model_text,
             Err(EngineError::InvalidInput)
+        ));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn polish_pipeline_rewrites_the_material_and_runs_hard_checks() {
+        let provider = FakeProvider::default();
+        let pack_registry = packs();
+        let engine = DraftEngine::new(polish_pipeline(), &pack_registry, &provider, &NoopJournal)
+            .expect("engine should construct");
+        let outcome = engine
+            .run(
+                DraftInput {
+                    material: "为进一步贯彻落实上级精神，我单位将不断提高思想认识。".to_owned(),
+                    model_text: None,
+                    initial_document: None,
+                    confirmed_doc_type: Some(DocumentType::Report),
+                },
+                None,
+            )
+            .await
+            .expect("polish pipeline should complete");
+        assert_eq!(outcome.type_decision.value, DocumentType::Report);
+        assert!(outcome.lint_report.is_some());
+        assert!(outcome.fact_check_report.is_some());
+        // The deai stage replaced the placeholder body with the polished text.
+        assert!(outcome
+            .document
+            .body
+            .blocks
+            .iter()
+            .any(|block| matches!(block, Block::Paragraph { content, .. } if content.contains("具体工作安排如下"))));
+        assert!(outcome.stages.iter().all(|stage| matches!(
+            stage.stage_id,
+            StageId::Doctype | StageId::Deai | StageId::Lint | StageId::Factcheck
+        )));
+    }
+
+    #[test]
+    fn polish_pipelines_forbid_retrieval_and_drafting_stages() {
+        let mut definition = polish_pipeline();
+        definition.stages.insert(
+            2,
+            StageConfig {
+                id: StageId::Facts,
+                kind: StageKind::Llm,
+                prompt: Some("事实提取".to_owned()),
+                inject: Vec::new(),
+                output_schema: Some("FactExtraction".to_owned()),
+                json_mode: true,
+                stream: false,
+                on_low_confidence: None,
+                loop_back: None,
+            },
+        );
+        assert!(matches!(
+            definition.validate(),
+            Err(EngineError::InvalidPipeline(_))
+        ));
+
+        let mut definition = polish_pipeline();
+        definition.stages.remove(1);
+        assert!(matches!(
+            definition.validate(),
+            Err(EngineError::InvalidPipeline(_))
         ));
     }
 

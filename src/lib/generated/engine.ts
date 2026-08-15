@@ -9,7 +9,7 @@ export type StageKind = "llm" | "pack" | "draft";
 
 export type StageStatus = "running" | "completed" | "failed" | "cancelled";
 
-export type PipelineKind = "draft" | "review" | "imitate";
+export type PipelineKind = "draft" | "review" | "imitate" | "polish";
 
 export type LowConfidenceAction = "ask_user";
 

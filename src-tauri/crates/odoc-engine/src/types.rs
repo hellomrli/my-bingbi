@@ -28,6 +28,9 @@ pub enum PipelineKind {
     /// Imitate mode reuses the drafting stages and adds a `style` stage that distills the
     /// caller-supplied model text into a reusable writing-style profile.
     Imitate,
+    /// Polish mode rewrites the supplied material in place: it decides the document type,
+    /// applies the humanizer pass, then hard-checks the result. No retrieval or outlining.
+    Polish,
 }
 
 impl PipelineKind {
@@ -37,6 +40,7 @@ impl PipelineKind {
             Self::Draft => "draft",
             Self::Review => "review",
             Self::Imitate => "imitate",
+            Self::Polish => "polish",
         }
     }
 }

@@ -13,7 +13,7 @@ import { SessionHistoryDialog } from "./features/documents/SessionHistoryDialog"
 import { SettingsDialog } from "./features/settings/SettingsDialog";
 import { Toolbar } from "./features/workbench/Toolbar";
 import { countChineseCharacters, documentTypeLabels } from "./lib/document";
-import { draftStageLabels, draftStages, imitateStages, rerunStage, startDraft, startImitate, type DraftStageId } from "./lib/engine";
+import { draftStageLabels, draftStages, imitateStages, polishStages, rerunStage, startDraft, startImitate, startPolish, type DraftStageId } from "./lib/engine";
 import { isReviewStage, startReview, type ReviewStageId } from "./lib/review";
 import {
   backendVersion,
@@ -120,7 +120,7 @@ function App() {
   const [engineLintReport, setEngineLintReport] = useState<LintReport | null>(null);
   const [engineFactCheckReport, setEngineFactCheckReport] = useState<FactCheckReport | null>(null);
   const [engineReportRevision, setEngineReportRevision] = useState<number | null>(null);
-  const [pipeline, setPipeline] = useState<"draft" | "review" | "imitate">("draft");
+  const [pipeline, setPipeline] = useState<"draft" | "review" | "imitate" | "polish">("draft");
   const [reviewOpen, setReviewOpen] = useState(false);
   const [reviewing, setReviewing] = useState(false);
   const [reviewStage, setReviewStage] = useState<ReviewStageId | null>(null);
@@ -447,7 +447,11 @@ function App() {
     setFailedStage(null);
     // Downstream stages ran against the previous output, so their records no longer hold.
     // The stage order depends on the session's pipeline kind, which the closure captured.
-    const stageOrder: readonly DraftStageId[] = pipeline === "imitate" ? imitateStages : draftStages;
+    const stageOrder: readonly DraftStageId[] = pipeline === "imitate"
+      ? imitateStages
+      : pipeline === "polish"
+        ? polishStages
+        : draftStages;
     const rerunIndex = stageOrder.indexOf(rerunStageId);
     setCompletedStages((current) =>
       current.filter((stage) => stageOrder.indexOf(stage) <= rerunIndex),
@@ -569,6 +573,57 @@ function App() {
           material: material.trim(),
           providerId,
           modelText: modelText.trim(),
+          confirmedDocType: null,
+        },
+        handleDraftEvent,
+      );
+      // Older runtimes may return the outcome without delivering the final channel event.
+      if (useWorkbenchStore.getState().document.id !== outcome.document.id || useWorkbenchStore.getState().document.revision !== outcome.document.revision) {
+        applyDraftOutcome(outcome);
+      }
+    } catch (error) {
+      const code = errorCode(error);
+      if (code === "document_type_confirmation_required") {
+        setDraftError(null);
+      } else {
+        setDraftError(ipcErrorMessage(error));
+        if (isDraftStage(draftStage ?? "")) setFailedStage(draftStage);
+      }
+    } finally {
+      setDrafting(false);
+    }
+  }
+
+  async function runPolish() {
+    if (drafting || !material.trim() || !providerId) return;
+    if (!desktopRuntime) {
+      setDraftError("模型调用仅在桌面应用中可用。");
+      return;
+    }
+    const selected = providers.find((provider) => provider.id === providerId);
+    const restricted = document.meta.securityLevel === "secret" || document.meta.securityLevel === "confidential";
+    if (!selected?.enabled || (restricted && !selected.isLocal)) {
+      setDraftError(restricted ? "当前密级仅允许本地模型，请先选择本地服务。" : "模型服务不可用，请先在设置中启用服务。");
+      return;
+    }
+    setDrafting(true);
+    setPipeline("polish");
+    setDraftStage(null);
+    setCompletedStages([]);
+    setFailedStage(null);
+    setDraftText("");
+    setDraftError(null);
+    setDraftSessionId(null);
+    setTypeDecision(null);
+    setConfirmedDocType(null);
+    try {
+      await saveBeforeDraft();
+      const snapshot = useWorkbenchStore.getState().document;
+      const outcome = await startPolish(
+        {
+          documentId: snapshot.id,
+          material: material.trim(),
+          providerId,
           confirmedDocType: null,
         },
         handleDraftEvent,
@@ -858,6 +913,7 @@ function App() {
           modelText={modelText}
           onModelTextChange={setModelText}
           onStartImitate={() => void runImitate()}
+          onStartPolish={() => void runPolish()}
           providers={providers}
           providerId={providerId}
           onProviderChange={setProviderId}

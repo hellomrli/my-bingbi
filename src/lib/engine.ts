@@ -37,7 +37,13 @@ export const imitateStages = [
   "score",
 ] as const;
 
-export type DraftStageId = (typeof draftStages)[number] | (typeof imitateStages)[number];
+/** Polish mode rewrites the supplied material in place: decide, humanize, hard-check. */
+export const polishStages = ["doctype", "deai", "lint", "factcheck"] as const;
+
+export type DraftStageId =
+  | (typeof draftStages)[number]
+  | (typeof imitateStages)[number]
+  | (typeof polishStages)[number];
 
 export const draftStageLabels: Record<DraftStageId, string> = {
   doctype: "文种",
@@ -103,6 +109,35 @@ export async function startImitate(
     };
   }
   return startDraft(input, onEvent);
+}
+
+/**
+ * Polish mode: rewrites the supplied material in place with the humanizer pass, then runs the
+ * hard lint and fact checks. The result replaces the current document body.
+ */
+export async function startPolish(
+  input: DraftStartInput,
+  onEvent: (event: DraftEvent) => void,
+): Promise<DraftOutcome> {
+  if (!isDesktopRuntime()) {
+    throw {
+      code: "model_runtime_unavailable",
+      message: "模型调用仅在桌面应用中可用。",
+    };
+  }
+  const channel = new Channel<DraftEvent>();
+  channel.onmessage = onEvent;
+  return invoke<DraftOutcome>("draft_start", {
+    request: {
+      documentId: input.documentId,
+      material: input.material,
+      providerId: input.providerId,
+      confirmedDocType: input.confirmedDocType ?? null,
+      modelText: null,
+      polish: true,
+    },
+    onEvent: channel,
+  });
 }
 
 /**
