@@ -776,13 +776,13 @@ CI 用 GitHub Actions matrix（`windows-latest` + `ubuntu-22.04`）交叉产出�
 
 ### M2 — 知识库与严格排版（约 4 周）
 
-- [ ] `odoc-kb`：REST Provider 与本地 Vault 已完成；WebSocket 增量订阅待补
-- [ ] 三级检索管线（FTS5 → 双链扩展 → 向量重排），本地索引缓存
-- [ ] Obsidian 库自动打标（frontmatter 补全）
+- [x] `odoc-kb`：REST Provider 与本地 Vault 已完成；WebSocket 增量订阅已接入（后台同步守护 + 设置页开关 + 游标持久化）
+- [ ] 三级检索管线：关键词召回 + RRF 融合 + 本地索引缓存已落地；双链扩展与向量重排待补
+- [x] Obsidian 库自动打标（frontmatter 补全，设置页可关）
 - [x] 检索增强已接入 `draft.yaml`（有界关键词召回 + 来源注入），素材侧栏可用
-- [ ] 归档回写：生成的公文一键存回 Obsidian 库并打标
-- [ ] `odoc-export`：严格 docx 排版引擎（docx-rs + `style/gb9704.toml`）+ 模板注入法（当前已有简化 OOXML 导出基础）
-- [ ] 文种覆盖扩到 20+（法定公文 12 种 + 事务文书 8 种）
+- [x] 归档回写：生成的公文一键存回 Obsidian 库并带 frontmatter（`archive_document_to_kb` + 归档对话框）
+- [x] `odoc-export`：严格 docx 排版引擎（手写 OOXML + `style/gb9704.toml` 页面参数/字体/行距）+ 模板注入法 + LibreOffice PDF 兜底（实现路线为轻依赖手写 OOXML，非 docx-rs）
+- [x] 文种覆盖扩到 20+（gb9704-format 包已含 22 个文种骨架模板）
 - **验收**：起草时能自动召回"去年同类文件"作参考；导出的 docx 在 Word 里打开，各要素字体字号、版心、行距完全符合国标
 
 ### M3 — 质量与防幻觉（约 3 周）
@@ -799,7 +799,7 @@ CI 用 GitHub Actions matrix（`windows-latest` + `ubuntu-22.04`）交叉产出�
 ### M4 — 打磨与开放（约 3 周）
 
 - [ ] `LocalVaultProvider` + `McpProvider`（离线与通用通道）
-- [ ] Anthropic Provider、成本统计面板
+- [x] Anthropic Provider（内置预设 + 上游模型嗅探）；成本统计面板（起草记录对话框：token 汇总 + 阶段明细，金额换算待定价表）
 - [ ] 知识包管理 UI（安装/更新/启用禁用/自建）
 - [ ] 用户自定义规则、自定义机关 docx 模板
 - [ ] 字体检测与映射、首次运行引导
