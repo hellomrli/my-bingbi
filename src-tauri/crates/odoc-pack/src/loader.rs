@@ -208,11 +208,10 @@ impl LoadedPack {
         )?;
         match role {
             ResourceRole::Rule => {
+                // An empty or comment-only rule file is a valid empty rule set, so user packs
+                // can start from a template and fill rules in incrementally.
                 let rules: Vec<RuleDefinition> = serde_yaml::from_str(&text)
                     .map_err(|_| PackError::InvalidYaml(resource.relative_path.clone()))?;
-                if rules.is_empty() {
-                    return Err(PackError::InvalidYaml(resource.relative_path));
-                }
                 for rule in rules {
                     validate_rule(&rule)?;
                     if !rule_ids.insert(rule.id.clone()) {

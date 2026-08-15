@@ -377,6 +377,8 @@ rules = ["rules/format.yaml"]
 #   lexicon: ["杜绝形式主义"]
 #   max_per_100_chars: 0
 #   message: 本单位禁用语，请更换表述
+
+[]
 "#,
     )?;
     std::fs::write(
