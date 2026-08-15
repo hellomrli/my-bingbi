@@ -2880,6 +2880,7 @@ mod tests {
         assert!(!root.join("another-pack").exists());
     }
 
+    #[test]
     fn review_request_normalizes_blank_focus_and_rejects_oversized_focus() {
         let blank = ReviewStartRequest {
             document_id: "doc".to_owned(),
