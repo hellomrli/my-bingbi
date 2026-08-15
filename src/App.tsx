@@ -166,7 +166,8 @@ function App() {
       .then((loaded) => {
         setConfig(loaded);
         setTheme(loaded.theme);
-        if (!loaded.firstRunCompleted) setGuideOpen(true);
+        // The guide is a desktop first-run flow; browser preview stays quiet.
+        if (isDesktopRuntime() && !loaded.firstRunCompleted) setGuideOpen(true);
       })
       .catch((error) => setNotice(ipcErrorMessage(error)));
     loadKbConfig()
