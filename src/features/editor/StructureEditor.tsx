@@ -15,8 +15,10 @@ function EditableBlock({ block, index }: { block: Block; index: number }) {
   const selectNode = useWorkbenchStore((state) => state.selectNode);
   const updateBlock = useWorkbenchStore((state) => state.updateBlock);
   const removeBlock = useWorkbenchStore((state) => state.removeBlock);
+  const unverifiedTokens = useWorkbenchStore((state) => state.unverifiedTokens);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const isTextBlock = block.type === "paragraph" || block.type === "heading" || block.type === "quote";
+  const unverified = unverifiedTokens[block.id] ?? [];
 
   useEffect(() => {
     if (selectedNodeId === block.id) textareaRef.current?.focus();
@@ -64,6 +66,11 @@ function EditableBlock({ block, index }: { block: Block; index: number }) {
         onChange={(event) => updateBlock(block.id, { content: event.target.value })}
         placeholder={block.type === "heading" ? "输入标题，不含层次序号" : "输入正文内容"}
       />
+      {unverified.length > 0 && (
+        <span className="fact-unverified-badge" title="这些数字/日期/文号未在已核实事实台账中找到">
+          <span aria-hidden="true">⚠</span> 待核实：{unverified.join("、")}
+        </span>
+      )}
       <button
         className="icon-button small danger-action"
         type="button"
@@ -84,6 +91,8 @@ export function StructureEditor() {
   const document = useWorkbenchStore((state) => state.document);
   const updateTitle = useWorkbenchStore((state) => state.updateTitle);
   const addBlock = useWorkbenchStore((state) => state.addBlock);
+  const unverifiedTokens = useWorkbenchStore((state) => state.unverifiedTokens);
+  const titleTokens = unverifiedTokens[document.body.title.id] ?? [];
 
   return (
     <div className="structure-editor" data-node-id={document.body.id}>
@@ -95,6 +104,11 @@ export function StructureEditor() {
           onChange={(event) => updateTitle(event.target.value)}
           placeholder="输入公文标题"
         />
+        {titleTokens.length > 0 && (
+          <span className="fact-unverified-badge" title="标题中的数字/日期/文号未在已核实事实台账中找到">
+            <span aria-hidden="true">⚠</span> 待核实：{titleTokens.join("、")}
+          </span>
+        )}
       </label>
       <div className="block-list">
         {document.body.blocks.map((block, index) => (

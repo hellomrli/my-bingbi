@@ -42,6 +42,10 @@ pub struct Finding {
     pub message: String,
     pub location: String,
     pub suggestion: Option<String>,
+    /// The exact text span this finding targets, when it is a single inline token
+    /// (set by the fact check so the frontend can red-mark the unverified value).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub token: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -135,6 +139,7 @@ pub fn fact_check_document(document: &ODoc) -> Result<FactCheckReport, LintError
                 message: format!("正文中的事实“{token}”未在已核实事实台账中找到。"),
                 location: target.location.clone(),
                 suggestion: Some("补充材料或在事实台账中核实该数据后再导出。".to_owned()),
+                token: Some(token),
             });
         }
     }
@@ -347,6 +352,7 @@ fn push_finding(
         message: rule.message.clone(),
         location: target.location.clone(),
         suggestion: rule.suggestion.clone(),
+        token: None,
     });
 }
 
@@ -366,6 +372,7 @@ fn apply_builtin_rules(document: &ODoc, findings: &mut Vec<Finding>) {
             message: "公文缺少主送机关。".to_owned(),
             location: "主体 · 主送机关".to_owned(),
             suggestion: None,
+            token: None,
         });
     }
     if document
@@ -381,6 +388,7 @@ fn apply_builtin_rules(document: &ODoc, findings: &mut Vec<Finding>) {
             message: "正文尚未填写。".to_owned(),
             location: "主体 · 正文".to_owned(),
             suggestion: None,
+            token: None,
         });
     }
 }

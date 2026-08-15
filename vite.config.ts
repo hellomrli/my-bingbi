@@ -17,6 +17,11 @@ export default defineConfig({
           port: 1421,
         }
       : undefined,
+    watch: {
+      // Rust build artifacts are huge and not frontend source; watching them
+      // exhausts the OS file-watcher limit and crashes the dev/e2e server.
+      ignored: ["**/src-tauri/target/**"],
+    },
   },
   envPrefix: ["VITE_", "TAURI_"],
   build: {

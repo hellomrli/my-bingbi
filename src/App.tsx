@@ -40,7 +40,7 @@ import type { FactCheckReport, LintReport } from "./lib/generated/lint";
 import type { ProviderProfile } from "./lib/llm";
 import type { KbConfig } from "./lib/kb";
 import type { DocumentType } from "./lib/odoc";
-import { lintDocument, type Finding } from "./lib/lint";
+import { lintDocument, unverifiedTokenMap, type Finding } from "./lib/lint";
 import type { AppConfig, DocumentSummary } from "./lib/store";
 import { useWorkbenchStore } from "./store/workbench";
 
@@ -81,6 +81,7 @@ function App() {
   const dirty = useWorkbenchStore((state) => state.dirty);
   const savedAt = useWorkbenchStore((state) => state.savedAt);
   const setDocument = useWorkbenchStore((state) => state.setDocument);
+  const setUnverifiedTokens = useWorkbenchStore((state) => state.setUnverifiedTokens);
   const setView = useWorkbenchStore((state) => state.setView);
   const setTheme = useWorkbenchStore((state) => state.setTheme);
   const markSaved = useWorkbenchStore((state) => state.markSaved);
@@ -139,6 +140,7 @@ function App() {
       message: finding.message,
       location: finding.location,
       ...(finding.suggestion ? { suggestion: finding.suggestion } : {}),
+      ...(finding.token ? { token: finding.token } : {}),
     }));
     return engineFindings;
   }, [document.revision, engineFactCheckReport, engineLintReport, engineReportRevision, findings]);
@@ -404,6 +406,7 @@ function App() {
 
   function applyDraftOutcome(outcome: DraftOutcome) {
     setDocument(outcome.document, Date.now());
+    setUnverifiedTokens(unverifiedTokenMap(outcome.factCheckReport?.findings ?? []));
     setEngineLintReport(outcome.lintReport);
     setEngineFactCheckReport(outcome.factCheckReport);
     setEngineReportRevision(outcome.document.revision);
@@ -527,6 +530,7 @@ function App() {
     setEngineLintReport(outcome.lintReport);
     setEngineFactCheckReport(outcome.factCheckReport);
     setEngineReportRevision(outcome.revision);
+    setUnverifiedTokens(unverifiedTokenMap(outcome.factCheckReport?.findings ?? []));
   }
 
   async function runReview() {

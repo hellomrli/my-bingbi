@@ -145,6 +145,15 @@
   text-align: right;
 }
 
+/* 事实回查未命中的数字/日期/文号：红波浪线标红，阻断导出前可定位。 */
+.official-sheet .fact-unverified {
+  padding: 0 1px;
+  color: var(--paper-seal);
+  background: transparent;
+  text-decoration: underline wavy var(--paper-seal);
+  text-underline-offset: 3px;
+}
+
 .official-attachments {
   margin-top: 0.5em;
   padding-left: 2em;

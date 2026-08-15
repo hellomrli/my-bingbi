@@ -768,6 +768,21 @@ textarea::placeholder {
   line-height: 1.7;
 }
 
+/* 事实回查未命中的数字/日期/文号提示（编辑器内红字标注） */
+.fact-unverified-badge {
+  grid-column: 2;
+  margin-top: 2px;
+  color: var(--danger);
+  font-size: var(--fs-micro);
+  font-weight: 500;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.title-editor .fact-unverified-badge {
+  margin-top: 1px;
+}
+
 .title-editor textarea {
   min-height: 58px;
   font-size: var(--fs-md);
@@ -1931,6 +1946,13 @@ textarea::placeholder {
   border: 0;
   background: transparent;
   color: var(--ink);
+}
+
+.model-sniff-row {
+  display: grid;
+  align-items: center;
+  grid-template-columns: minmax(0, 1fr) 30px;
+  gap: 6px;
 }
 
 .credential-status {

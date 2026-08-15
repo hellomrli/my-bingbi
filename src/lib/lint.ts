@@ -10,6 +10,67 @@ export interface Finding {
   message: string;
   location: string;
   suggestion?: string;
+  /** The exact inline text span flagged by the fact check, when present. */
+  token?: string;
+}
+
+export interface MarkedSegment {
+  text: string;
+  unverified: boolean;
+}
+
+/** Groups the fact-check `token` values by the node they were found in. */
+export function unverifiedTokenMap(
+  findings: Array<{ nodeId: string; token?: string | null }>,
+): Record<string, string[]> {
+  const map: Record<string, string[]> = {};
+  for (const finding of findings) {
+    if (!finding.token || finding.token.length === 0) continue;
+    const nodeId = finding.nodeId;
+    const tokens = map[nodeId] ?? (map[nodeId] = []);
+    if (!tokens.includes(finding.token)) tokens.push(finding.token);
+  }
+  return map;
+}
+
+/**
+ * Splits `text` into marked/unmarked segments by wrapping every occurrence of the
+ * unverified tokens. Token matches are literal substring matches, exactly as the
+ * kernel extracted them, so ordering and case are preserved.
+ */
+export function markUnverifiedSegments(text: string, tokens: string[] | undefined): MarkedSegment[] {
+  if (!tokens || tokens.length === 0) return [{ text, unverified: false }];
+  const ranges: Array<[number, number]> = [];
+  for (const token of tokens) {
+    if (token.length === 0) continue;
+    let from = 0;
+    while (true) {
+      const index = text.indexOf(token, from);
+      if (index < 0) break;
+      ranges.push([index, index + token.length]);
+      from = index + token.length;
+    }
+  }
+  if (ranges.length === 0) return [{ text, unverified: false }];
+  ranges.sort((left, right) => left[0] - right[0]);
+  const merged: Array<[number, number]> = [];
+  for (const range of ranges) {
+    const previous = merged[merged.length - 1];
+    if (previous && range[0] <= previous[1]) {
+      previous[1] = Math.max(previous[1], range[1]);
+    } else {
+      merged.push([...range]);
+    }
+  }
+  const segments: MarkedSegment[] = [];
+  let cursor = 0;
+  for (const [start, end] of merged) {
+    if (start > cursor) segments.push({ text: text.slice(cursor, start), unverified: false });
+    segments.push({ text: text.slice(start, end), unverified: true });
+    cursor = end;
+  }
+  if (cursor < text.length) segments.push({ text: text.slice(cursor), unverified: false });
+  return segments;
 }
 
 const slogans = ["走深走实", "提质增效", "凝心聚力", "开拓创新", "真抓实干", "持续发力", "全面推动", "不断完善"];

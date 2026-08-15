@@ -28,6 +28,8 @@ interface WorkbenchState {
   selectedNodeId: string | null;
   dirty: boolean;
   savedAt: number | null;
+  /** nodeId → unverified fact tokens from the latest kernel fact-check report. */
+  unverifiedTokens: Record<string, string[]>;
   setDocument: (document: ODoc, savedAt?: number | null) => void;
   setView: (view: WorkbenchView) => void;
   setFindingFilter: (filter: FindingFilter) => void;
@@ -35,6 +37,7 @@ interface WorkbenchState {
   setTheme: (theme: Theme) => void;
   selectNode: (nodeId: string | null) => void;
   markSaved: (savedAt?: number) => void;
+  setUnverifiedTokens: (tokens: Record<string, string[]>) => void;
   updateDocumentType: (docType: DocumentType) => void;
   updateSecurityLevel: (securityLevel: SecurityLevel) => void;
   updateHeader: (field: keyof Omit<Header, "id">, value: string) => void;
@@ -81,13 +84,16 @@ export const useWorkbenchStore = create<WorkbenchState>()(
       selectedNodeId: null,
       dirty: false,
       savedAt: null,
-      setDocument: (document, savedAt = Date.now()) => set({ document, dirty: false, selectedNodeId: null, savedAt }),
+      unverifiedTokens: {},
+      setDocument: (document, savedAt = Date.now()) =>
+        set({ document, dirty: false, selectedNodeId: null, savedAt, unverifiedTokens: {} }),
       setView: (view) => set({ view }),
       setFindingFilter: (findingFilter) => set({ findingFilter }),
       toggleGrid: () => set((state) => ({ showGrid: !state.showGrid })),
       setTheme: (theme) => set({ theme }),
       selectNode: (selectedNodeId) => set({ selectedNodeId }),
       markSaved: (savedAt = Date.now()) => set({ dirty: false, savedAt }),
+      setUnverifiedTokens: (unverifiedTokens) => set({ unverifiedTokens }),
       updateDocumentType: (docType) =>
         set((state) => ({ document: changed(state.document, (document) => (document.meta.docType = docType)), dirty: true })),
       updateSecurityLevel: (securityLevel) =>

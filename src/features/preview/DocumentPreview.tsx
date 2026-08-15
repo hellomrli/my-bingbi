@@ -1,4 +1,6 @@
+import type { ReactNode } from "react";
 import type { Block, HeadingLevel } from "../../lib/odoc";
+import { markUnverifiedSegments } from "../../lib/lint";
 import { useWorkbenchStore } from "../../store/workbench";
 
 const chineseDigits = ["零", "一", "二", "三", "四", "五", "六", "七", "八", "九", "十"];
@@ -18,7 +20,19 @@ function headingPrefix(level: HeadingLevel, number: number): string {
   return `（${number}）`;
 }
 
-function renderBlocks(blocks: Block[]) {
+/** Wraps every unverified fact token in a red mark; plain text otherwise. */
+function renderMarked(text: string, tokens: string[] | undefined): ReactNode {
+  if (!tokens || tokens.length === 0) return text;
+  return markUnverifiedSegments(text, tokens).map((segment, index) =>
+    segment.unverified ? (
+      <mark className="fact-unverified" key={index}>{segment.text}</mark>
+    ) : (
+      segment.text
+    ),
+  );
+}
+
+function renderBlocks(blocks: Block[], tokens: Record<string, string[]>) {
   const counters: Record<HeadingLevel, number> = { l1: 0, l2: 0, l3: 0, l4: 0 };
 
   return blocks.map((block) => {
@@ -30,7 +44,7 @@ function renderBlocks(blocks: Block[]) {
       return (
         <p className={`official-heading ${block.level}`} id={`preview-${block.id}`} key={block.id}>
           {headingPrefix(block.level, counters[block.level])}
-          {block.content || "未填写标题"}
+          {renderMarked(block.content || "未填写标题", tokens[block.id])}
         </p>
       );
     }
@@ -38,7 +52,7 @@ function renderBlocks(blocks: Block[]) {
     if (block.type === "paragraph" || block.type === "quote") {
       return (
         <p className={block.type === "quote" ? "official-paragraph quote" : "official-paragraph"} id={`preview-${block.id}`} key={block.id}>
-          {block.content || "（空段落）"}
+          {renderMarked(block.content || "（空段落）", tokens[block.id])}
         </p>
       );
     }
@@ -72,6 +86,7 @@ function renderBlocks(blocks: Block[]) {
 export function DocumentPreview() {
   const document = useWorkbenchStore((state) => state.document);
   const showGrid = useWorkbenchStore((state) => state.showGrid);
+  const unverifiedTokens = useWorkbenchStore((state) => state.unverifiedTokens);
   const header = document.header;
   const body = document.body;
   const footer = document.footer;
@@ -84,21 +99,21 @@ export function DocumentPreview() {
             <header className="official-header">
               <div className="authority-mark">{header.issuingAuthorityMark || "发文机关文件"}</div>
               <div className="header-meta">
-                <span>{header.documentNumber || "机关代字〔年份〕序号"}</span>
+                <span>{header.documentNumber ? renderMarked(header.documentNumber, unverifiedTokens[header.id]) : "机关代字〔年份〕序号"}</span>
                 {header.signer && <span>签发人：{header.signer}</span>}
               </div>
               <div className="red-rule" />
             </header>
           )}
 
-          <h1 className="official-title">{body.title.text || "未命名公文"}</h1>
+          <h1 className="official-title">{renderMarked(body.title.text || "未命名公文", unverifiedTokens[body.title.id])}</h1>
           {body.mainRecipients.length > 0 && <p className="official-recipient">{body.mainRecipients.join("、")}：</p>}
-          <div className="official-content">{renderBlocks(body.blocks)}</div>
+          <div className="official-content">{renderBlocks(body.blocks, unverifiedTokens)}</div>
 
           {(body.signer || body.date) && (
             <div className="official-signoff">
               {body.signer && <div>{body.signer.authority}</div>}
-              {body.date && <div>{body.date.value}</div>}
+              {body.date && <div>{renderMarked(body.date.value, unverifiedTokens[body.date.id])}</div>}
             </div>
           )}
 
