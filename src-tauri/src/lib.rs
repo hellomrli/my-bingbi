@@ -312,7 +312,10 @@ async fn apply_update<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(),
             code: "update_unavailable",
             message: "当前已是最新版本。",
         })?;
-    update.download_and_install().await.map_err(|_| IpcError {
+    update
+        .download_and_install(|_| {}, |_| {})
+        .await
+        .map_err(|_| IpcError {
         code: "update_install_failed",
         message: "更新下载或安装失败，请稍后重试。",
     })?;
