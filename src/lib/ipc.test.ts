@@ -5,16 +5,20 @@ import { createEmptyDocument } from "./document";
 import {
   applyUpdate,
   checkForUpdate,
+  clearCrashEvents,
   defaultAppConfig,
   defaultKbConfig,
   deleteDocument,
   exportDocx,
+  extractDocxText,
+  extractReferenceText,
   hasKbFnsToken,
   hasProviderSecret,
   listPackSummaries,
   listProviderModels,
   listProviderProfiles,
   listDocuments,
+  listCrashEvents,
   loadKbConfig,
   loadAppConfig,
   loadDocument,
@@ -130,6 +134,11 @@ describe("browser document repository", () => {
     await expect(applyUpdate()).rejects.toMatchObject({ code: "update_unavailable" });
   });
 
+  it("keeps local crash diagnostics behind the desktop boundary", async () => {
+    expect(await listCrashEvents()).toEqual([]);
+    await expect(clearCrashEvents()).rejects.toMatchObject({ code: "crash_diagnostics_unavailable" });
+  });
+
   it("does not allow model calls to bypass the Rust security boundary", async () => {
     await expect(testProviderConnection("ollama")).rejects.toMatchObject({ code: "model_runtime_unavailable" });
     await expect(listProviderModels("anthropic")).rejects.toMatchObject({ code: "model_runtime_unavailable" });
@@ -137,5 +146,11 @@ describe("browser document repository", () => {
 
   it("keeps DOCX export behind the desktop boundary", async () => {
     await expect(exportDocx("doc-browser")).rejects.toMatchObject({ code: "export_unavailable" });
+    await expect(extractDocxText(new Uint8Array([1, 2, 3]))).rejects.toMatchObject({
+      code: "reference_upload_unavailable",
+    });
+    await expect(extractReferenceText("材料.pdf", new Uint8Array([1, 2, 3]))).rejects.toMatchObject({
+      code: "reference_upload_unavailable",
+    });
   });
 });

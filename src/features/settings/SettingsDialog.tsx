@@ -36,6 +36,7 @@ import {
 import type { ProviderKind, ProviderProfile, ProviderProfileInput } from "../../lib/llm";
 import { probeGbFonts, type FontProbe } from "../../lib/fonts";
 import type { AppConfig, AppTheme } from "../../lib/store";
+import { CrashDiagnosticsSettings } from "./CrashDiagnosticsSettings";
 import { KnowledgeBaseSettings } from "./KnowledgeBaseSettings";
 import { PackSettings } from "./PackSettings";
 
@@ -390,6 +391,11 @@ export function SettingsDialog({ open, config, onClose, onSave, onShowGuide }: S
                   onChange={(event) => setDraft({ ...draft, autosaveEnabled: event.target.checked })}
                 />
               </label>
+              <CrashDiagnosticsSettings
+                enabled={draft.crashReportingEnabled}
+                desktop={desktop}
+                onEnabledChange={(enabled) => setDraft({ ...draft, crashReportingEnabled: enabled })}
+              />
               <div className="settings-group">
                 <label>字体映射</label>
                 {fontProbe?.supported && fontProbe.missing.length > 0 && (

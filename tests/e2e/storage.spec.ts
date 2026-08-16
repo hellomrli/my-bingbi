@@ -30,14 +30,14 @@ test("edits, autosaves, lists, and persists application settings", async ({ page
   const settings = page.getByRole("dialog", { name: "设置" });
   await expect(settings).toBeVisible();
   await settings.getByRole("button", { name: "暗色" }).click();
-  await settings.locator(".toggle-row input[type=checkbox]").uncheck();
+  await settings.getByRole("checkbox", { name: /自动保存/ }).uncheck();
   await settings.getByRole("button", { name: "保存设置" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
 
   await page.reload();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   await page.getByRole("button", { name: "设置" }).click();
-  await expect(page.getByRole("dialog", { name: "设置" }).locator(".toggle-row input[type=checkbox]")).not.toBeChecked();
+  await expect(page.getByRole("dialog", { name: "设置" }).getByRole("checkbox", { name: /自动保存/ })).not.toBeChecked();
 
   const reopenedSettings = page.getByRole("dialog", { name: "设置" });
   await reopenedSettings.getByRole("button", { name: "模型服务" }).click();
@@ -55,6 +55,24 @@ test("edits, autosaves, lists, and persists application settings", async ({ page
   expect(providerStorage).toContain("e2e-local");
   expect(providerStorage).not.toContain("apiKey");
   expect(consoleErrors).toEqual([]);
+});
+
+test("uploads and removes individual drafting references", async ({ page }) => {
+  const material = page.getByRole("textbox", { name: /写作意图与基础材料/ });
+  await material.fill("拟部署汛期隐患排查，月底前反馈。 ");
+
+  await page.getByLabel("上传参考文件").setInputFiles([
+    { name: "会议纪要.md", mimeType: "text/markdown", buffer: Buffer.from("会议决定月底前完成整改。") },
+    { name: "数据.csv", mimeType: "text/csv", buffer: Buffer.from("事项,数量\n排水泵,3台") },
+  ]);
+
+  const references = page.getByLabel("已引用的参考来源");
+  await expect(references).toContainText("会议纪要.md");
+  await expect(references).toContainText("数据.csv");
+  await references.getByRole("button", { name: "移除参考来源 会议纪要.md" }).click();
+  await expect(references).not.toContainText("会议纪要.md");
+  await expect(references).toContainText("数据.csv");
+  await expect(material).toContainText("拟部署汛期隐患排查");
 });
 
 test("model provider settings stay within a mobile viewport", async ({ page }) => {

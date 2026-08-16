@@ -102,7 +102,7 @@ export function WelcomeGuide({ open, onComplete, onOpenSettings }: WelcomeGuideP
         {step === 2 && (
           <div className="welcome-guide-body">
             <h2>准备就绪</h2>
-            <p className="welcome-guide-lead">现在可以开始第一份公文了：在左侧填入要素与材料，点击「开始起草」。</p>
+            <p className="welcome-guide-lead">现在可以开始第一份公文了：在左侧写下大致意图，或上传/引用参考材料，点击「开始起草」即可，无需先写正文。</p>
             <div className="welcome-guide-checklist">
               {["文种路由与事实提取自动完成", "生成的数字与日期会回查标红", "一键导出符合 GB/T 9704 的 DOCX"].map((item) => (
                 <div key={item}><Check size={14} />{item}</div>

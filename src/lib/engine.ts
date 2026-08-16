@@ -19,6 +19,7 @@ export const draftStages = [
   "draft",
   "deai",
   "lint",
+  "correct",
   "factcheck",
   "score",
 ] as const;
@@ -33,12 +34,13 @@ export const imitateStages = [
   "draft",
   "deai",
   "lint",
+  "correct",
   "factcheck",
   "score",
 ] as const;
 
 /** Polish mode rewrites the supplied material in place: decide, humanize, hard-check. */
-export const polishStages = ["doctype", "deai", "lint", "factcheck"] as const;
+export const polishStages = ["doctype", "deai", "lint", "correct", "factcheck"] as const;
 
 export type DraftStageId =
   | (typeof draftStages)[number]
@@ -54,6 +56,7 @@ export const draftStageLabels: Record<DraftStageId, string> = {
   draft: "起草",
   deai: "降 AI 味",
   lint: "校验",
+  correct: "校对",
   factcheck: "事实回查",
   score: "评分",
 };

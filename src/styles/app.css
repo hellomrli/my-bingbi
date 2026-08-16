@@ -445,6 +445,117 @@ textarea::placeholder {
   min-height: 72px;
 }
 
+.material-field > span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.material-field > span em {
+  margin-left: auto;
+  color: var(--accent);
+  font-size: var(--fs-micro);
+  font-style: normal;
+}
+
+.material-reference-actions {
+  display: grid;
+  gap: 6px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--r-md);
+  padding: 8px;
+  background: var(--surface-2);
+}
+
+.material-reference-actions > span {
+  color: var(--ink-3);
+  font-size: var(--fs-micro);
+  line-height: 1.45;
+}
+
+.reference-upload-button {
+  width: 100%;
+  cursor: pointer;
+}
+
+.reference-upload-button.is-disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.material-reference-list {
+  display: grid;
+  gap: 4px;
+}
+
+.material-reference-list-heading,
+.material-reference-list li {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+}
+
+.material-reference-list-heading {
+  color: var(--ink-2);
+  font-size: var(--fs-micro);
+  font-weight: 600;
+}
+
+.material-reference-list-heading small {
+  margin-left: auto;
+  color: var(--ink-3);
+  font-weight: 400;
+}
+
+.material-reference-list ul {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.material-reference-list li {
+  min-height: 28px;
+  gap: 6px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.material-reference-list .reference-kind {
+  flex: 0 0 auto;
+  color: var(--accent);
+  font-size: var(--fs-micro);
+}
+
+.material-reference-list .reference-label {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  color: var(--ink-2);
+  font-size: var(--fs-micro);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.material-reference-list .icon-button {
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+}
+
+.reference-status {
+  border-left: 2px solid var(--ok);
+  padding-left: 7px;
+  color: var(--ink-2);
+  font-size: var(--fs-micro);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.reference-status.is-error {
+  border-left-color: var(--danger);
+  color: var(--danger);
+}
+
 .model-text-field small {
   color: var(--ink-3);
 }
@@ -1787,6 +1898,96 @@ textarea::placeholder {
   padding: 8px 10px;
   color: var(--ink-2);
   font-size: var(--fs-micro);
+}
+
+.crash-diagnostics {
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-md);
+  padding: 9px 10px;
+  background: var(--surface-2);
+}
+
+.crash-diagnostics-toolbar,
+.crash-diagnostics-toolbar > div,
+.crash-event-details summary,
+.crash-event-list li > div {
+  display: flex;
+  align-items: center;
+}
+
+.crash-diagnostics-toolbar,
+.crash-event-list li > div {
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.crash-diagnostics-toolbar > div {
+  gap: 5px;
+}
+
+.crash-diagnostics .danger-action {
+  color: var(--danger);
+}
+
+.crash-event-details {
+  min-width: 0;
+  border-top: 1px solid var(--line-soft);
+  padding-top: 7px;
+}
+
+.crash-event-details summary {
+  width: fit-content;
+  gap: 5px;
+  color: var(--ink-2);
+  font-size: var(--fs-micro);
+  cursor: pointer;
+}
+
+.crash-event-list {
+  display: grid;
+  max-height: 210px;
+  gap: 6px;
+  margin: 7px 0 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+
+.crash-event-list li {
+  min-width: 0;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-sm);
+  padding: 7px 8px;
+  background: var(--surface);
+}
+
+.crash-event-list strong,
+.crash-event-list time,
+.crash-event-list small {
+  font-size: var(--fs-micro);
+}
+
+.crash-event-list strong {
+  color: var(--danger);
+}
+
+.crash-event-list time,
+.crash-event-list small {
+  color: var(--ink-3);
+}
+
+.crash-event-list p {
+  margin: 4px 0;
+  color: var(--ink-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.crash-event-list small {
+  display: block;
+  overflow-wrap: anywhere;
 }
 
 .welcome-guide {

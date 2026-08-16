@@ -52,6 +52,7 @@ describe("draft stage identity", () => {
       "draft",
       "deai",
       "lint",
+      "correct",
       "factcheck",
       "score",
     ]);
@@ -67,6 +68,7 @@ describe("draft stage identity", () => {
       "draft",
       "deai",
       "lint",
+      "correct",
       "factcheck",
       "score",
     ]);
@@ -74,7 +76,7 @@ describe("draft stage identity", () => {
   });
 
   it("keeps the polish pipeline to decide, humanize and hard-check", () => {
-    expect([...polishStages]).toEqual(["doctype", "deai", "lint", "factcheck"]);
+    expect([...polishStages]).toEqual(["doctype", "deai", "lint", "correct", "factcheck"]);
     for (const stage of polishStages) {
       expect(draftStageLabels[stage]).toBeTruthy();
     }

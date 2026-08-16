@@ -216,7 +216,8 @@ sequenceDiagram
     participant L as odoc-llm
     participant LT as odoc-lint
 
-    U->>UI: 填要素（机关/事由/对象/材料）
+    U->>UI: 输入写作意图，可引用知识库或上传参考文件
+    UI->>UI: 汇总为带来源标记的起草材料
     UI->>E: draft_start(intake)
     E->>L: ① 文种路由（便宜模型 + pack 决策表）
     L-->>E: doc_type=请示, 置信度, 备选
@@ -232,8 +233,9 @@ sequenceDiagram
     E->>L: ⑥ 降 AI 味 / humanizer 二次审稿
     E->>LT: ⑦ 规则引擎硬校验（格式/词表/AI味/模糊主体）
     LT-->>E: 违规项列表（可定位到节点）
-    E->>E: ⑧ 事实回查：标红未命中的数字/文号/日期
-    E->>L: ⑨ 质量评分（rubric，<80 分回到 ⑥）
+    E->>L: ⑧ 文本校对（仅报告可定位的错别字/标点建议）
+    E->>E: ⑨ 事实回查：标红未命中的数字/文号/日期
+    E->>L: ⑩ 质量评分（rubric，<80 分回到 ⑥）
     E-->>UI: ODoc + 质检报告 + 待核实高亮
     U->>UI: 修改 → 导出
     UI->>E: export(docx, 版式=gb9704)
@@ -556,6 +558,10 @@ stages:
     type: rules                         # 零成本硬校验
     packs: [gb9704-format, renmin-style, local-corpus]
 
+  - id: correct
+    type: llm                         # 只报告可在原文中定位的文本纠错建议
+    prompt: pack://renmin-style#proofreading
+
   - id: factcheck
     type: fact_verify                   # 事实回查，标红
 
@@ -574,7 +580,7 @@ stages:
 - **成本核算**：按 stage 统计 token 与费用。
 - **取消与恢复**：长流程可中断，断点续跑。
 
-**其他流水线**：`polish.yaml`（润色/降 AI 味，已实现：文种路由 → 润色改写 → 规则校验 → 事实回查）、`review.yaml`（审核已有公文，已实现）、`imitate.yaml`（仿写指定范文，已实现）。
+**其他流水线**：`polish.yaml`（润色/降 AI 味，已实现：文种路由 → 润色改写 → 规则校验 → 文本校对 → 事实回查）、`review.yaml`（审核已有公文，已实现）、`imitate.yaml`（仿写指定范文，已实现）。
 
 流水线用 `kind` 区分阶段集合：`draft`（默认，向后兼容不写该字段的旧定义）必须含 `doctype`/`facts`/`outline`/`draft`；`review` 必须含 `doctype`/`lint`/`factcheck`/`review`/`score`，且**禁止声明任何会改写文档的阶段**（`facts`/`outline`/`draft`/`deai`/`export`）——审核只出意见，不动原文，这条边界在内核校验层强制，而不是靠提示词约束。
 
@@ -769,8 +775,8 @@ CI 用 GitHub Actions matrix（`windows-latest` + `ubuntu-22.04`）交叉产出�
 - [x] `odoc-llm`：OpenAI 兼容 + Ollama 两个 Provider，流式输出打通
 - [x] `odoc-pack`：把 ref1/ref2 转成 `gb9704-format`、`renmin-style` 两个包；桌面启动时校验并加载，安装包内资源映射到 `packs/`
 - [x] `odoc-engine`：`draft.yaml` 流水线跑通（文种路由 → 事实提取 → 骨架 → 起草）；已接入 SQLite 会话日志、流式 Tauri IPC 与密级边界
-- [x] 前端：要素表单 + 结构化编辑器 + A4 版式预览；已接入材料输入、Provider 选择、流式起草和低置信度文种确认
-- [x] `odoc-lint`：知识包规则引擎 + 事实回查；已接入 `lint`/`factcheck` stage 和右侧质检面板
+- [x] 前端：要素表单 + 结构化编辑器 + A4 版式预览；已接入材料驱动入口（大致写作意图 + 知识库引用 + TXT/Markdown/CSV/JSON/YAML/PDF/OFD/DOC/DOCX/XLSX/XLS/WPS 上传）、Provider 选择、流式起草和低置信度文种确认，用户无需先写好正文
+- [x] `odoc-lint`：知识包规则引擎 + 事实回查；已接入 `lint`/`correct`/`factcheck` stage 和右侧质检面板
 - [x] 导出：桌面版简化 DOCX（OOXML ZIP + GB/T 9704 页面参数 + 内核 lint/factcheck 阻断）；PDF/WebView 打印待补
 - **验收**：输入"申请购置应急排水设备经费，15 万元，设备老化，强降雨"→ 出一份格式正确的**请示**，质检面板能报出问题，桌面版可导出简化 DOCX（PDF 待补）
 
@@ -803,7 +809,7 @@ CI 用 GitHub Actions matrix（`windows-latest` + `ubuntu-22.04`）交叉产出�
 - [x] 知识包管理 UI（启用/停用；用户包目录 + local-corpus 示例包自建；安装/更新待补）
 - [x] 用户自定义规则（编辑示例包 rules/ 或复制为新包，重启生效）、自定义机关 docx 模板（模板注入法 + 设置页上传）
 - [x] 字体检测与映射（FontFaceSet 探测国标字体缺失 + 设置页提示与映射）；首次运行引导（桌面端三步向导：欢迎 → 模型服务 → 开始使用）
-- [x] 自动更新（tauri-plugin-updater 条件启用 + release 签名产物与 latest.json；发布前置：`tauri signer generate` 后配置 `TAURI_SIGNING_PRIVATE_KEY` secret）；崩溃上报（本地）待补
+- [x] 自动更新（tauri-plugin-updater 条件启用 + release 签名产物与 latest.json；发布前置：`tauri signer generate` 后配置 `TAURI_SIGNING_PRIVATE_KEY` secret）；本地崩溃诊断（用户主动启用后捕获 Rust panic，本机 SQLite 最多保留 100 条，设置页可查看与清空，全程不上传）
 - [x] 文档与示例包（README 同步当前进度与快速开始；local-corpus 自定义规则示例包随用户包目录自动创建）
 - **验收**：一个新用户从下载到产出第一份合格公文，全程无需看文档
 

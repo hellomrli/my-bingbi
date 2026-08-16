@@ -1,4 +1,5 @@
 mod config;
+mod crash;
 mod document;
 mod error;
 mod kb;
@@ -13,6 +14,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 pub use config::{AppConfig, AppTheme};
+pub use crash::LocalCrashReporter;
 pub use document::{DocumentSummary, DocumentVersionSummary, SaveDocumentResult};
 pub use error::{SecretError, StoreError};
 pub use kb::{CostSummary, CrashEvent, KbCacheHit, KbIndexState, PackInstallRecord, UpdateState};

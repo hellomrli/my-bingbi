@@ -1,11 +1,14 @@
 use crate::config::unix_millis;
 use crate::{DocumentStore, StoreError};
 use odoc_kb::{Frontmatter, KbNote};
-use rusqlite::{OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
+use std::path::Path;
+use std::time::Duration;
 use ts_rs::TS;
 
 const MAX_CACHE_LIMIT: u32 = 200;
+const MAX_CRASH_EVENTS: i64 = 100;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -348,9 +351,19 @@ impl DocumentStore {
         message: &str,
         context_json: &str,
     ) -> Result<(), StoreError> {
-        self.connection.execute("INSERT INTO crash_events(kind, message, context_json, created_at) VALUES (?1, ?2, ?3, ?4)",
-            params![kind, message, context_json, unix_millis()?])?;
-        Ok(())
+        insert_crash_event(&self.connection, kind, message, context_json)
+    }
+
+    /// Writes a panic through a short-lived connection without touching the main store mutex.
+    pub(crate) fn record_crash_event_at(
+        path: impl AsRef<Path>,
+        kind: &str,
+        message: &str,
+        context_json: &str,
+    ) -> Result<(), StoreError> {
+        let connection = Connection::open(path)?;
+        connection.busy_timeout(Duration::from_millis(250))?;
+        insert_crash_event(&connection, kind, message, context_json)
     }
 
     /// Lists the most recent crash records, newest first, capped at 100 rows.
@@ -370,6 +383,17 @@ impl DocumentStore {
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>()
+            .map_err(StoreError::from)
+    }
+
+    /// Deletes all locally retained crash records and returns the number removed.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StoreError`] when the delete fails.
+    pub fn clear_crash_events(&self) -> Result<usize, StoreError> {
+        self.connection
+            .execute("DELETE FROM crash_events", [])
             .map_err(StoreError::from)
     }
 
@@ -419,6 +443,25 @@ impl DocumentStore {
             params![record.pack_id, record.source_path, record.enabled, record.installed_at, record.updated_at])?;
         Ok(())
     }
+}
+
+fn insert_crash_event(
+    connection: &Connection,
+    kind: &str,
+    message: &str,
+    context_json: &str,
+) -> Result<(), StoreError> {
+    connection.execute(
+        "INSERT INTO crash_events(kind, message, context_json, created_at) VALUES (?1, ?2, ?3, ?4)",
+        params![kind, message, context_json, unix_millis()?],
+    )?;
+    connection.execute(
+        "DELETE FROM crash_events WHERE id NOT IN (
+            SELECT id FROM crash_events ORDER BY id DESC LIMIT ?1
+        )",
+        params![MAX_CRASH_EVENTS],
+    )?;
+    Ok(())
 }
 
 /// Converts an FTS5 bm25 score into the positive relevance value the UI ranks by.
@@ -480,4 +523,86 @@ fn filter_cache_hits(
     }
     hits.truncate(limit as usize);
     hits
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn crash_events_are_newest_first_bounded_and_clearable() {
+        let store = DocumentStore::open_in_memory().expect("store should open");
+        for index in 0..105 {
+            store
+                .record_crash_event(
+                    "rust_panic",
+                    &format!("panic-{index}"),
+                    &format!(r#"{{"index":{index}}}"#),
+                )
+                .expect("crash event should save");
+        }
+
+        let events = store
+            .list_crash_events(100)
+            .expect("crash events should load");
+        assert_eq!(events.len(), 100);
+        assert_eq!(
+            events.first().map(|event| event.message.as_str()),
+            Some("panic-104")
+        );
+        assert_eq!(
+            events.last().map(|event| event.message.as_str()),
+            Some("panic-5")
+        );
+        assert_eq!(
+            store.clear_crash_events().expect("events should clear"),
+            100
+        );
+        assert!(
+            store
+                .list_crash_events(100)
+                .expect("cleared events should load")
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn crash_event_queries_respect_the_requested_limit() {
+        let store = DocumentStore::open_in_memory().expect("store should open");
+        for index in 0..3 {
+            store
+                .record_crash_event("rust_panic", &format!("panic-{index}"), "{}")
+                .expect("crash event should save");
+        }
+
+        let events = store
+            .list_crash_events(2)
+            .expect("crash events should load");
+        assert_eq!(
+            events
+                .iter()
+                .map(|event| event.message.as_str())
+                .collect::<Vec<_>>(),
+            ["panic-2", "panic-1"]
+        );
+    }
+
+    #[test]
+    fn crash_hook_sink_uses_an_independent_file_connection() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let path = directory.path().join("store.sqlite3");
+        let store = DocumentStore::open(&path).expect("store should open");
+
+        DocumentStore::record_crash_event_at(&path, "rust_panic", "panic", "{}")
+            .expect("independent crash event should save");
+
+        assert_eq!(
+            store
+                .list_crash_events(10)
+                .expect("crash events should load")
+                .first()
+                .map(|event| event.message.as_str()),
+            Some("panic")
+        );
+    }
 }

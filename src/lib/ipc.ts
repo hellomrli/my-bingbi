@@ -13,6 +13,7 @@ import type { ODoc } from "./odoc";
 import type { PackSummary } from "./pack";
 import type {
   AppConfig,
+  CrashEvent,
   DocumentSummary,
   DocumentVersionSummary,
   KbIndexState,
@@ -212,6 +213,25 @@ export async function importDocx(bytes: Uint8Array): Promise<RestoreVersionResul
     throw browserError("import_unavailable", "DOCX 导入仅在桌面应用中可用。");
   }
   return invoke<RestoreVersionResult>("import_docx", { bytes: Array.from(bytes) });
+}
+
+/** Extracts a DOCX reference as plain text without importing it into the document library. */
+export async function extractDocxText(bytes: Uint8Array): Promise<string> {
+  if (!isDesktopRuntime()) {
+    throw browserError("reference_upload_unavailable", "DOCX 参考文件仅可在桌面应用中读取。");
+  }
+  return invoke<string>("extract_docx_text", { bytes: Array.from(bytes) });
+}
+
+/** Extracts a supported binary reference as plain text without importing it into the library. */
+export async function extractReferenceText(fileName: string, bytes: Uint8Array): Promise<string> {
+  if (!isDesktopRuntime()) {
+    throw browserError(
+      "reference_upload_unavailable",
+      "PDF、OFD、DOC、DOCX、XLSX、XLS 和 WPS 参考文件仅可在桌面应用中读取。",
+    );
+  }
+  return invoke<string>("extract_reference_text", { fileName, bytes: Array.from(bytes) });
 }
 
 export async function exportPdf(documentId: string): Promise<PdfExportResult> {
@@ -515,6 +535,20 @@ export async function userPackRoot(): Promise<string | null> {
 export async function packLoadIssues(): Promise<string[]> {
   if (!isDesktopRuntime()) return [];
   return invoke<string[]>("pack_load_issues");
+}
+
+/** Lists the newest opt-in Rust panic diagnostics stored on this device. */
+export async function listCrashEvents(limit = 20): Promise<CrashEvent[]> {
+  if (!isDesktopRuntime()) return [];
+  return invoke<CrashEvent[]>("list_crash_events", { limit });
+}
+
+/** Clears all local panic diagnostics and returns the number removed. */
+export async function clearCrashEvents(): Promise<number> {
+  if (!isDesktopRuntime()) {
+    throw browserError("crash_diagnostics_unavailable", "崩溃诊断仅在桌面应用中可用。");
+  }
+  return invoke<number>("clear_crash_events");
 }
 
 export async function listProviderProfiles(): Promise<ProviderProfile[]> {

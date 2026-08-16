@@ -4,8 +4,9 @@ use odoc_engine::{
     StageOutput,
 };
 use odoc_export::{
-    ExportError, Gb9704Style, print_html, read_docx, validate_docx_template, write_docx_with_style,
-    write_docx_with_template, write_pdf_with_libreoffice,
+    ExportError, Gb9704Style, extract_reference_text as parse_reference_text, print_html,
+    read_docx, validate_docx_template, write_docx_with_style, write_docx_with_template,
+    write_pdf_with_libreoffice,
 };
 use odoc_kb::{
     ChangeKind, FnsPendingChange, FnsProvider, FnsWatchConfig, FnsWatchEvent, KbConfig, KbError,
@@ -19,8 +20,9 @@ use odoc_llm::{
 use odoc_model::{DocumentType, ODoc, SecurityLevel};
 use odoc_pack::{PackRegistry, PackSummary, StageId};
 use odoc_store::{
-    AppConfig, DEFAULT_SECRET_SERVICE, DocumentStore, DocumentSummary, DocumentVersionSummary,
-    KeyringSecretStore, SaveDocumentResult, SecretError, SecretStore, StoreError,
+    AppConfig, CrashEvent, DEFAULT_SECRET_SERVICE, DocumentStore, DocumentSummary,
+    DocumentVersionSummary, KeyringSecretStore, LocalCrashReporter, SaveDocumentResult,
+    SecretError, SecretStore, StoreError,
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -33,6 +35,7 @@ use tauri_plugin_updater::UpdaterExt;
 struct AppState {
     documents: Mutex<DocumentStore>,
     secrets: Box<dyn SecretStore>,
+    crash_reporter: LocalCrashReporter,
     kb_sync_generation: tokio::sync::watch::Sender<u64>,
     user_pack_root: PathBuf,
     pack_issues: Vec<String>,
@@ -78,6 +81,7 @@ struct RerunStageRequest {
 }
 
 const MAX_DRAFT_MATERIAL_BYTES: usize = 2 * 1024 * 1024;
+const MAX_REFERENCE_FILE_BYTES: usize = 64 * 1024 * 1024;
 const MAX_REVIEW_FOCUS_BYTES: usize = 512;
 const KB_FNS_TOKEN_ACCOUNT: &str = "knowledge-base:fns:token";
 const KB_FNS_WS_TOKEN_ACCOUNT: &str = "knowledge-base:fns:ws-token";
@@ -333,6 +337,33 @@ fn pack_load_issues(state: State<'_, AppState>) -> Result<Vec<String>, IpcError>
     Ok(state.pack_issues.clone())
 }
 
+/// Lists opt-in Rust panic diagnostics retained only in the local application database.
+#[tauri::command]
+fn list_crash_events(
+    state: State<'_, AppState>,
+    limit: Option<u32>,
+) -> Result<Vec<CrashEvent>, IpcError> {
+    let limit = limit.unwrap_or(20);
+    if !(1..=100).contains(&limit) {
+        return Err(IpcError {
+            code: "invalid_input",
+            message: "诊断记录数量范围无效。",
+        });
+    }
+    lock_documents(&state)?
+        .list_crash_events(limit)
+        .map_err(map_store_error)
+}
+
+/// Clears every locally retained panic diagnostic and returns the number removed.
+#[tauri::command]
+fn clear_crash_events(state: State<'_, AppState>) -> Result<u32, IpcError> {
+    let deleted = lock_documents(&state)?
+        .clear_crash_events()
+        .map_err(map_store_error)?;
+    Ok(deleted.try_into().unwrap_or(u32::MAX))
+}
+
 /// Creates the user pack root, seeding a commented example pack when the root is empty.
 ///
 /// The example pack demonstrates custom deterministic rules: edit `rules/format.yaml` and
@@ -535,7 +566,11 @@ fn save_app_config(state: State<'_, AppState>, config: AppConfig) -> Result<(), 
     validate_app_config(&config)?;
     lock_documents(&state)?
         .save_app_config(&config)
-        .map_err(map_store_error)
+        .map_err(map_store_error)?;
+    state
+        .crash_reporter
+        .set_enabled(config.crash_reporting_enabled);
+    Ok(())
 }
 
 #[tauri::command]
@@ -1360,6 +1395,43 @@ fn import_docx(
         .save_document(&document, Some("docx_import"))
         .map_err(map_store_error)?;
     Ok(RestoreVersionResult { document, saved })
+}
+
+/// Extracts semantic text from a DOCX reference without saving or changing the current document.
+///
+/// This is intentionally separate from `import_docx`: an uploaded reference is only input to a
+/// later drafting run and must not appear in the document library as an imported draft.
+#[tauri::command]
+fn extract_docx_text(bytes: Vec<u8>) -> Result<String, IpcError> {
+    extract_reference_text("reference.docx".to_owned(), bytes)
+}
+
+/// Extracts bounded plain text from a binary drafting reference without importing it.
+#[tauri::command]
+fn extract_reference_text(file_name: String, bytes: Vec<u8>) -> Result<String, IpcError> {
+    if bytes.is_empty() || bytes.len() > MAX_REFERENCE_FILE_BYTES {
+        return Err(IpcError {
+            code: "reference_too_large",
+            message: "参考文件为空或超过 64 MiB 限制。",
+        });
+    }
+    if file_name.trim().is_empty()
+        || file_name.len() > 512
+        || file_name.contains(['\0', '\r', '\n'])
+    {
+        return Err(IpcError {
+            code: "reference_invalid",
+            message: "参考文件名或文件结构无效，无法读取。",
+        });
+    }
+    let text = parse_reference_text(&file_name, &bytes).map_err(map_reference_error)?;
+    if text.trim().is_empty() || text.len() > MAX_DRAFT_MATERIAL_BYTES {
+        return Err(IpcError {
+            code: "reference_too_large",
+            message: "参考文件提取后的文字为空或超过起草材料 2 MiB 限制。",
+        });
+    }
+    Ok(text)
 }
 
 #[tauri::command]
@@ -2381,6 +2453,23 @@ fn map_import_error(error: ExportError) -> IpcError {
     }
 }
 
+fn map_reference_error(error: ExportError) -> IpcError {
+    match error {
+        ExportError::PackageTooLarge => IpcError {
+            code: "reference_too_large",
+            message: "参考文件超过 64 MiB，内部内容超过安全限制，或提取文字超过 2 MiB。",
+        },
+        ExportError::UnsupportedReferenceFormat => IpcError {
+            code: "reference_unsupported",
+            message: "暂不支持该参考文件格式。支持 PDF、OFD、DOC、DOCX、XLSX、XLS 和 WPS。",
+        },
+        _ => IpcError {
+            code: "reference_invalid",
+            message: "参考文件结构无效、已加密、为纯扫描件，或没有可提取的文字。",
+        },
+    }
+}
+
 fn map_template_error(error: ExportError) -> IpcError {
     match error {
         ExportError::TemplateMarkerMissing => IpcError {
@@ -2449,7 +2538,13 @@ pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
             let database_path = DocumentStore::default_database_path()?;
-            let documents = DocumentStore::open(database_path)?;
+            let documents = DocumentStore::open(&database_path)?;
+            let crash_reporter = LocalCrashReporter::new(
+                &database_path,
+                env!("CARGO_PKG_VERSION"),
+                documents.app_config()?.crash_reporting_enabled,
+            );
+            crash_reporter.install();
             let secrets = KeyringSecretStore::new(DEFAULT_SECRET_SERVICE)?;
             // The updater needs a release signing key; only the release pipeline has one, so
             // the plugin is registered conditionally and dev/CI builds stay signature-free.
@@ -2470,6 +2565,7 @@ pub fn run() {
             app.manage(AppState {
                 documents: Mutex::new(documents),
                 secrets: Box::new(secrets),
+                crash_reporter,
                 kb_sync_generation,
                 user_pack_root,
                 pack_issues: pack_issues
@@ -2487,6 +2583,8 @@ pub fn run() {
             list_pack_summaries,
             user_pack_root,
             pack_load_issues,
+            list_crash_events,
+            clear_crash_events,
             check_for_update,
             apply_update,
             save_document,
@@ -2533,6 +2631,8 @@ pub fn run() {
             review_start,
             export_docx,
             import_docx,
+            extract_docx_text,
+            extract_reference_text,
             export_pdf,
             export_capabilities,
             save_docx_template,
@@ -2633,6 +2733,7 @@ mod tests {
         let state = AppState {
             documents: Mutex::new(store),
             secrets: Box::new(odoc_store::MemorySecretStore::default()),
+            crash_reporter: LocalCrashReporter::new("/tmp/bingbi-test.sqlite3", "0.1.0", false),
             kb_sync_generation: tokio::sync::watch::channel(0_u64).0,
             user_pack_root: PathBuf::from("/tmp/user-packs"),
             pack_issues: Vec::new(),
@@ -2684,6 +2785,20 @@ mod tests {
             ..empty
         };
         assert!(validate_draft_start_request(&oversized).is_err());
+    }
+
+    #[test]
+    fn reference_upload_stays_outside_document_import_and_has_stable_errors() {
+        let error = extract_docx_text(Vec::new()).expect_err("empty reference should fail");
+        assert_eq!(error.code, "reference_too_large");
+        assert_eq!(
+            map_reference_error(ExportError::InvalidXml).code,
+            "reference_invalid"
+        );
+        assert_eq!(
+            map_reference_error(ExportError::PackageTooLarge).code,
+            "reference_too_large"
+        );
     }
 
     #[test]
@@ -2756,6 +2871,7 @@ mod tests {
         let state = AppState {
             documents: Mutex::new(store),
             secrets: Box::new(odoc_store::MemorySecretStore::default()),
+            crash_reporter: LocalCrashReporter::new("/tmp/bingbi-test.sqlite3", "0.1.0", false),
             kb_sync_generation: tokio::sync::watch::channel(0_u64).0,
             user_pack_root: PathBuf::from("/tmp/user-packs"),
             pack_issues: Vec::new(),

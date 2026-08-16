@@ -6,11 +6,13 @@
 
 mod import;
 mod pdf;
+mod reference;
 mod style;
 mod template;
 
 pub use import::read_docx;
 pub use pdf::{find_libreoffice, print_html, write_pdf_with_libreoffice};
+pub use reference::extract_reference_text;
 pub use style::{FontStyle, FontStyles, Gb9704Style, HeaderStyle, PageStyle, StyleError};
 pub use template::{validate_docx_template, write_docx_with_template};
 
@@ -66,6 +68,10 @@ pub enum ExportError {
     TemplateMarkerMissing,
     #[error("docx package exceeds the configured safety limit")]
     PackageTooLarge,
+    #[error("reference file format is not supported")]
+    UnsupportedReferenceFormat,
+    #[error("reference file structure is invalid or contains no readable text")]
+    InvalidReference,
     #[error("LibreOffice is not available")]
     LibreOfficeUnavailable,
     #[error("LibreOffice could not convert the document")]

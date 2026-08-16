@@ -1,13 +1,101 @@
-import { BookOpen, Check, Database, FilePlus2, LoaderCircle, Play, Search, ShieldAlert, Sparkles } from "lucide-react";
-import { FormEvent, useState } from "react";
+import { BookOpen, Check, Database, FilePlus2, FileUp, LoaderCircle, Play, Search, ShieldAlert, Sparkles, X } from "lucide-react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { documentTypeLabels, securityLabels } from "../../lib/document";
-import { ipcErrorMessage, kbGet, kbSearch } from "../../lib/ipc";
+import { extractDocxText, extractReferenceText, ipcErrorMessage, kbGet, kbSearch } from "../../lib/ipc";
 import type { KbHit, KbNote } from "../../lib/kb";
 import type { ProviderProfile } from "../../lib/llm";
 import type { DocumentType, SecurityLevel } from "../../lib/odoc";
 import type { TypeDecision } from "../../lib/generated/engine";
 import type { DraftStageId } from "../../lib/engine";
 import { useWorkbenchStore } from "../../store/workbench";
+
+const MAX_DRAFT_MATERIAL_BYTES = 2 * 1024 * 1024;
+const MAX_REFERENCE_FILE_BYTES = 64 * 1024 * 1024;
+const TEXT_REFERENCE_EXTENSIONS = new Set(["txt", "md", "markdown", "csv", "json", "yaml", "yml"]);
+const BINARY_REFERENCE_EXTENSIONS = new Set(["pdf", "ofd", "doc", "docx", "xlsx", "xls", "wps"]);
+const REFERENCE_FORMAT_MESSAGE = "暂支持 TXT、Markdown、CSV、JSON、YAML、PDF、OFD、DOC、DOCX、XLSX、XLS 和 WPS。";
+const REFERENCE_START_PREFIX = "【参考来源｜";
+const REFERENCE_END_MARKER = "【参考来源结束】";
+
+interface MaterialReference {
+  kind: "知识库" | "上传文件";
+  label: string;
+  start: number;
+  end: number;
+}
+
+function fileExtension(name: string): string {
+  const dot = name.lastIndexOf(".");
+  return dot >= 0 ? name.slice(dot + 1).toLowerCase() : "";
+}
+
+function safeReferenceLabel(value: string): string {
+  return value
+    .replace(/[\u0000-\u001f\u007f]/g, " ")
+    .replaceAll("【", "［")
+    .replaceAll("】", "］")
+    .trim()
+    .slice(0, 160) || "未命名参考文件";
+}
+
+function materialByteLength(value: string): number {
+  return new Blob([value]).size;
+}
+
+async function readReferenceBytes(file: File): Promise<ArrayBuffer> {
+  if (typeof file.arrayBuffer === "function") {
+    try {
+      return await file.arrayBuffer();
+    } catch {
+      // Fall back to FileReader for WebViews with a partial Blob implementation.
+    }
+  }
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (reader.result instanceof ArrayBuffer) resolve(reader.result);
+      else reject(new Error("参考文件读取失败"));
+    };
+    reader.onerror = () => reject(reader.error ?? new Error("参考文件读取失败"));
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+function decodeTextReference(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  if (bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xfe) {
+    return new TextDecoder("utf-16le").decode(bytes);
+  }
+  if (bytes.length >= 2 && bytes[0] === 0xfe && bytes[1] === 0xff) {
+    return new TextDecoder("utf-16be").decode(bytes);
+  }
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    // Windows-produced TXT/CSV files in Chinese offices are commonly GBK/GB18030.
+    return new TextDecoder("gb18030", { fatal: true }).decode(bytes);
+  }
+}
+
+async function readTextReference(file: File): Promise<string> {
+  return decodeTextReference(await readReferenceBytes(file));
+}
+
+function parseMaterialReferences(value: string): MaterialReference[] {
+  const pattern = /【参考来源｜(知识库|上传文件)：([^\r\n】]+)】\r?\n[\s\S]*?\r?\n【参考来源结束】/g;
+  return Array.from(value.matchAll(pattern), (match) => ({
+    kind: match[1] as MaterialReference["kind"],
+    label: match[2],
+    start: match.index,
+    end: match.index + match[0].length,
+  }));
+}
+
+function safeReferenceContent(value: string): string {
+  return value
+    .replaceAll(REFERENCE_START_PREFIX, "［参考来源｜")
+    .replaceAll(REFERENCE_END_MARKER, "［参考来源结束］");
+}
 
 interface IntakeSidebarProps {
   material: string;
@@ -70,6 +158,23 @@ export function IntakeSidebar({
   const [sourceError, setSourceError] = useState<string | null>(null);
   const [selectedNote, setSelectedNote] = useState<KbNote | null>(null);
   const [hasSearched, setHasSearched] = useState(false);
+  const [referenceStatus, setReferenceStatus] = useState<{ message: string; error: boolean } | null>(null);
+  const [referenceBusy, setReferenceBusy] = useState(false);
+  const materialRef = useRef(material);
+  const materialReferences = useMemo(() => parseMaterialReferences(material), [material]);
+
+  useEffect(() => {
+    materialRef.current = material;
+  }, [material]);
+
+  function changeMaterial(value: string) {
+    if (materialByteLength(value) > MAX_DRAFT_MATERIAL_BYTES) {
+      setReferenceStatus({ message: "起草材料超过 2 MiB 限制，请删减文字或参考来源。", error: true });
+      return;
+    }
+    materialRef.current = value;
+    onMaterialChange(value);
+  }
 
   async function searchSources(event: FormEvent) {
     event.preventDefault();
@@ -108,18 +213,123 @@ export function IntakeSidebar({
     }
   }
 
-  function addSourceToMaterial() {
-    if (!selectedNote) return;
-    const source = `【知识库素材：${selectedNote.title}｜${selectedNote.path}】\n${selectedNote.content.trim()}`;
-    if (new Blob([material, source]).size > 2 * 1024 * 1024) {
-      setSourceError("加入后将超过起草材料的 2 MiB 限制，请先摘取所需段落。");
+  function appendReference(kind: "知识库" | "上传文件", label: string, content: string): boolean {
+    const safeLabel = safeReferenceLabel(label);
+    const cleaned = safeReferenceContent(content.trim());
+    if (!cleaned) {
+      setReferenceStatus({ message: `${safeLabel} 没有可读取的文字。`, error: true });
+      return false;
+    }
+    if (cleaned.includes("\0")) {
+      setReferenceStatus({ message: `${safeLabel} 含有不可处理的控制字符，请先转换为纯文本。`, error: true });
+      return false;
+    }
+    const marker = `${REFERENCE_START_PREFIX}${kind}：${safeLabel}】`;
+    const currentMaterial = materialRef.current;
+    if (currentMaterial.includes(marker)) {
+      setReferenceStatus({ message: `${safeLabel} 已经加入起草材料。`, error: true });
+      return false;
+    }
+    const source = `${marker}\n${cleaned}\n${REFERENCE_END_MARKER}`;
+    const next = currentMaterial.trim() ? `${currentMaterial.trim()}\n\n${source}` : source;
+    if (materialByteLength(next) > MAX_DRAFT_MATERIAL_BYTES) {
+      setReferenceStatus({ message: "加入后将超过起草材料的 2 MiB 限制，请先摘取所需段落。", error: true });
+      return false;
+    }
+    changeMaterial(next);
+    setReferenceStatus({ message: `已引用：${safeLabel}`, error: false });
+    return true;
+  }
+
+  function removeReference(kind: MaterialReference["kind"], label: string) {
+    if (drafting || referenceBusy) return;
+    const currentMaterial = materialRef.current;
+    const reference = parseMaterialReferences(currentMaterial).find(
+      (candidate) => candidate.kind === kind && candidate.label === label,
+    );
+    if (!reference) {
+      setReferenceStatus({ message: "该参考来源已不存在，请刷新后重试。", error: true });
       return;
     }
-    onMaterialChange(material.trim() ? `${material.trim()}\n\n${source}` : source);
-    setSourceError(null);
+    const before = currentMaterial.slice(0, reference.start).trimEnd();
+    const after = currentMaterial.slice(reference.end).trimStart();
+    changeMaterial(before && after ? `${before}\n\n${after}` : before || after);
+    setReferenceStatus({ message: `已移除：${label}`, error: false });
+  }
+
+  function addSourceToMaterial() {
+    if (!selectedNote || drafting || referenceBusy) return;
+    appendReference("知识库", `${selectedNote.title}｜${selectedNote.path}`, selectedNote.content);
+  }
+
+  async function addUploadedReferences(files: File[]) {
+    if (files.length === 0 || drafting || referenceBusy) return;
+    setReferenceBusy(true);
+    try {
+      for (const file of files) {
+        const extension = fileExtension(file.name);
+        const label = safeReferenceLabel(file.name);
+        if (file.size === 0) {
+          setReferenceStatus({ message: `${label} 是空文件。`, error: true });
+          continue;
+        }
+        if (extension === "docx") {
+          if (!desktopRuntime) {
+            setReferenceStatus({ message: "浏览器预览不能解析 DOCX，请在桌面版上传。", error: true });
+            continue;
+          }
+          if (file.size > MAX_REFERENCE_FILE_BYTES) {
+            setReferenceStatus({ message: "DOCX 参考文件超过 64 MiB 限制。", error: true });
+            continue;
+          }
+          setReferenceStatus({ message: `正在读取 ${label}…`, error: false });
+          try {
+            const text = await extractDocxText(new Uint8Array(await readReferenceBytes(file)));
+            appendReference("上传文件", label, text);
+          } catch (error) {
+            setReferenceStatus({ message: ipcErrorMessage(error), error: true });
+          }
+          continue;
+        }
+        if (BINARY_REFERENCE_EXTENSIONS.has(extension)) {
+          if (!desktopRuntime) {
+            setReferenceStatus({ message: `${REFERENCE_FORMAT_MESSAGE} ${extension.toUpperCase()} 参考文件需要在桌面版读取。`, error: true });
+            continue;
+          }
+          if (file.size > MAX_REFERENCE_FILE_BYTES) {
+            setReferenceStatus({ message: `${extension.toUpperCase()} 参考文件超过 64 MiB 限制。`, error: true });
+            continue;
+          }
+          setReferenceStatus({ message: `正在读取 ${label}…`, error: false });
+          try {
+            const text = await extractReferenceText(file.name, new Uint8Array(await readReferenceBytes(file)));
+            appendReference("上传文件", label, text);
+          } catch (error) {
+            setReferenceStatus({ message: ipcErrorMessage(error), error: true });
+          }
+          continue;
+        }
+        if (!TEXT_REFERENCE_EXTENSIONS.has(extension) && !file.type.startsWith("text/")) {
+          setReferenceStatus({ message: REFERENCE_FORMAT_MESSAGE, error: true });
+          continue;
+        }
+        if (file.size > MAX_DRAFT_MATERIAL_BYTES) {
+          setReferenceStatus({ message: "文本参考文件超过起草材料 2 MiB 限制。", error: true });
+          continue;
+        }
+        setReferenceStatus({ message: `正在读取 ${label}…`, error: false });
+        try {
+          appendReference("上传文件", label, await readTextReference(file));
+        } catch (error) {
+          setReferenceStatus({ message: ipcErrorMessage(error), error: true });
+        }
+      }
+    } finally {
+      setReferenceBusy(false);
+    }
   }
   const stageLabel = draftStage
-    ? ({ doctype: "文种识别", facts: "事实提取", retrieve: "知识检索", style: "笔法分析", outline: "骨架生成", draft: "正文起草", deai: "降 AI 味", lint: "规则校验", factcheck: "事实回查", score: "质量评分" } as const)[draftStage]
+    ? ({ doctype: "文种识别", facts: "事实提取", retrieve: "知识检索", style: "笔法分析", outline: "骨架生成", draft: "正文起草", deai: "降 AI 味", lint: "规则校验", correct: "文本校对", factcheck: "事实回查", score: "质量评分" } as const)[draftStage]
     : null;
 
   return (
@@ -208,19 +418,69 @@ export function IntakeSidebar({
         </div>
         <div className="draft-form">
           <label className="field material-field">
-            <span>起草材料</span>
+            <span>写作意图与基础材料 <em>不必先写正文</em></span>
             <textarea
               value={material}
-              onChange={(event) => onMaterialChange(event.target.value)}
-              placeholder="粘贴背景、事项、数据、时限和依据。模型只使用这里提供的事实。"
+              onChange={(event) => changeMaterial(event.target.value)}
+              placeholder="写下想解决什么问题、准备做什么、对象和时限即可；也可以只上传/引用文件，让模型先提取事实再起草。"
               rows={6}
-              maxLength={2 * 1024 * 1024}
+              maxLength={MAX_DRAFT_MATERIAL_BYTES}
               disabled={drafting}
             />
-            <small>{material.length.toLocaleString("zh-CN")} 字符</small>
+            <small>{material.length.toLocaleString("zh-CN")} 字符 · {materialByteLength(material).toLocaleString("zh-CN")} 字节 / 2 MiB</small>
           </label>
+          <div className="material-reference-actions">
+            <span>可一次选择多个参考文件；它们会进入完整起草流程：事实提取、检索、起草、校验和事实回查。</span>
+            <label className={"command-button reference-upload-button" + (drafting || referenceBusy ? " is-disabled" : "")}>
+              <FileUp size={14} />
+              上传参考文件
+              <input
+                className="visually-hidden"
+                type="file"
+                multiple
+                accept=".txt,.md,.markdown,.csv,.json,.yaml,.yml,.pdf,.ofd,.doc,.docx,.xlsx,.xls,.wps,text/plain,text/markdown,application/json,application/yaml,application/pdf,application/ofd,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,application/vnd.ms-works"
+                disabled={drafting || referenceBusy}
+                onChange={(event) => {
+                  const files = Array.from(event.target.files ?? []);
+                  event.target.value = "";
+                  void addUploadedReferences(files);
+                }}
+              />
+            </label>
+          </div>
+          {materialReferences.length > 0 && (
+            <div className="material-reference-list" aria-label="已引用的参考来源">
+              <div className="material-reference-list-heading">
+                <span>已引用来源</span>
+                <small>{materialReferences.length} 份</small>
+              </div>
+              <ul>
+                {materialReferences.map((reference) => (
+                  <li key={`${reference.kind}:${reference.label}`}>
+                    <span className="reference-kind">{reference.kind === "知识库" ? "库" : "文件"}</span>
+                    <span className="reference-label" title={reference.label}>{reference.label}</span>
+                    <button
+                      className="icon-button tiny"
+                      type="button"
+                      onClick={() => removeReference(reference.kind, reference.label)}
+                      disabled={drafting || referenceBusy}
+                      title={`移除 ${reference.label}`}
+                      aria-label={`移除参考来源 ${reference.label}`}
+                    >
+                      <X size={13} />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {referenceStatus && (
+            <div className={"reference-status" + (referenceStatus.error ? " is-error" : "")} role={referenceStatus.error ? "alert" : "status"}>
+              {referenceStatus.message}
+            </div>
+          )}
           <label className="field model-text-field">
-            <span>范文（仿写模式）</span>
+            <span>范文（可选，仿写模式）</span>
             <textarea
               value={modelText}
               onChange={(event) => onModelTextChange(event.target.value)}
@@ -285,8 +545,8 @@ export function IntakeSidebar({
             className="command-button primary draft-start-button"
             type="button"
             onClick={onStartDraft}
-            disabled={drafting || !material.trim() || !providerId || providerBlocked || !selectedProvider?.enabled}
-            title={providerBlocked ? "当前密级禁止使用云端模型" : undefined}
+            disabled={drafting || referenceBusy || !material.trim() || !providerId || providerBlocked || !selectedProvider?.enabled}
+            title={referenceBusy ? "正在读取参考文件，请稍候" : !material.trim() ? "请填写写作意图，或上传/引用至少一份参考文件" : providerBlocked ? "当前密级禁止使用云端模型" : undefined}
           >
             {drafting ? <LoaderCircle size={15} className="is-spinning" /> : <Play size={15} />}
             {drafting ? "正在起草" : typeDecision ? "重新起草" : "开始起草"}
@@ -295,8 +555,8 @@ export function IntakeSidebar({
             className="command-button imitate-start-button"
             type="button"
             onClick={onStartImitate}
-            disabled={drafting || !material.trim() || !modelText.trim() || !providerId || providerBlocked || !selectedProvider?.enabled}
-            title={!modelText.trim() ? "请先粘贴范文" : providerBlocked ? "当前密级禁止使用云端模型" : undefined}
+            disabled={drafting || referenceBusy || !material.trim() || !modelText.trim() || !providerId || providerBlocked || !selectedProvider?.enabled}
+            title={referenceBusy ? "正在读取参考文件，请稍候" : !material.trim() ? "请填写写作意图，或上传/引用至少一份参考文件" : !modelText.trim() ? "请先粘贴范文" : providerBlocked ? "当前密级禁止使用云端模型" : undefined}
           >
             {drafting ? <LoaderCircle size={15} className="is-spinning" /> : <FilePlus2 size={15} />}
             仿写起草
@@ -305,8 +565,8 @@ export function IntakeSidebar({
             className="command-button polish-start-button"
             type="button"
             onClick={onStartPolish}
-            disabled={drafting || !material.trim() || !providerId || providerBlocked || !selectedProvider?.enabled}
-            title={providerBlocked ? "当前密级禁止使用云端模型" : "把起草材料原地润色为具体、稳妥的公文表达"}
+            disabled={drafting || referenceBusy || !material.trim() || !providerId || providerBlocked || !selectedProvider?.enabled}
+            title={referenceBusy ? "正在读取参考文件，请稍候" : providerBlocked ? "当前密级禁止使用云端模型" : "润色已有正文；只提供意图或参考文件时请使用开始起草"}
           >
             {drafting ? <LoaderCircle size={15} className="is-spinning" /> : <Sparkles size={15} />}
             润色改写
@@ -317,14 +577,14 @@ export function IntakeSidebar({
       <section className="panel-section source-section">
         <div className="panel-heading">
           <Database size={14} />
-          <span>库中素材</span>
+          <span>知识库引用</span>
           <span className="panel-count">{kbEnabled ? `${sourceHits.length} 项` : "未启用"}</span>
         </div>
         <form className="source-search" onSubmit={searchSources}>
           <Search size={14} />
           <input
             aria-label="搜索素材"
-            placeholder={kbEnabled ? "搜索历史公文" : "请先在设置中启用知识库"}
+            placeholder={kbEnabled ? "搜索可引用的历史公文/政策文件" : "请先在设置中启用知识库"}
             value={sourceQuery}
             onChange={(event) => setSourceQuery(event.target.value)}
             disabled={!kbEnabled || sourceBusy}
@@ -347,9 +607,9 @@ export function IntakeSidebar({
               <span>{selectedNote.path}</span>
             </div>
             <p>{selectedNote.content}</p>
-            <button className="command-button" type="button" onClick={addSourceToMaterial}>
+            <button className="command-button" type="button" onClick={addSourceToMaterial} disabled={drafting || referenceBusy}>
               <FilePlus2 size={14} />
-              加入起草材料
+              引用到起草材料
             </button>
           </article>
         )}
