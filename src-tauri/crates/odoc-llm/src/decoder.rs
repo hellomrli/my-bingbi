@@ -1,6 +1,7 @@
 use crate::LlmError;
 
 const MAX_FRAME_BYTES: usize = 1024 * 1024;
+const MAX_JSON_SUBSTRING_CANDIDATES: usize = 64;
 
 #[derive(Default)]
 pub(crate) struct SseDecoder {
@@ -143,8 +144,8 @@ mod tests {
 /// Parses model JSON output with tolerant fallbacks for common LLM formatting slips.
 ///
 /// Attempts in order: the raw text, the text inside a code fence, the text with unescaped
-/// newlines inside string values repaired, and finally the substring between the first `{`
-/// and the last `}`. Any successful attempt returns the parsed value.
+/// newlines inside string values repaired, and finally balanced object/array values extracted
+/// from surrounding prose. Any successful attempt returns the parsed value.
 ///
 /// # Errors
 ///
@@ -153,19 +154,25 @@ pub fn parse_model_json<T: serde::de::DeserializeOwned>(
     content: &str,
 ) -> Result<T, serde_json::Error> {
     let trimmed = content.trim();
-    let escaped = escape_string_newlines(trimmed);
-    let braced = brace_substring(trimmed);
+    let fenced = strip_code_fence(trimmed);
     let candidates = [
-        trimmed,
-        strip_code_fence(trimmed),
-        escaped.as_str(),
-        braced.as_str(),
+        trimmed.to_owned(),
+        fenced.to_owned(),
+        escape_string_newlines(trimmed),
+        escape_string_newlines(fenced),
     ];
-    for candidate in candidates {
+    for candidate in &candidates {
         if let Ok(value) = serde_json::from_str(candidate) {
             return Ok(value);
         }
     }
+
+    for source in [trimmed, fenced] {
+        if let Some(value) = parse_json_substring(source) {
+            return Ok(value);
+        }
+    }
+
     serde_json::from_str(content)
 }
 
@@ -211,18 +218,61 @@ fn escape_string_newlines(content: &str) -> String {
     output
 }
 
-fn brace_substring(content: &str) -> String {
-    let Some(start) = content.find('{') else {
-        return content.to_owned();
-    };
-    let Some(end) = content.rfind('}') else {
-        return content.to_owned();
-    };
-    if end > start {
-        content[start..=end].to_owned()
-    } else {
-        content.to_owned()
+/// Parses balanced object/array slices while preserving nested values and braces in strings.
+fn parse_json_substring<T: serde::de::DeserializeOwned>(content: &str) -> Option<T> {
+    let bytes = content.as_bytes();
+    let mut candidate_count = 0;
+    for (start, byte) in bytes.iter().copied().enumerate() {
+        if !matches!(byte, b'{' | b'[') {
+            continue;
+        }
+        candidate_count += 1;
+        if candidate_count > MAX_JSON_SUBSTRING_CANDIDATES {
+            break;
+        }
+        let mut stack = vec![byte];
+        let mut in_string = false;
+        let mut escaped = false;
+        for (index, current) in bytes.iter().copied().enumerate().skip(start + 1) {
+            if in_string {
+                if escaped {
+                    escaped = false;
+                } else if current == b'\\' {
+                    escaped = true;
+                } else if current == b'"' {
+                    in_string = false;
+                }
+                continue;
+            }
+            match current {
+                b'"' => in_string = true,
+                b'{' | b'[' => stack.push(current),
+                b'}' | b']' => {
+                    let matches = stack.last().is_some_and(|opening| {
+                        (*opening == b'{' && current == b'}')
+                            || (*opening == b'[' && current == b']')
+                    });
+                    if !matches {
+                        break;
+                    }
+                    stack.pop();
+                    if stack.is_empty() {
+                        let candidate = &content[start..=index];
+                        if let Ok(value) = serde_json::from_str(candidate) {
+                            return Some(value);
+                        }
+                        let repaired = escape_string_newlines(candidate);
+                        if let Ok(value) = serde_json::from_str(&repaired) {
+                            return Some(value);
+                        }
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
     }
+    None
 }
 
 #[cfg(test)]
@@ -276,5 +326,20 @@ mod json_tests {
                 value: "ok".to_owned()
             }
         );
+    }
+
+    #[test]
+    fn extracts_arrays_from_surrounding_prose() {
+        let noisy = "审核结果如下：[{\"value\":\"first\"},{\"value\":\"second\"}]。";
+        let values = parse_model_json::<Vec<Sample>>(noisy).expect("array substring should parse");
+        assert_eq!(values.len(), 2);
+        assert_eq!(values[1].value, "second");
+    }
+
+    #[test]
+    fn preserves_braces_inside_json_strings() {
+        let noisy = "结果：{\"value\":\"文本中的 {花括号} 保留\"}。";
+        let value = parse_model_json::<Sample>(noisy).expect("braces in strings should parse");
+        assert_eq!(value.value, "文本中的 {花括号} 保留");
     }
 }

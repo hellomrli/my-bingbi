@@ -2475,7 +2475,7 @@ dependencies = [
 
 [[package]]
 name = "my-bingbi"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "odoc-engine",
  "odoc-export",

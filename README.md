@@ -104,8 +104,8 @@ cargo run -p odoc-engine --example export_engine_bindings
 推送版本 tag 会自动在 GitHub Actions 的原生 runner 上构建 Linux `.deb` 和 Windows NSIS `.exe`，并创建对应的 GitHub Release：
 
 ```bash
-git tag v0.1.2
-git push origin v0.1.2
+git tag v0.1.3
+git push origin v0.1.3
 ```
 
 发布工作流位于 [`.github/workflows/release.yml`](.github/workflows/release.yml)，只匹配 `v*` tag；构建完成前不会创建 Release。

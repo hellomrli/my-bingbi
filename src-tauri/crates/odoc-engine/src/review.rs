@@ -268,7 +268,11 @@ impl<'a, J: DraftJournal, P: LlmProvider + ?Sized> ReviewEngine<'a, J, P> {
             .provider
             .chat(self.model_request(stage, context)?)
             .await?;
-        let value = serde_json::from_str(&response.content).map_err(|_| {
+        // Providers frequently wrap JSON in a markdown fence or add a short explanation even
+        // when JSON mode is requested. Keep review stages consistent with the draft pipeline's
+        // tolerant decoder so that a harmless presentation wrapper does not become a hard
+        // pipeline failure.
+        let value = odoc_llm::parse_model_json(&response.content).map_err(|_| {
             EngineError::InvalidModelOutput {
                 stage: stage.id,
                 reason: "expected valid JSON",
@@ -652,6 +656,30 @@ stages:
             before,
             "review must not modify the document under inspection"
         );
+    }
+
+    #[tokio::test]
+    async fn review_accepts_json_wrapped_in_markdown_and_prose() {
+        let provider = FakeReviewProvider::with_review(
+            "模型说明：以下是审核结果。\n```json\n{\"findings\":[],\"summary\":\"格式正常\",\"missingInformation\":[]}\n```",
+        );
+        let packs = packs();
+        let journal = crate::NoopJournal;
+        let engine = ReviewEngine::new(review_pipeline(), &packs, &provider, &journal)
+            .expect("engine builds");
+
+        let outcome = engine
+            .run(
+                ReviewInput {
+                    document: sample_document(),
+                    focus: None,
+                },
+                None,
+            )
+            .await
+            .expect("wrapped JSON should still be accepted");
+
+        assert_eq!(outcome.review_report.summary, "格式正常");
     }
 
     #[tokio::test]

@@ -760,13 +760,14 @@ impl<'a, J: DraftJournal, P: LlmProvider + ?Sized> DraftEngine<'a, J, P> {
     ) -> Result<StageOutput, EngineError> {
         let mut output = self.model_text(stage, context, event_sender).await?;
         if stage.json_mode {
-            serde_json::from_str::<serde_json::Value>(&output.content).map_err(|_| {
-                EngineError::InvalidModelOutput {
-                    stage: stage.id,
-                    reason: "expected valid JSON",
-                }
-            })?;
-            output.json = Some(output.content.clone());
+            let value =
+                odoc_llm::parse_model_json::<serde_json::Value>(&output.content).map_err(|_| {
+                    EngineError::InvalidModelOutput {
+                        stage: stage.id,
+                        reason: "expected valid JSON",
+                    }
+                })?;
+            output.json = Some(serde_json::to_string(&value)?);
         }
         Ok(output)
     }
