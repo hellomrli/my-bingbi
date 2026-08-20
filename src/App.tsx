@@ -13,7 +13,7 @@ import { SessionHistoryDialog } from "./features/documents/SessionHistoryDialog"
 import { SettingsDialog } from "./features/settings/SettingsDialog";
 import { Toolbar } from "./features/workbench/Toolbar";
 import { countChineseCharacters, documentTypeLabels } from "./lib/document";
-import { draftStageLabels, draftStages, imitateStages, polishStages, rerunStage, startDraft, startImitate, startPolish, type DraftStageId } from "./lib/engine";
+import { draftStageLabels, draftStages, imitateStages, polishStages, rerunStage, shouldApplyDraftOutcome, shouldApplyRerunOutcome, startDraft, startImitate, startPolish, type DraftStageId } from "./lib/engine";
 import { isReviewStage, startReview, type ReviewStageId } from "./lib/review";
 import {
   backendVersion,
@@ -131,6 +131,9 @@ function App() {
   // Tracks the stage a failed review died on: the state value read inside the catch block would
   // still be whatever it was when the run started.
   const reviewStageRef = useRef<ReviewStageId | null>(null);
+  // The draft pipelines have the same catch-block staleness problem, so the stage a failure
+  // occurred on is tracked in a ref too, not in the render-time `draftStage` state.
+  const draftStageRef = useRef<DraftStageId | null>(null);
   const selectNode = useWorkbenchStore((state) => state.selectNode);
   const findings = useMemo(() => lintDocument(document), [document]);
   const displayedFindings = useMemo<Finding[]>(() => {
@@ -174,6 +177,25 @@ function App() {
       .then(setKbConfig)
       .catch((error) => setNotice(ipcErrorMessage(error)));
   }, [setTheme]);
+
+  // Desktop: reopen the document the user last had open. The first-run guide, if any, sits on
+  // top; a missing or deleted document falls back to the demo document without interrupting it.
+  useEffect(() => {
+    if (!isDesktopRuntime()) return;
+    const lastId = useWorkbenchStore.getState().lastDocumentId;
+    if (!lastId) return;
+    loadDocument(lastId)
+      .then((loaded) => {
+        const current = useWorkbenchStore.getState().document;
+        if (current.id === loaded.id) return;
+        setDocument(loaded, Date.now());
+        setSavedVersion(null);
+        setNotice("已恢复上次打开的公文");
+      })
+      .catch(() => {
+        // The last document may no longer exist; keep the demo document.
+      });
+  }, [setDocument, setNotice]);
 
   useEffect(() => {
     listProviderProfiles()
@@ -425,6 +447,7 @@ function App() {
     setDraftText("");
     setDraftError(null);
     setDraftStage(null);
+    draftStageRef.current = null;
     setFailedStage(null);
     void refreshDocuments().then((loaded) => {
       setSavedVersion(loaded.find((item) => item.id === outcome.document.id)?.versionCount ?? null);
@@ -444,6 +467,7 @@ function App() {
     setDraftText("");
     setDraftError(null);
     setDraftStage(null);
+    draftStageRef.current = null;
     setFailedStage(null);
     // Downstream stages ran against the previous output, so their records no longer hold.
     // The stage order depends on the session's pipeline kind, which the closure captured.
@@ -464,6 +488,7 @@ function App() {
   function handleDraftEvent(event: DraftEvent) {
     if (event.type === "stage_started") {
       if (isDraftStage(event.stageId)) {
+        draftStageRef.current = event.stageId;
         setDraftStage(event.stageId);
         setFailedStage(null);
         if (event.stageId === "draft" || event.stageId === "deai") setDraftText("");
@@ -504,6 +529,7 @@ function App() {
     setDrafting(true);
     setPipeline("draft");
     setDraftStage(null);
+    draftStageRef.current = null;
     setCompletedStages([]);
     setFailedStage(null);
     setDraftText("");
@@ -525,8 +551,11 @@ function App() {
         },
         handleDraftEvent,
       );
-      // Older runtimes may return the outcome without delivering the final channel event.
-      if (useWorkbenchStore.getState().document.id !== outcome.document.id || useWorkbenchStore.getState().document.revision !== outcome.document.revision) {
+      // Older runtimes may return the outcome without delivering the final channel event. Apply
+      // it only for the document that was drafted: if the user opened a different document while
+      // this ran, its unsaved edits must not be clobbered by the finished draft.
+      const current = useWorkbenchStore.getState().document;
+      if (shouldApplyDraftOutcome(current.id, current.revision, outcome)) {
         applyDraftOutcome(outcome);
       }
     } catch (error) {
@@ -535,7 +564,7 @@ function App() {
         setDraftError(null);
       } else {
         setDraftError(ipcErrorMessage(error));
-        if (isDraftStage(draftStage ?? "")) setFailedStage(draftStage);
+        if (isDraftStage(draftStageRef.current ?? "")) setFailedStage(draftStageRef.current);
       }
     } finally {
       setDrafting(false);
@@ -557,6 +586,7 @@ function App() {
     setDrafting(true);
     setPipeline("imitate");
     setDraftStage(null);
+    draftStageRef.current = null;
     setCompletedStages([]);
     setFailedStage(null);
     setDraftText("");
@@ -577,8 +607,11 @@ function App() {
         },
         handleDraftEvent,
       );
-      // Older runtimes may return the outcome without delivering the final channel event.
-      if (useWorkbenchStore.getState().document.id !== outcome.document.id || useWorkbenchStore.getState().document.revision !== outcome.document.revision) {
+      // Older runtimes may return the outcome without delivering the final channel event. Apply
+      // it only for the document that was drafted: if the user opened a different document while
+      // this ran, its unsaved edits must not be clobbered by the finished draft.
+      const current = useWorkbenchStore.getState().document;
+      if (shouldApplyDraftOutcome(current.id, current.revision, outcome)) {
         applyDraftOutcome(outcome);
       }
     } catch (error) {
@@ -587,7 +620,7 @@ function App() {
         setDraftError(null);
       } else {
         setDraftError(ipcErrorMessage(error));
-        if (isDraftStage(draftStage ?? "")) setFailedStage(draftStage);
+        if (isDraftStage(draftStageRef.current ?? "")) setFailedStage(draftStageRef.current);
       }
     } finally {
       setDrafting(false);
@@ -609,6 +642,7 @@ function App() {
     setDrafting(true);
     setPipeline("polish");
     setDraftStage(null);
+    draftStageRef.current = null;
     setCompletedStages([]);
     setFailedStage(null);
     setDraftText("");
@@ -628,8 +662,11 @@ function App() {
         },
         handleDraftEvent,
       );
-      // Older runtimes may return the outcome without delivering the final channel event.
-      if (useWorkbenchStore.getState().document.id !== outcome.document.id || useWorkbenchStore.getState().document.revision !== outcome.document.revision) {
+      // Older runtimes may return the outcome without delivering the final channel event. Apply
+      // it only for the document that was drafted: if the user opened a different document while
+      // this ran, its unsaved edits must not be clobbered by the finished draft.
+      const current = useWorkbenchStore.getState().document;
+      if (shouldApplyDraftOutcome(current.id, current.revision, outcome)) {
         applyDraftOutcome(outcome);
       }
     } catch (error) {
@@ -638,7 +675,7 @@ function App() {
         setDraftError(null);
       } else {
         setDraftError(ipcErrorMessage(error));
-        if (isDraftStage(draftStage ?? "")) setFailedStage(draftStage);
+        if (isDraftStage(draftStageRef.current ?? "")) setFailedStage(draftStageRef.current);
       }
     } finally {
       setDrafting(false);
@@ -653,6 +690,7 @@ function App() {
     }
     setDrafting(true);
     setDraftStage(stageId);
+    draftStageRef.current = stageId;
     setFailedStage(null);
     setDraftError(null);
     if (stageId === "draft" || stageId === "deai") setDraftText("");
@@ -660,8 +698,10 @@ function App() {
       const outcome = await rerunStage(draftSessionId, stageId, handleDraftEvent);
       // The rerun streams only stage events, so the returned document is applied here; the
       // content guard keeps this idempotent if a future runtime also delivers a final event.
+      // Like the full runs, never write back into a document the user has since switched away
+      // from — the rerun's snapshot belongs to the session's document, not the active one.
       const current = useWorkbenchStore.getState().document;
-      if (current.id !== outcome.document.id || JSON.stringify(current) !== JSON.stringify(outcome.document)) {
+      if (shouldApplyRerunOutcome(current, outcome)) {
         applyRerunOutcome(outcome, stageId);
       }
     } catch (error) {
@@ -670,7 +710,7 @@ function App() {
         setDraftError(null);
       } else {
         setDraftError(ipcErrorMessage(error));
-        if (isDraftStage(draftStage ?? "")) setFailedStage(draftStage);
+        if (isDraftStage(draftStageRef.current ?? "")) setFailedStage(draftStageRef.current);
       }
     } finally {
       setDrafting(false);
@@ -833,8 +873,13 @@ function App() {
     try {
       const snapshot = useWorkbenchStore.getState().document;
       const saved = await saveDocument(snapshot, "pdf_export");
-      markSaved(saved.savedAt);
-      setSavedVersion(saved.versionSeq);
+      // Only acknowledge the save if the document has not moved on while the export ran;
+      // otherwise the newest edits would be marked as saved and never auto-saved again.
+      const current = useWorkbenchStore.getState().document;
+      if (current.id === snapshot.id && current.revision === snapshot.revision) {
+        markSaved(saved.savedAt);
+        setSavedVersion(saved.versionSeq);
+      }
       const result = await exportPdf(snapshot.id);
       if (result.kind === "pdf") {
         downloadBytes(`${baseName}.pdf`, Uint8Array.from(result.bytes), "application/pdf");
@@ -1014,6 +1059,7 @@ function App() {
           setGuideOpen(false);
           setSettingsOpen(true);
         }}
+        onSelectProvider={(providerId) => setProviderId(providerId)}
       />
       <ReviewReportDialog
         open={reviewOpen}

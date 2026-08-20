@@ -47,6 +47,34 @@ export type DraftStageId =
   | (typeof imitateStages)[number]
   | (typeof polishStages)[number];
 
+/**
+ * Whether a finished draft outcome should be written back into the workbench.
+ *
+ * The runtime delivers the outcome both through the stream's final event and as the command's
+ * return value; the workbench applies the return value only when the document is the same one
+ * that was drafted AND its revision has not already caught up. Requiring the same id keeps a
+ * draft that finished after the user switched documents from clobbering the now-active
+ * document's unsaved edits.
+ */
+export function shouldApplyDraftOutcome(
+  currentId: string,
+  currentRevision: number,
+  outcome: DraftOutcome,
+): boolean {
+  return currentId === outcome.document.id && currentRevision !== outcome.document.revision;
+}
+
+/** Same write-back guard for single-stage re-runs, which must never touch another document. */
+export function shouldApplyRerunOutcome(current: {
+  id: string;
+  revision: number;
+}, outcome: RerunOutcome): boolean {
+  return (
+    current.id === outcome.document.id &&
+    JSON.stringify(current) !== JSON.stringify(outcome.document)
+  );
+}
+
 export const draftStageLabels: Record<DraftStageId, string> = {
   doctype: "文种",
   facts: "事实",

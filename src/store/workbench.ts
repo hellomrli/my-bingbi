@@ -28,6 +28,8 @@ interface WorkbenchState {
   selectedNodeId: string | null;
   dirty: boolean;
   savedAt: number | null;
+  /** Id of the last document the user had open; the desktop runtime restores it on launch. */
+  lastDocumentId: string | null;
   /** nodeId → unverified fact tokens from the latest kernel fact-check report. */
   unverifiedTokens: Record<string, string[]>;
   setDocument: (document: ODoc, savedAt?: number | null) => void;
@@ -73,6 +75,18 @@ function nullable(value: string): string | null {
   return value.trim() ? value : null;
 }
 
+/** Shape guard for a persisted document: a stale or corrupt draft must not crash rendering. */
+function isValidDocument(value: unknown): value is ODoc {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<ODoc>;
+  return (
+    candidate.schemaVersion === "0.1.0" &&
+    typeof candidate.id === "string" &&
+    typeof candidate.revision === "number" &&
+    Array.isArray(candidate.body?.blocks)
+  );
+}
+
 export const useWorkbenchStore = create<WorkbenchState>()(
   persist(
     (set) => ({
@@ -84,9 +98,10 @@ export const useWorkbenchStore = create<WorkbenchState>()(
       selectedNodeId: null,
       dirty: false,
       savedAt: null,
+      lastDocumentId: null,
       unverifiedTokens: {},
       setDocument: (document, savedAt = Date.now()) =>
-        set({ document, dirty: false, selectedNodeId: null, savedAt, unverifiedTokens: {} }),
+        set({ document, dirty: false, selectedNodeId: null, savedAt, lastDocumentId: document.id, unverifiedTokens: {} }),
       setView: (view) => set({ view }),
       setFindingFilter: (findingFilter) => set({ findingFilter }),
       toggleGrid: () => set((state) => ({ showGrid: !state.showGrid })),
@@ -199,14 +214,25 @@ export const useWorkbenchStore = create<WorkbenchState>()(
     }),
     {
       name: "bingbi-workbench-v1",
+      version: 1,
+      // Validate the persisted document shape so a stale or corrupt draft cannot crash rendering;
+      // a missing or invalid document falls back to the demo document.
+      migrate: (persisted) => {
+        const state = (persisted ?? {}) as Partial<WorkbenchState> & { document?: unknown };
+        if (!isValidDocument(state.document)) {
+          state.document = createDemoDocument();
+        }
+        return state as WorkbenchState;
+      },
       partialize: (state) =>
         isDesktopRuntime()
-          ? { showGrid: state.showGrid, theme: state.theme }
+          ? { showGrid: state.showGrid, theme: state.theme, lastDocumentId: state.lastDocumentId }
           : {
               document: state.document,
               showGrid: state.showGrid,
               theme: state.theme,
               savedAt: state.savedAt,
+              lastDocumentId: state.lastDocumentId,
             },
     },
   ),

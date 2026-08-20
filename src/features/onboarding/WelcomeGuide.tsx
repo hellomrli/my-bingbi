@@ -7,6 +7,8 @@ interface WelcomeGuideProps {
   open: boolean;
   onComplete: () => void;
   onOpenSettings: () => void;
+  /** Called when the user picks a provider in step two; wires the choice into the workbench. */
+  onSelectProvider?: (providerId: string) => void;
 }
 
 const capabilityHighlights = [
@@ -16,16 +18,18 @@ const capabilityHighlights = [
   { icon: Database, title: "知识库", detail: "对接你的 Obsidian 库，检索增强" },
 ];
 
-export function WelcomeGuide({ open, onComplete, onOpenSettings }: WelcomeGuideProps) {
+export function WelcomeGuide({ open, onComplete, onOpenSettings, onSelectProvider }: WelcomeGuideProps) {
   const [step, setStep] = useState(0);
   const [providers, setProviders] = useState<ProviderProfile[]>([]);
   const [providerBusy, setProviderBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [selectedProvider, setSelectedProvider] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) return;
     setStep(0);
     setError(null);
+    setSelectedProvider(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
@@ -33,7 +37,16 @@ export function WelcomeGuide({ open, onComplete, onOpenSettings }: WelcomeGuideP
     if (!open || step !== 1) return;
     setProviderBusy(true);
     listProviderProfiles()
-      .then(setProviders)
+      .then((loaded) => {
+        setProviders(loaded);
+        // Default to the previously selected provider when it is still enabled, otherwise the
+        // first enabled one — the radio is controlled so the selection actually matters.
+        setSelectedProvider((current) =>
+          current && loaded.some((provider) => provider.id === current && provider.enabled)
+            ? current
+            : (loaded.find((provider) => provider.enabled)?.id ?? null),
+        );
+      })
       .catch((loadError) => setError(ipcErrorMessage(loadError)))
       .finally(() => setProviderBusy(false));
   }, [open, step]);
@@ -88,7 +101,15 @@ export function WelcomeGuide({ open, onComplete, onOpenSettings }: WelcomeGuideP
               <div className="welcome-provider-list">
                 {enabledProviders.map((provider) => (
                   <label className="welcome-provider-row" key={provider.id}>
-                    <input type="radio" name="welcome-provider" defaultChecked={provider.id === enabledProviders[0].id} />
+                    <input
+                      type="radio"
+                      name="welcome-provider"
+                      checked={provider.id === selectedProvider}
+                      onChange={() => {
+                        setSelectedProvider(provider.id);
+                        onSelectProvider?.(provider.id);
+                      }}
+                    />
                     <span>
                       <strong>{provider.displayName}</strong>
                       <small>{provider.isLocal ? "本地模型" : "云端模型"} · {provider.model}</small>
