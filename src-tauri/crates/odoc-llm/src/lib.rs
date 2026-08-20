@@ -5,6 +5,7 @@ mod provider;
 mod types;
 
 pub use error::LlmError;
+pub use odoc_model::SecurityLevel;
 pub use provider::{LlmProvider, ProviderClient};
 pub use types::{
     Capabilities, ChatDelta, ChatMessage, ChatRequest, ChatResponse, ChatRole,

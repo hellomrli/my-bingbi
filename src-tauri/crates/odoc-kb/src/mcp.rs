@@ -1,5 +1,6 @@
 use crate::{Frontmatter, KbError, KbHit, KbNote, KbProvider, KbQuery, SearchMode};
 use async_trait::async_trait;
+use futures_util::StreamExt;
 use reqwest::header::{AUTHORIZATION, HeaderValue};
 use reqwest::{Client, StatusCode};
 use serde_json::{Value, json};
@@ -112,12 +113,16 @@ impl McpProvider {
             if let Some(value) = response.headers().get("MCP-Session-Id") {
                 session_id = value.to_str().ok().map(str::to_owned);
             }
-            let bytes = response
-                .bytes()
-                .await
-                .map_err(|_| KbError::InvalidResponse)?;
-            if bytes.len() > MAX_RESPONSE_BYTES {
-                return Err(KbError::TooLarge);
+            // Stream the body and stop as soon as the cap is exceeded, instead of buffering
+            // the whole response first (see fns::finish_json for the same reasoning).
+            let mut stream = response.bytes_stream();
+            let mut bytes = Vec::new();
+            while let Some(chunk) = stream.next().await {
+                let chunk = chunk.map_err(|_| KbError::InvalidResponse)?;
+                if bytes.len().saturating_add(chunk.len()) > MAX_RESPONSE_BYTES {
+                    return Err(KbError::TooLarge);
+                }
+                bytes.extend_from_slice(&chunk);
             }
             if payload.get("method").and_then(Value::as_str) == Some("tools/call") {
                 let value = parse_json_or_sse(&bytes)?;

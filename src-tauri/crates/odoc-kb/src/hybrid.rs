@@ -1,5 +1,5 @@
 use crate::{Frontmatter, KbError, KbHit, KbProvider, KbQuery};
-use odoc_llm::LlmProvider;
+use odoc_llm::{LlmProvider, SecurityLevel};
 use std::collections::{BTreeMap, BTreeSet};
 
 const PRIMARY_LIMIT: u32 = 80;
@@ -22,14 +22,24 @@ pub async fn hybrid_search(
     provider: &dyn KbProvider,
     query: &KbQuery,
 ) -> Result<Vec<KbHit>, KbError> {
-    hybrid_search_with_semantic(provider, query, None::<&dyn LlmProvider>).await
+    // No semantic re-ranking, so the security level is irrelevant; a placeholder keeps the
+    // call site honest about the fact that nothing is sent outside the vault.
+    hybrid_search_with_semantic(
+        provider,
+        query,
+        SecurityLevel::Public,
+        None::<&dyn LlmProvider>,
+    )
+    .await
 }
 
 /// [`hybrid_search`] with an optional semantic re-ranking pass.
 ///
 /// When `semantic` is supplied and supports embeddings, every fused hit is embedded together
 /// with the query and its cosine similarity is folded into the score. Embedding failures are
-/// silently ignored — semantic re-ranking is an enhancement, never a failure mode.
+/// silently ignored — semantic re-ranking is an enhancement, never a failure mode. The
+/// `security_level` is forwarded to the embedding provider so restricted content is never
+/// sent to a remote endpoint.
 ///
 /// # Errors
 ///
@@ -38,6 +48,7 @@ pub async fn hybrid_search(
 pub async fn hybrid_search_with_semantic<P: LlmProvider + ?Sized>(
     provider: &dyn KbProvider,
     query: &KbQuery,
+    security_level: SecurityLevel,
     semantic: Option<&P>,
 ) -> Result<Vec<KbHit>, KbError> {
     query.validate()?;
@@ -116,7 +127,7 @@ pub async fn hybrid_search_with_semantic<P: LlmProvider + ?Sized>(
             .then_with(|| left.vault.cmp(&right.vault))
     });
     if let Some(semantic) = semantic {
-        fold_semantic_scores(semantic, query, &mut result).await;
+        fold_semantic_scores(semantic, query, security_level, &mut result).await;
     }
     result.truncate(query.normalized_limit() as usize);
     Ok(result)
@@ -124,14 +135,17 @@ pub async fn hybrid_search_with_semantic<P: LlmProvider + ?Sized>(
 
 /// Embeds the query and the top hits, then adds the weighted cosine similarity to each score.
 ///
-/// Any embedding failure drops the whole pass; the lexical fusion remains authoritative.
+/// Any embedding failure drops the whole pass; the lexical fusion remains authoritative. The
+/// security level travels with the texts so a restricted document cannot leak through a remote
+/// embedding endpoint.
 async fn fold_semantic_scores<P: LlmProvider + ?Sized>(
     semantic: &P,
     query: &KbQuery,
+    security_level: SecurityLevel,
     result: &mut [KbHit],
 ) {
     let Some(query_vector) = semantic
-        .embed(std::slice::from_ref(&query.keyword))
+        .embed(std::slice::from_ref(&query.keyword), security_level)
         .await
         .ok()
         .and_then(|vectors| vectors.into_iter().next())
@@ -147,7 +161,7 @@ async fn fold_semantic_scores<P: LlmProvider + ?Sized>(
                 .collect::<String>()
         })
         .collect::<Vec<_>>();
-    let Ok(vectors) = semantic.embed(&texts).await else {
+    let Ok(vectors) = semantic.embed(&texts, security_level).await else {
         return;
     };
     if vectors.len() != result.len() {
@@ -292,7 +306,11 @@ mod tests {
         ) -> Result<(), LlmError> {
             Ok(())
         }
-        async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, LlmError> {
+        async fn embed(
+            &self,
+            texts: &[String],
+            _security_level: SecurityLevel,
+        ) -> Result<Vec<Vec<f32>>, LlmError> {
             Ok(texts
                 .iter()
                 .map(|text| {
@@ -354,9 +372,14 @@ mod tests {
             .expect("search should work");
         assert_eq!(lexical[0].path, "公文/a.md");
 
-        let reranked = hybrid_search_with_semantic(&FakeKb, &query(), Some(&SemanticProvider))
-            .await
-            .expect("search should work");
+        let reranked = hybrid_search_with_semantic(
+            &FakeKb,
+            &query(),
+            SecurityLevel::Internal,
+            Some(&SemanticProvider),
+        )
+        .await
+        .expect("search should work");
         assert_eq!(reranked[0].path, "公文/a.md");
         assert!(
             reranked[0].score > lexical[0].score,
@@ -366,9 +389,14 @@ mod tests {
 
     #[tokio::test]
     async fn missing_embeddings_fall_back_to_lexical_fusion() {
-        let with = hybrid_search_with_semantic(&FakeKb, &query(), Some(&NoEmbedProvider))
-            .await
-            .expect("search should work");
+        let with = hybrid_search_with_semantic(
+            &FakeKb,
+            &query(),
+            SecurityLevel::Internal,
+            Some(&NoEmbedProvider),
+        )
+        .await
+        .expect("search should work");
         let without = hybrid_search(&FakeKb, &query())
             .await
             .expect("search should work");

@@ -8,6 +8,16 @@ use zip::ZipArchive;
 
 const MAX_ZIP_PART_BYTES: usize = 16 * 1024 * 1024;
 const MAX_ZIP_ENTRIES: usize = 4_096;
+/// Aggregate budget for every decompressed XML part of one package, so a high-compression
+/// input cannot inflate into many times its own size (zip bomb).
+const MAX_ZIP_TOTAL_BYTES: usize = 64 * 1024 * 1024;
+/// Excel hard limits: column XFD = `16_384`, row `1_048_576`. A cell reference outside these
+/// bounds is untrustworthy and must not drive a dense expansion.
+const MAX_SHEET_COLUMNS: usize = 16_384;
+const MAX_SHEET_ROWS: usize = 1_048_576;
+/// Upper bound on the cells a parsed sheet may materialize when rendered to text (row ×
+/// column slots). Guards the `(0..=max_col)` dense expansion against sparse hostile sheets.
+const MAX_SHEET_EXPANDED_CELLS: usize = 1_000_000;
 
 /// Reads text objects from an OFD package. OFD is a ZIP container whose page content is XML; the
 /// semantic text is stored in `TextCode` elements. The package's page/document indirection is
@@ -15,6 +25,7 @@ const MAX_ZIP_ENTRIES: usize = 4_096;
 /// vendor packages that omit or localize `OFD.xml` references.
 pub(super) fn extract_ofd(bytes: &[u8]) -> Result<String, ExportError> {
     let mut archive = open_archive(bytes)?;
+    let mut budget = 0_usize;
     let mut parts = Vec::new();
     for index in 0..archive.len().min(MAX_ZIP_ENTRIES) {
         let mut entry = archive
@@ -24,7 +35,7 @@ pub(super) fn extract_ofd(bytes: &[u8]) -> Result<String, ExportError> {
         if entry.is_dir() || !name.to_ascii_lowercase().ends_with(".xml") {
             continue;
         }
-        let xml = read_entry(&mut entry)?;
+        let xml = read_entry_budgeted(&mut entry, &mut budget)?;
         if is_ofd_content_part(&name, &xml) {
             parts.push((name, xml));
         }
@@ -32,21 +43,25 @@ pub(super) fn extract_ofd(bytes: &[u8]) -> Result<String, ExportError> {
     if parts.is_empty() {
         return Err(ExportError::InvalidReference);
     }
-    parts.sort_by_key(|left| ofd_part_rank(&left.0));
+    parts.sort_by_key(|part| ofd_part_rank(&part.0));
     let mut output = String::new();
-    for (_, xml) in parts {
-        let values = collect_tag_text(&xml, &["TextCode", "Text"])?;
+    for (_, xml) in &parts {
+        let values = collect_tag_text(xml, &["TextCode", "Text"])?;
         append_lines(&mut output, values);
     }
     if output.trim().is_empty() {
         // A few producers put text directly in Content.xml under a vendor-specific tag. Keep a
         // conservative fallback that ignores attributes and known layout/metadata elements.
+        // The parts above were already decompressed and stay within the shared budget, so the
+        // fallback reuses them instead of re-opening the archive (which would double memory).
         let mut fallback = String::new();
-        for (_, xml) in collect_xml_entries(bytes)? {
-            append_lines(
-                &mut fallback,
-                collect_leaf_text(&xml, &["ofd", "Page", "Document", "OFD"])?,
-            );
+        for (name, xml) in &parts {
+            if is_ofd_content_part(name, xml) {
+                append_lines(
+                    &mut fallback,
+                    collect_leaf_text(xml, &["ofd", "Page", "Document", "OFD"])?,
+                );
+            }
         }
         return if fallback.trim().is_empty() {
             Err(ExportError::InvalidReference)
@@ -62,16 +77,17 @@ pub(super) fn extract_ofd(bytes: &[u8]) -> Result<String, ExportError> {
 /// adjacent facts.
 pub(super) fn extract_xlsx(bytes: &[u8]) -> Result<String, ExportError> {
     let mut archive = open_archive(bytes)?;
+    let mut budget = 0_usize;
     let shared_strings = archive
         .by_name("xl/sharedStrings.xml")
         .ok()
-        .map(|mut entry| read_entry(&mut entry))
+        .map(|mut entry| read_entry_budgeted(&mut entry, &mut budget))
         .transpose()?
         .map(|xml| parse_shared_strings(&xml))
         .transpose()?
         .unwrap_or_default();
 
-    let sheet_names = workbook_sheet_paths(&mut archive)?;
+    let sheet_names = workbook_sheet_paths(&mut archive, &mut budget)?;
     let mut paths = if sheet_names.is_empty() {
         let mut discovered = Vec::new();
         for index in 0..archive.len().min(MAX_ZIP_ENTRIES) {
@@ -98,7 +114,7 @@ pub(super) fn extract_xlsx(bytes: &[u8]) -> Result<String, ExportError> {
         let mut entry = archive
             .by_name(&path)
             .map_err(|_| ExportError::InvalidReference)?;
-        let xml = read_entry(&mut entry)?;
+        let xml = read_entry_budgeted(&mut entry, &mut budget)?;
         let rows = parse_sheet(&xml, &shared_strings)?;
         append_sheet(&mut output, rows);
     }
@@ -118,8 +134,8 @@ pub(super) fn extract_wps(bytes: &[u8]) -> Result<String, ExportError> {
             return Ok(text);
         }
     }
-    let entries = collect_xml_entries(bytes)?;
-    let mut ranked = entries;
+    let mut budget = 0_usize;
+    let mut ranked = collect_xml_entries(bytes, &mut budget)?;
     ranked.sort_by_key(|(name, _)| {
         let lower = name.to_ascii_lowercase();
         if lower.contains("document") || lower.contains("content") {
@@ -159,20 +175,32 @@ fn open_archive(bytes: &[u8]) -> Result<ZipArchive<Cursor<&[u8]>>, ExportError> 
     Ok(archive)
 }
 
-fn read_entry<R: Read>(entry: &mut R) -> Result<Vec<u8>, ExportError> {
+fn read_entry_budgeted<R: Read>(entry: &mut R, budget: &mut usize) -> Result<Vec<u8>, ExportError> {
     let mut bytes = Vec::new();
     entry
         .take((MAX_ZIP_PART_BYTES + 1) as u64)
         .read_to_end(&mut bytes)
         .map_err(|_| ExportError::InvalidReference)?;
     if bytes.len() > MAX_ZIP_PART_BYTES {
-        Err(ExportError::PackageTooLarge)
-    } else {
-        Ok(bytes)
+        return Err(ExportError::PackageTooLarge);
     }
+    charge_budget(budget, bytes.len())?;
+    Ok(bytes)
 }
 
-fn collect_xml_entries(bytes: &[u8]) -> Result<Vec<(String, Vec<u8>)>, ExportError> {
+/// Charges `len` decompressed bytes against the aggregate package budget.
+fn charge_budget(budget: &mut usize, len: usize) -> Result<(), ExportError> {
+    *budget = budget.saturating_add(len);
+    if *budget > MAX_ZIP_TOTAL_BYTES {
+        return Err(ExportError::PackageTooLarge);
+    }
+    Ok(())
+}
+
+fn collect_xml_entries(
+    bytes: &[u8],
+    budget: &mut usize,
+) -> Result<Vec<(String, Vec<u8>)>, ExportError> {
     let mut archive = open_archive(bytes)?;
     let mut entries = Vec::new();
     for index in 0..archive.len().min(MAX_ZIP_ENTRIES) {
@@ -183,7 +211,7 @@ fn collect_xml_entries(bytes: &[u8]) -> Result<Vec<(String, Vec<u8>)>, ExportErr
         if entry.is_dir() || !name.to_ascii_lowercase().ends_with(".xml") {
             continue;
         }
-        entries.push((name, read_entry(&mut entry)?));
+        entries.push((name, read_entry_budgeted(&mut entry, budget)?));
     }
     Ok(entries)
 }
@@ -321,13 +349,14 @@ fn append_lines(output: &mut String, values: Vec<String>) {
 
 fn workbook_sheet_paths(
     archive: &mut ZipArchive<Cursor<&[u8]>>,
+    budget: &mut usize,
 ) -> Result<Vec<String>, ExportError> {
     let workbook = match archive.by_name("xl/workbook.xml") {
-        Ok(mut entry) => read_entry(&mut entry)?,
+        Ok(mut entry) => read_entry_budgeted(&mut entry, budget)?,
         Err(_) => return Ok(Vec::new()),
     };
     let relationships = match archive.by_name("xl/_rels/workbook.xml.rels") {
-        Ok(mut entry) => read_entry(&mut entry)?,
+        Ok(mut entry) => read_entry_budgeted(&mut entry, budget)?,
         Err(_) => return Ok(Vec::new()),
     };
     let mut targets = HashMap::new();
@@ -500,6 +529,13 @@ fn parse_sheet(xml: &[u8], shared_strings: &[String]) -> Result<Vec<Vec<String>>
         }
         buffer.clear();
     }
+    let expanded_cells: usize = rows
+        .values()
+        .map(|row| row.keys().copied().max().unwrap_or(0).saturating_add(1))
+        .sum();
+    if expanded_cells > MAX_SHEET_EXPANDED_CELLS {
+        return Err(ExportError::PackageTooLarge);
+    }
     Ok(rows
         .into_values()
         .map(|row| {
@@ -548,10 +584,14 @@ fn cell_reference(value: &str) -> Option<(usize, usize)> {
     let mut column = 0_usize;
     for character in letters.bytes() {
         column = column
-            .saturating_mul(26)
-            .saturating_add((character - b'A' + 1) as usize);
+            .checked_mul(26)?
+            .checked_add((character - b'A' + 1) as usize)?;
     }
-    Some((row, column.saturating_sub(1)))
+    let column = column.checked_sub(1)?;
+    if row >= MAX_SHEET_ROWS || column >= MAX_SHEET_COLUMNS {
+        return None;
+    }
+    Some((row, column))
 }
 
 fn append_sheet(output: &mut String, rows: Vec<Vec<String>>) {
@@ -573,5 +613,73 @@ fn append_sheet(output: &mut String, rows: Vec<Vec<String>>) {
                 .collect::<Vec<_>>()
                 .join("\t"),
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+
+    #[test]
+    fn cell_reference_bounds_are_enforced() {
+        // Normal references still parse.
+        assert_eq!(cell_reference("A1"), Some((0, 0)));
+        assert_eq!(cell_reference("XFD1048576"), Some((1_048_575, 16_383)));
+        assert_eq!(cell_reference("$B$2"), Some((1, 1)));
+        // Columns beyond XFD are untrustworthy, not saturated to usize::MAX.
+        assert_eq!(cell_reference("XFE1"), None);
+        assert_eq!(cell_reference("AAAAAAAAAAAAAAAAAAAA1"), None);
+        // Rows beyond the spreadsheet limit are rejected too.
+        assert_eq!(cell_reference("A1048577"), None);
+        // Malformed references fall back to sequential placement; the loose column/row
+        // ordering ("12A") is pre-existing permissive behavior and stays unchanged.
+        assert_eq!(cell_reference(""), None);
+        assert_eq!(cell_reference("12A"), Some((11, 0)));
+    }
+
+    #[test]
+    fn read_entry_budget_caps_aggregate_decompressed_bytes() {
+        let mut budget = 0_usize;
+        let small = vec![b'a'; 1024];
+        read_entry_budgeted(&mut Cursor::new(small.as_slice()), &mut budget)
+            .expect("small entry should read");
+        assert_eq!(budget, 1024);
+
+        // charge_budget enforces the aggregate ceiling without allocating 64 MiB.
+        let remaining = MAX_ZIP_TOTAL_BYTES - budget;
+        assert!(charge_budget(&mut budget, remaining).is_ok());
+        assert_eq!(budget, MAX_ZIP_TOTAL_BYTES);
+        assert!(matches!(
+            charge_budget(&mut budget, 1),
+            Err(ExportError::PackageTooLarge)
+        ));
+    }
+
+    #[test]
+    fn single_entry_above_part_limit_is_rejected() {
+        let mut budget = 0_usize;
+        let oversized = vec![b'x'; MAX_ZIP_PART_BYTES + 1];
+        assert!(matches!(
+            read_entry_budgeted(&mut Cursor::new(oversized.as_slice()), &mut budget),
+            Err(ExportError::PackageTooLarge)
+        ));
+    }
+
+    #[test]
+    fn sparse_hostile_sheet_is_rejected_before_expansion() {
+        // Many rows with one cell parked at column XFD would expand into millions of
+        // empty slots; the dense-expansion budget must reject it instead of OOMing.
+        let mut xml = String::from("<worksheet><sheetData>");
+        for row in 1..=2_000 {
+            use std::fmt::Write as _;
+            write!(xml, r#"<row r="{row}"><c r="XFD{row}"><v>1</v></c></row>"#)
+                .expect("writing to a String cannot fail");
+        }
+        xml.push_str("</sheetData></worksheet>");
+        assert!(matches!(
+            parse_sheet(xml.as_bytes(), &[]),
+            Err(ExportError::PackageTooLarge)
+        ));
     }
 }

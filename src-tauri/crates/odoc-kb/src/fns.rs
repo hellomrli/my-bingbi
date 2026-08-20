@@ -5,6 +5,7 @@ use crate::types::{
     validate_relative_path,
 };
 use async_trait::async_trait;
+use futures_util::StreamExt;
 use reqwest::header::{AUTHORIZATION, HeaderValue};
 use reqwest::{Client, Response, StatusCode};
 use serde_json::{Map, Value, json};
@@ -119,12 +120,17 @@ impl FnsProvider {
         if !status.is_success() {
             return Err(map_status(status));
         }
-        let bytes = response
-            .bytes()
-            .await
-            .map_err(|error| map_reqwest_error(&error))?;
-        if bytes.len() > MAX_RESPONSE_BYTES {
-            return Err(KbError::TooLarge);
+        // Stream the body and stop as soon as the cap is exceeded, instead of buffering the
+        // whole response first: a hostile endpoint could otherwise push unbounded bytes into
+        // memory before the size check runs.
+        let mut stream = response.bytes_stream();
+        let mut bytes = Vec::new();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|error| map_reqwest_error(&error))?;
+            if bytes.len().saturating_add(chunk.len()) > MAX_RESPONSE_BYTES {
+                return Err(KbError::TooLarge);
+            }
+            bytes.extend_from_slice(&chunk);
         }
         serde_json::from_slice(&bytes).map_err(|_| KbError::InvalidResponse)
     }
@@ -299,7 +305,11 @@ impl KbProvider for FnsProvider {
         let prefix = path_prefix.map(normalize_relative_path).transpose()?;
         let mut notes = Vec::new();
         let mut page = 1_u32;
-        while notes.len() < limit as usize {
+        // Upper bound on pages: at most ceil(limit / page_size) full pages plus one guard
+        // page, so a hostile or buggy server that keeps returning rows without progress
+        // cannot make us loop forever.
+        let max_pages = limit.div_ceil(INDEX_PAGE_SIZE).saturating_add(1);
+        while notes.len() < limit as usize && page <= max_pages {
             let remaining = limit.saturating_sub(notes.len().try_into().unwrap_or(u32::MAX));
             let page_size = remaining.min(INDEX_PAGE_SIZE);
             let mut params = vec![
@@ -321,6 +331,10 @@ impl KbProvider for FnsProvider {
                 break;
             }
             let row_count = rows.len();
+            // Rows that survive parsing and prefix filtering; a full page with none of
+            // them means the server is serving junk for this cursor and re-requesting it
+            // would only loop forever.
+            let mut useful_rows = 0_usize;
             for row in rows {
                 let Some(hit) = hit_from_value(&row, self.vault.as_deref().unwrap_or_default())
                 else {
@@ -332,6 +346,7 @@ impl KbProvider for FnsProvider {
                 {
                     continue;
                 }
+                useful_rows += 1;
                 match self.get(&hit.path).await {
                     Ok(note) => notes.push(note),
                     Err(KbError::NotFound) => {}
@@ -342,6 +357,9 @@ impl KbProvider for FnsProvider {
                 }
             }
             if row_count < page_size as usize {
+                break;
+            }
+            if useful_rows == 0 {
                 break;
             }
             page = page.saturating_add(1);

@@ -1140,6 +1140,12 @@ async fn draft_start<R: tauri::Runtime>(
             .map_err(map_store_error)
     })?;
     let provider = provider_client(&state, &request.provider_id)?;
+    if !document.meta.security_level.allows_remote_provider() && !provider.capabilities().is_local {
+        return Err(IpcError {
+            code: "model_security_blocked",
+            message: "当前密级仅允许本地模型，无法启动起草。",
+        });
+    }
     let pipeline_file = draft_pipeline_file(request.model_text.as_deref(), request.polish);
     let pipeline_path = builtin_pipeline_path(&app, pipeline_file).map_err(map_tauri_error)?;
     let pipeline = PipelineDefinition::load(pipeline_path).map_err(map_engine_error)?;

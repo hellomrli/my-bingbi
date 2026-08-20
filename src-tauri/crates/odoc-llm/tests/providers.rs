@@ -570,7 +570,10 @@ async fn openai_embeddings_hit_the_embeddings_endpoint_and_return_vectors() {
     .expect("client should build");
 
     let vectors = client
-        .embed(&["第一段".to_owned(), "第二段".to_owned()])
+        .embed(
+            &["第一段".to_owned(), "第二段".to_owned()],
+            SecurityLevel::Internal,
+        )
         .await
         .expect("embedding should succeed");
     assert_eq!(vectors, vec![vec![0.1, 0.2, 0.3], vec![-0.1, 0.0, 0.5]]);
@@ -596,8 +599,36 @@ async fn non_openai_providers_report_embeddings_as_unsupported() {
     )
     .expect("client should build");
     let error = client
-        .embed(&["文本".to_owned()])
+        .embed(&["文本".to_owned()], SecurityLevel::Internal)
         .await
         .expect_err("embedding should be unsupported");
     assert_eq!(error.code(), "model_embedding_unavailable");
+}
+
+#[tokio::test]
+async fn restricted_documents_never_embed_to_a_remote_provider() {
+    let client = ProviderClient::new(
+        profile(
+            ProviderKind::OpenAiCompatible,
+            "https://api.example.com".to_owned(),
+        ),
+        Some("key".to_owned()),
+    )
+    .expect("client should build");
+    // A remote OpenAI-compatible provider must refuse to embed secret/confidential text,
+    // exactly like chat: the security gate is at the provider boundary, not the caller.
+    for level in [SecurityLevel::Secret, SecurityLevel::Confidential] {
+        let error = client
+            .embed(&["涉密内容".to_owned()], level)
+            .await
+            .expect_err("restricted embedding must be blocked");
+        assert_eq!(error.code(), "remote_provider_blocked");
+    }
+    // Internal documents pass the gate and only then fail on the (unreachable) network,
+    // proving the block above was the security gate and not a generic network error.
+    let error = client
+        .embed(&["内部内容".to_owned()], SecurityLevel::Internal)
+        .await
+        .expect_err("request to unreachable host must fail");
+    assert_ne!(error.code(), "remote_provider_blocked");
 }

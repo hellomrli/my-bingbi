@@ -675,9 +675,14 @@ impl<'a, J: DraftJournal, P: LlmProvider + ?Sized> DraftEngine<'a, J, P> {
                     ..KbQuery::default()
                 })
                 .collect::<Vec<_>>();
-            let searches = queries
-                .iter()
-                .map(|query| hybrid_search_with_semantic(provider, query, Some(self.provider)));
+            let searches = queries.iter().map(|query| {
+                hybrid_search_with_semantic(
+                    provider,
+                    query,
+                    context.document.meta.security_level,
+                    Some(self.provider),
+                )
+            });
             let mut hits = Vec::new();
             for incoming in try_join_all(searches).await? {
                 merge_hits(&mut hits, incoming);

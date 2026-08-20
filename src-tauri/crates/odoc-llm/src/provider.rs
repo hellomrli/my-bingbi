@@ -6,6 +6,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use futures_util::StreamExt;
+use odoc_model::SecurityLevel;
 use reqwest::{Client, Response};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -46,12 +47,19 @@ pub trait LlmProvider: Send + Sync {
     ///
     /// Callers treat a [`LlmError::Unsupported`] response as "no semantic re-ranking" and fall
     /// back to lexical fusion; they must never fail a search because embeddings are missing.
+    /// The `security_level` is the classification of the document the texts belong to:
+    /// implementations MUST refuse to send restricted (secret/confidential) content to a
+    /// remote provider, mirroring the gate [`LlmProvider::chat`] applies.
     ///
     /// # Errors
     ///
-    /// Returns a stable, redacted [`LlmError`] for validation, network, HTTP, and response
-    /// parsing failures, or [`LlmError::Unsupported`] when the provider cannot embed.
-    async fn embed(&self, _texts: &[String]) -> Result<Vec<Vec<f32>>, LlmError> {
+    /// Returns a stable, redacted [`LlmError`] for validation, security, network, HTTP, and
+    /// response parsing failures, or [`LlmError::Unsupported`] when the provider cannot embed.
+    async fn embed(
+        &self,
+        _texts: &[String],
+        _security_level: SecurityLevel,
+    ) -> Result<Vec<Vec<f32>>, LlmError> {
         Err(LlmError::Unsupported)
     }
 
@@ -430,7 +438,7 @@ impl LlmProvider for ProviderClient {
                 self.profile.kind,
                 ProviderKind::OpenAiCompatible | ProviderKind::Anthropic
             ),
-            embeddings: false,
+            embeddings: self.profile.kind == ProviderKind::OpenAiCompatible,
             context_window: None,
             is_local: self.profile.is_local,
         }
@@ -461,9 +469,22 @@ impl LlmProvider for ProviderClient {
         }
     }
 
-    async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, LlmError> {
+    async fn embed(
+        &self,
+        texts: &[String],
+        security_level: SecurityLevel,
+    ) -> Result<Vec<Vec<f32>>, LlmError> {
         if texts.is_empty() || texts.iter().any(String::is_empty) {
             return Err(LlmError::InvalidRequest);
+        }
+        self.profile.validate()?;
+        if !self.profile.enabled {
+            return Err(LlmError::ProviderDisabled);
+        }
+        // Same security gate as chat: restricted content must never leave for a remote
+        // provider, even through the embeddings endpoint.
+        if !security_level.allows_remote_provider() && !self.profile.is_local {
+            return Err(LlmError::RemoteProviderBlocked);
         }
         if self.profile.kind != ProviderKind::OpenAiCompatible {
             return Err(LlmError::Unsupported);
