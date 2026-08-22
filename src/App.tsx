@@ -883,7 +883,7 @@ function App() {
       const result = await exportPdf(snapshot.id);
       if (result.kind === "pdf") {
         downloadBytes(`${baseName}.pdf`, Uint8Array.from(result.bytes), "application/pdf");
-        setNotice("PDF 已通过 LibreOffice 导出");
+        setNotice("PDF 已通过内置排版引擎导出");
       } else {
         const preview = window.open("", "_blank", "noopener,noreferrer");
         if (!preview) throw { code: "popup_blocked", message: "浏览器阻止了打印预览窗口。" };
@@ -892,7 +892,7 @@ function App() {
         preview.document.close();
         preview.focus();
         window.setTimeout(() => preview.print(), 120);
-        setNotice("未检测到 LibreOffice，已打开打印预览");
+        setNotice("未找到可用中文字体，已打开打印预览");
       }
     } catch (error) {
       setNotice(ipcErrorMessage(error));

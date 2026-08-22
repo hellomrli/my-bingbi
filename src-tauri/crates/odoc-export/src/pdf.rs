@@ -1,87 +1,9 @@
-use super::{ExportError, Gb9704Style};
+use super::Gb9704Style;
 use odoc_model::{Block, ODoc};
 use std::fmt::Write as _;
-use std::fs;
-use std::path::PathBuf;
-use std::process::Command;
-use tempfile::tempdir;
 
-/// Finds a local LibreOffice/soffice executable without invoking a shell.
-pub fn find_libreoffice() -> Option<PathBuf> {
-    let candidates = if cfg!(target_os = "windows") {
-        vec!["soffice.exe", "libreoffice.exe"]
-    } else {
-        vec!["soffice", "libreoffice"]
-    };
-    if let Some(path) = std::env::var_os("PATH") {
-        for directory in std::env::split_paths(&path) {
-            for candidate in &candidates {
-                let executable = directory.join(candidate);
-                if executable.is_file() {
-                    return Some(executable);
-                }
-            }
-        }
-    }
-    let common = if cfg!(target_os = "windows") {
-        vec![
-            PathBuf::from(r"C:\Program Files\LibreOffice\program\soffice.exe"),
-            PathBuf::from(r"C:\Program Files (x86)\LibreOffice\program\soffice.exe"),
-        ]
-    } else if cfg!(target_os = "macos") {
-        vec![PathBuf::from(
-            "/Applications/LibreOffice.app/Contents/MacOS/soffice",
-        )]
-    } else {
-        vec![
-            PathBuf::from("/usr/bin/libreoffice"),
-            PathBuf::from("/usr/bin/soffice"),
-        ]
-    };
-    common.into_iter().find(|path| path.is_file())
-}
-
-/// Converts DOCX bytes through a local `LibreOffice` headless process.
-///
-/// # Errors
-///
-/// Returns an error when `LibreOffice` is not installed, the input is empty or oversized, the
-/// temporary workspace cannot be prepared, or the conversion produces no readable PDF.
-pub fn write_pdf_with_libreoffice(docx: &[u8]) -> Result<Vec<u8>, ExportError> {
-    let executable = find_libreoffice().ok_or(ExportError::LibreOfficeUnavailable)?;
-    if docx.is_empty() || docx.len() > 64 * 1024 * 1024 {
-        return Err(ExportError::PackageTooLarge);
-    }
-    let directory = tempdir().map_err(ExportError::Io)?;
-    let input = directory.path().join("document.docx");
-    let profile = directory.path().join("profile");
-    fs::write(&input, docx).map_err(ExportError::Io)?;
-    let status = Command::new(&executable)
-        .arg("--headless")
-        .arg("--nologo")
-        .arg(format!(
-            "-env:UserInstallation=file://{}",
-            profile.display()
-        ))
-        .arg("--convert-to")
-        .arg("pdf")
-        .arg("--outdir")
-        .arg(directory.path())
-        .arg(&input)
-        .status()
-        .map_err(|_| ExportError::PdfConversionFailed)?;
-    if !status.success() {
-        return Err(ExportError::PdfConversionFailed);
-    }
-    let output = directory.path().join("document.pdf");
-    let bytes = fs::read(output).map_err(|_| ExportError::PdfConversionFailed)?;
-    if bytes.is_empty() || bytes.len() > 64 * 1024 * 1024 {
-        return Err(ExportError::PdfConversionFailed);
-    }
-    Ok(bytes)
-}
-
-/// Produces a print-preview HTML representation used when `LibreOffice` is unavailable.
+/// Produces a print-preview HTML representation used when no usable CJK font
+/// is available for the embedded PDF engine.
 pub fn print_html(document: &ODoc, style: &Gb9704Style) -> String {
     let mut html = String::from("<!doctype html><meta charset=\"utf-8\"><style>");
     let right = style.page.width_mm - style.page.margin_left_mm - style.page.body_width_mm;

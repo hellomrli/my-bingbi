@@ -4,9 +4,9 @@ use odoc_engine::{
     StageOutput,
 };
 use odoc_export::{
-    ExportError, Gb9704Style, extract_reference_text as parse_reference_text, print_html,
-    read_docx, validate_docx_template, write_docx_with_style, write_docx_with_template,
-    write_pdf_with_libreoffice,
+    ExportError, Gb9704Style, discover_system_fonts, extract_reference_text as parse_reference_text,
+    odoc_to_typst, print_html, read_docx, render_typst_pdf, resolve_font_path,
+    validate_docx_template, write_docx_with_style, write_docx_with_template,
 };
 use odoc_kb::{
     ChangeKind, FnsPendingChange, FnsProvider, FnsWatchConfig, FnsWatchEvent, KbConfig, KbError,
@@ -143,7 +143,6 @@ enum PdfExportResult {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ExportCapabilities {
-    libreoffice_available: bool,
     custom_template_configured: bool,
 }
 
@@ -1451,15 +1450,53 @@ fn export_pdf(
         .map_err(map_store_error)?;
     ensure_exportable(&document, &packs)?;
     let style = export_style(&state, &packs)?;
-    let docx = write_docx_with_style(&document, &style).map_err(map_export_error)?;
-    match write_pdf_with_libreoffice(&docx) {
-        Ok(bytes) => Ok(PdfExportResult::Pdf { bytes }),
-        Err(ExportError::LibreOfficeUnavailable | ExportError::PdfConversionFailed) => {
-            Ok(PdfExportResult::PrintPreview {
-                html: print_html(&document, &style),
-            })
+
+    // Zero-dependency PDF: render the document through the embedded Typst
+    // engine using fonts discovered on the host system. When no usable CJK
+    // font is available, fall back to the browser print preview (which does not
+    // depend on any external binary either).
+    let fonts = typst_fonts(&style);
+    if fonts.is_empty() {
+        return Ok(PdfExportResult::PrintPreview {
+            html: print_html(&document, &style),
+        });
+    }
+    let source = odoc_to_typst(&document, &style);
+    let bytes = render_typst_pdf(&source, &fonts).map_err(map_pdf_error)?;
+    Ok(PdfExportResult::Pdf { bytes })
+}
+
+/// Maps every distinct font family referenced by `style` to a discovered font
+/// file on the host system. Families that cannot be resolved fall back to the
+/// CJK serif font; an empty result means no usable font exists at all.
+fn typst_fonts(style: &Gb9704Style) -> Vec<(String, PathBuf)> {
+    let system_fonts = discover_system_fonts();
+    let families = [
+        &style.fonts.title,
+        &style.fonts.body,
+        &style.fonts.heading_l1,
+        &style.fonts.heading_l2,
+        &style.fonts.heading_l3,
+        &style.fonts.heading_l4,
+        &style.fonts.document_number,
+    ];
+    let mut seen = std::collections::HashSet::new();
+    let mut fonts = Vec::new();
+    for family in families {
+        if !seen.insert(family.font.as_str()) {
+            continue;
         }
-        Err(error) => Err(map_export_error(error)),
+        if let Some(path) = resolve_font_path(&family.font, &system_fonts) {
+            fonts.push((family.font.clone(), path));
+        }
+    }
+    fonts
+}
+
+fn map_pdf_error(error: ExportError) -> IpcError {
+    IpcError {
+        code: "export_failed",
+        message: format!("PDF 生成失败：{error}"),
     }
 }
 
@@ -1470,7 +1507,6 @@ fn export_capabilities(state: State<'_, AppState>) -> Result<ExportCapabilities,
         .map_err(map_store_error)?
         .is_some();
     Ok(ExportCapabilities {
-        libreoffice_available: odoc_export::find_libreoffice().is_some(),
         custom_template_configured,
     })
 }

@@ -123,7 +123,6 @@ export type PdfExportResult =
   | { kind: "print_preview"; html: string };
 
 export interface ExportCapabilities {
-  libreofficeAvailable: boolean;
   customTemplateConfigured: boolean;
 }
 
@@ -243,7 +242,7 @@ export async function exportPdf(documentId: string): Promise<PdfExportResult> {
 
 export async function exportCapabilities(): Promise<ExportCapabilities> {
   if (!isDesktopRuntime()) {
-    return { libreofficeAvailable: false, customTemplateConfigured: false };
+    return { customTemplateConfigured: false };
   }
   return invoke<ExportCapabilities>("export_capabilities");
 }

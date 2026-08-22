@@ -1,19 +1,25 @@
 //! Deterministic OOXML import/export for the canonical [`ODoc`] model.
 //!
 //! The exporter intentionally keeps the package small and dependency-light.  It emits the
-//! parts required by Word and `LibreOffice`, applies the GB/T 9704 page geometry, and preserves
+//! parts required by Word, applies the GB/T 9704 page geometry, and preserves
 //! the semantic structure that can be represented by the first `ODoc` schema.
 
 mod import;
+pub mod fonts;
+mod odoc_to_typst;
 mod pdf;
 mod reference;
 mod style;
 mod template;
+pub mod typst_render;
 
 pub use import::read_docx;
-pub use pdf::{find_libreoffice, print_html, write_pdf_with_libreoffice};
+pub use odoc_to_typst::odoc_to_typst;
+pub use fonts::{discover_system_fonts, resolve_font_path, resolve_font_set, FontSet};
+pub use pdf::print_html;
 pub use reference::extract_reference_text;
 pub use style::{FontStyle, FontStyles, Gb9704Style, HeaderStyle, PageStyle, StyleError};
+pub use typst_render::render_typst_pdf;
 pub use template::{validate_docx_template, write_docx_with_template};
 
 use odoc_model::{Block, HeadingLevel, ListStyle, ODoc};
@@ -72,10 +78,14 @@ pub enum ExportError {
     UnsupportedReferenceFormat,
     #[error("reference file structure is invalid or contains no readable text")]
     InvalidReference,
-    #[error("LibreOffice is not available")]
-    LibreOfficeUnavailable,
-    #[error("LibreOffice could not convert the document")]
-    PdfConversionFailed,
+    #[error("font file `{0}` could not be read: {1}")]
+    FontRead(String, std::io::Error),
+    #[error("font file `{0}` does not contain a usable font")]
+    InvalidFont(String),
+    #[error("Typst compilation failed: {0}")]
+    TypstCompile(String),
+    #[error("Typst PDF export failed: {0}")]
+    TypstPdfExport(String),
 }
 
 /// Writes an `ODoc` as a structurally valid OOXML DOCX package.
