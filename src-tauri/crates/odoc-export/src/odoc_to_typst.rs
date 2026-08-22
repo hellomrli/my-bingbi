@@ -28,7 +28,12 @@ pub fn odoc_to_typst(document: &ODoc, style: &Gb9704Style) -> String {
     }
 
     if !document.body.title.text.trim().is_empty() {
-        write_centered(&mut out, &document.body.title.text, &style.fonts.title, style);
+        write_centered(
+            &mut out,
+            &document.body.title.text,
+            &style.fonts.title,
+            style,
+        );
     }
 
     if !document.body.main_recipients.is_empty() {
@@ -72,15 +77,11 @@ pub fn odoc_to_typst(document: &ODoc, style: &Gb9704Style) -> String {
 
 fn write_page_setup(out: &mut String, style: &Gb9704Style) {
     let right_margin = style.page.width_mm - style.page.margin_left_mm - style.page.body_width_mm;
-    let bottom_margin =
-        style.page.height_mm - style.page.margin_top_mm - style.page.body_height_mm;
+    let bottom_margin = style.page.height_mm - style.page.margin_top_mm - style.page.body_height_mm;
     let _ = writeln!(
         out,
         "#set page(paper: \"a4\", margin: (top: {}mm, bottom: {}mm, left: {}mm, right: {}mm))",
-        style.page.margin_top_mm,
-        bottom_margin,
-        style.page.margin_left_mm,
-        right_margin
+        style.page.margin_top_mm, bottom_margin, style.page.margin_left_mm, right_margin
     );
     let _ = writeln!(
         out,
@@ -118,7 +119,11 @@ fn write_header(out: &mut String, mark: &str, style: &Gb9704Style) {
 
 fn write_centered(out: &mut String, text: &str, font: &FontStyle, style: &Gb9704Style) {
     let _ = writeln!(out, "#align(center)[");
-    let _ = writeln!(out, "  #set par(first-line-indent: 0pt, leading: {}pt)", style.page.line_spacing_pt);
+    let _ = writeln!(
+        out,
+        "  #set par(first-line-indent: 0pt, leading: {}pt)",
+        style.page.line_spacing_pt
+    );
     let _ = writeln!(
         out,
         "  #text(font: \"{}\", size: {}pt)[{}]",
@@ -134,7 +139,11 @@ fn write_centered(out: &mut String, text: &str, font: &FontStyle, style: &Gb9704
 /// attachment notes and similar top-level lines.
 fn write_flush_paragraph(out: &mut String, text: &str, style: &Gb9704Style) {
     let _ = writeln!(out, "#block[");
-    let _ = writeln!(out, "  #set par(first-line-indent: 0pt, leading: {}pt)", style.page.line_spacing_pt);
+    let _ = writeln!(
+        out,
+        "  #set par(first-line-indent: 0pt, leading: {}pt)",
+        style.page.line_spacing_pt
+    );
     let _ = writeln!(out, "  {}", escape(text));
     let _ = writeln!(out, "]");
     let _ = writeln!(out);
@@ -149,12 +158,24 @@ fn write_block(out: &mut String, block: &Block, style: &Gb9704Style) {
                 let _ = writeln!(out);
             }
         }
-        Block::List { style: list_style, items, .. } => write_list(out, *list_style, items),
+        Block::List {
+            style: list_style,
+            items,
+            ..
+        } => write_list(out, *list_style, items),
         Block::Table { rows, .. } => write_table(out, rows),
         Block::Quote { content, .. } => {
             let _ = writeln!(out, "#block[");
-            let _ = writeln!(out, "  #set par(first-line-indent: 0pt, leading: {}pt)", style.page.line_spacing_pt);
-            let _ = writeln!(out, "  #text(style: \"italic\")[\u{201c}{}\u{201d}]", escape(content));
+            let _ = writeln!(
+                out,
+                "  #set par(first-line-indent: 0pt, leading: {}pt)",
+                style.page.line_spacing_pt
+            );
+            let _ = writeln!(
+                out,
+                "  #text(style: \"italic\")[\u{201c}{}\u{201d}]",
+                escape(content)
+            );
             let _ = writeln!(out, "]");
             let _ = writeln!(out);
         }
@@ -167,7 +188,11 @@ fn write_heading(out: &mut String, level: HeadingLevel, content: &str, style: &G
     // indent like regular paragraphs.
     if matches!(level, HeadingLevel::L1 | HeadingLevel::L2) {
         let _ = writeln!(out, "#block[");
-        let _ = writeln!(out, "  #set par(first-line-indent: 0pt, leading: {}pt)", style.page.line_spacing_pt);
+        let _ = writeln!(
+            out,
+            "  #set par(first-line-indent: 0pt, leading: {}pt)",
+            style.page.line_spacing_pt
+        );
         let _ = writeln!(
             out,
             "  #text(font: \"{}\", size: {}pt)[{}]",
@@ -245,7 +270,11 @@ fn write_signer(
         return;
     }
     let _ = writeln!(out, "#align(right)[");
-    let _ = writeln!(out, "  #set par(first-line-indent: 0pt, leading: {}pt)", style.page.line_spacing_pt);
+    let _ = writeln!(
+        out,
+        "  #set par(first-line-indent: 0pt, leading: {}pt)",
+        style.page.line_spacing_pt
+    );
     for line in lines {
         let _ = writeln!(out, "  {}", escape(&line));
     }
@@ -256,7 +285,11 @@ fn write_signer(
 fn write_footer(out: &mut String, footer: &odoc_model::Footer, style: &Gb9704Style) {
     let _ = writeln!(out, "#v(1fr)");
     let _ = writeln!(out, "#line(length: 100%)");
-    let _ = writeln!(out, "#set par(first-line-indent: 0pt, leading: {}pt)", style.page.line_spacing_pt);
+    let _ = writeln!(
+        out,
+        "#set par(first-line-indent: 0pt, leading: {}pt)",
+        style.page.line_spacing_pt
+    );
 
     if !footer.copy_recipients.is_empty() {
         let _ = writeln!(out, "抄送：{}", escape(&footer.copy_recipients.join("、")));
@@ -312,7 +345,10 @@ mod tests {
 
     #[test]
     fn escapes_markup_characters() {
-        assert_eq!(escape("#号 $价 *星 _线 [方]"), "\\#号 \\$价 \\*星 \\_线 \\[方\\]");
+        assert_eq!(
+            escape("#号 $价 *星 _线 [方]"),
+            "\\#号 \\$价 \\*星 \\_线 \\[方\\]"
+        );
         assert_eq!(escape("普通中文。"), "普通中文。");
     }
 
@@ -411,7 +447,8 @@ mod tests {
             return;
         }
 
-        let bytes = crate::render_typst_pdf(&source, &fonts).expect("Typst compilation should succeed");
+        let bytes =
+            crate::render_typst_pdf(&source, &fonts).expect("Typst compilation should succeed");
         assert!(bytes.starts_with(b"%PDF"), "output must be a PDF");
     }
 }

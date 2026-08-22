@@ -73,5 +73,8 @@ fn main() {
 
     let bytes = render_typst_pdf(&source, &fonts).expect("PDF render failed");
     std::fs::write("/tmp/bingbi_sample.pdf", &bytes).unwrap();
-    println!("PDF written to /tmp/bingbi_sample.pdf ({} bytes)", bytes.len());
+    println!(
+        "PDF written to /tmp/bingbi_sample.pdf ({} bytes)",
+        bytes.len()
+    );
 }

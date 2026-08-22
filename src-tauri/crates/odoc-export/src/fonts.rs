@@ -29,13 +29,7 @@ const BODY_KEYWORDS: &[&str] = &[
 ];
 
 /// 黑体(一级标题)关键字,按优先级排序。
-const HEI_KEYWORDS: &[&str] = &[
-    "黑体",
-    "simhei",
-    "hei",
-    "Noto Sans CJK",
-    "Source Han Sans",
-];
+const HEI_KEYWORDS: &[&str] = &["黑体", "simhei", "hei", "Noto Sans CJK", "Source Han Sans"];
 
 /// 楷体(二级标题)关键字,按优先级排序。
 ///
@@ -269,9 +263,10 @@ fn weight_rank(file_name: &str) -> u8 {
 /// 步骤:去掉扩展名 → 去掉 `[...]` 变量轴 → 按 `-`/`_`/空白切分 → 丢弃末尾的
 /// 样式/权重词(Regular、Bold 等)→ 对每个词做驼峰拆分 → 用空格连接。
 fn family_from_file_name(file_name: &str) -> String {
-    let stem = Path::new(file_name)
-        .file_stem()
-        .map_or_else(|| file_name.to_string(), |s| s.to_string_lossy().into_owned());
+    let stem = Path::new(file_name).file_stem().map_or_else(
+        || file_name.to_string(),
+        |s| s.to_string_lossy().into_owned(),
+    );
     let stem = strip_variable_axis(&stem).to_string();
 
     let tokens: Vec<&str> = stem
@@ -439,7 +434,10 @@ mod tests {
     #[test]
     fn keyword_match_is_case_insensitive_on_family_and_file_name() {
         let fonts = vec![
-            ("Noto Serif CJK".to_string(), PathBuf::from("/f/NotoSerifCJK-Regular.ttc")),
+            (
+                "Noto Serif CJK".to_string(),
+                PathBuf::from("/f/NotoSerifCJK-Regular.ttc"),
+            ),
             ("wqy zenhei".to_string(), PathBuf::from("/f/wqy-zenhei.ttc")),
         ];
         assert_eq!(
@@ -457,7 +455,10 @@ mod tests {
     fn specific_kai_keyword_wins_over_generic_kai() {
         // "kai" 会误匹配 Kaithi 文字字体,因此 ukai 必须排在其前面。
         let fonts = vec![
-            ("Noto Sans Kaithi".to_string(), PathBuf::from("/f/NotoSansKaithi-Regular.ttf")),
+            (
+                "Noto Sans Kaithi".to_string(),
+                PathBuf::from("/f/NotoSansKaithi-Regular.ttf"),
+            ),
             ("ukai".to_string(), PathBuf::from("/f/ukai.ttc")),
         ];
         assert_eq!(

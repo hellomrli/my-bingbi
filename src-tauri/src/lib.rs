@@ -4,9 +4,10 @@ use odoc_engine::{
     StageOutput,
 };
 use odoc_export::{
-    ExportError, Gb9704Style, discover_system_fonts, extract_reference_text as parse_reference_text,
-    odoc_to_typst, print_html, read_docx, render_typst_pdf, resolve_font_path,
-    validate_docx_template, write_docx_with_style, write_docx_with_template,
+    ExportError, Gb9704Style, discover_system_fonts,
+    extract_reference_text as parse_reference_text, odoc_to_typst, print_html, read_docx,
+    render_typst_pdf, resolve_font_path, validate_docx_template, write_docx_with_style,
+    write_docx_with_template,
 };
 use odoc_kb::{
     ChangeKind, FnsPendingChange, FnsProvider, FnsWatchConfig, FnsWatchEvent, KbConfig, KbError,

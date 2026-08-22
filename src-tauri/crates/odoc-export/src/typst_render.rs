@@ -106,12 +106,16 @@ impl World for TypstWorld {
         if id == self.source.id() {
             Ok(self.source.clone())
         } else {
-            Err(FileError::NotFound(id.vpath().as_rootless_path().to_path_buf()))
+            Err(FileError::NotFound(
+                id.vpath().as_rootless_path().to_path_buf(),
+            ))
         }
     }
 
     fn file(&self, id: FileId) -> FileResult<Bytes> {
-        Err(FileError::NotFound(id.vpath().as_rootless_path().to_path_buf()))
+        Err(FileError::NotFound(
+            id.vpath().as_rootless_path().to_path_buf(),
+        ))
     }
 
     fn font(&self, index: usize) -> Option<Font> {
@@ -134,10 +138,7 @@ impl World for TypstWorld {
 /// Returns an error when a font file cannot be read or parsed, when Typst
 /// compilation fails, or when the finished document cannot be serialized to
 /// PDF.
-pub fn render_typst_pdf(
-    source: &str,
-    fonts: &[(String, PathBuf)],
-) -> Result<Vec<u8>, ExportError> {
+pub fn render_typst_pdf(source: &str, fonts: &[(String, PathBuf)]) -> Result<Vec<u8>, ExportError> {
     let world = TypstWorld::new(source, fonts)?;
     let document = match typst::compile::<PagedDocument>(&world).output {
         Ok(document) => document,
@@ -205,6 +206,9 @@ mod tests {
 
         let pdf = render_typst_pdf(&source, &fonts).expect("a PDF should be generated");
         assert!(!pdf.is_empty(), "PDF bytes should not be empty");
-        assert!(pdf.starts_with(b"%PDF"), "PDF should start with the `%PDF` magic");
+        assert!(
+            pdf.starts_with(b"%PDF"),
+            "PDF should start with the `%PDF` magic"
+        );
     }
 }
