@@ -34,7 +34,7 @@
 - **材料驱动起草** — 只写大致意图、对象和时限即可，不要求先完成正文；可直接引用知识库文件，或上传 TXT / Markdown / CSV / JSON / YAML / PDF / OFD / DOC / DOCX / XLSX / XLS / WPS，材料统一进入完整起草流水线（Office/PDF 二进制文件由桌面内核解析）
 - **涉密可控** — 密级达到秘密及以上时强制走本地模型，密钥存系统 Keyring，全本地存储，无遥测
 - **知识包机制** — 公文规范、文种模板、校验规则都是可装卸的 Skill Pack，设置页可启用/停用；用户包目录（`config_dir/packs`）支持自建"本单位公文包"，首个空目录自动放入 `local-corpus` 示例包
-- **严格排版** — 按 GB/T 9704-2012 导出 docx：版心 156×225mm、天头 37mm、订口 28mm、行距 28pt 固定值、每面 22 行 × 28 字；支持机关 Word 模板注入与 LibreOffice PDF
+- **严格排版** — 按 GB/T 9704-2012 导出 docx：版心 156×225mm、天头 37mm、订口 28mm、行距 28pt 固定值、每面 22 行 × 28 字；支持机关 Word 模板注入；PDF 由内置 Typst 引擎零外部依赖生成（读取系统字体）
 - **成本可见** — 每次起草/仿写/审核的 token 消耗按会话记录，最近文档可打开「起草记录」查看阶段明细
 - **本地崩溃诊断** — 可选捕获 Rust 内核异常，只在本机 SQLite 中保留最近 100 条；设置页可查看、刷新和清空，不上传诊断数据
 
@@ -50,6 +50,8 @@
 | [`docs/STORE-SPEC.md`](docs/STORE-SPEC.md) | SQLite 事务、版本历史、配置和系统 Keyring 边界 |
 | [`docs/ui/workbench.html`](docs/ui/workbench.html) | 界面设计稿（浏览器打开） |
 | [`src/styles/tokens.css`](src/styles/tokens.css) | 设计令牌与 GB/T 9704-2012 版面常量 |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | 贡献指南：报告问题、提交代码、行为准则 |
+| [`LICENSE`](LICENSE) | 开源协议（MIT） |
 
 ---
 
@@ -104,8 +106,8 @@ cargo run -p odoc-engine --example export_engine_bindings
 推送版本 tag 会自动在 GitHub Actions 的原生 runner 上构建 Linux `.deb` 和 Windows NSIS `.exe`，并创建对应的 GitHub Release：
 
 ```bash
-git tag v0.1.4
-git push origin v0.1.4
+git tag v0.1.5
+git push origin v0.1.5
 ```
 
 发布工作流位于 [`.github/workflows/release.yml`](.github/workflows/release.yml)，只匹配 `v*` tag；构建完成前不会创建 Release。
@@ -159,7 +161,7 @@ git push origin v0.1.4
 
 ## 状态
 
-**M0–M4 主线功能已闭环。** 当前已有可运行的 React 工作台、A4 国标版心预览、结构化正文编辑、确定性质检、事实台账与回查标红、最近文档、自动保存、版本快照与 diff、起草/仿写/审核三种流水线、单步重跑、会话成本记录、知识包管理、字体检测、首次运行引导、自定义规则与本地崩溃诊断；桌面版可导出 GB/T 9704 严格 docx（支持机关模板注入）与 LibreOffice PDF。Rust 侧已建立 Tauri 壳、`odoc-model` AST、`odoc-store` SQLite 持久化、`odoc-llm` 多 Provider、`odoc-kb`（FNS/本地 Vault/MCP + WebSocket 增量订阅）、`odoc-lint` 规则引擎与 `odoc-export` 排版。模型凭据只存系统 Keyring，秘密及以上公文在内核层禁止远程调用。Linux `.deb` 与本机验证、CI 原生 Linux/Windows 壳检查与安装包产物均已就绪。
+**M0–M4 主线功能已闭环。** 当前已有可运行的 React 工作台、A4 国标版心预览、结构化正文编辑、确定性质检、事实台账与回查标红、最近文档、自动保存、版本快照与 diff、起草/仿写/审核三种流水线、单步重跑、会话成本记录、知识包管理、字体检测、首次运行引导、自定义规则与本地崩溃诊断；桌面版可导出 GB/T 9704 严格 docx（支持机关模板注入）与零依赖 PDF（内置 Typst 引擎）。Rust 侧已建立 Tauri 壳、`odoc-model` AST、`odoc-store` SQLite 持久化、`odoc-llm` 多 Provider、`odoc-kb`（FNS/本地 Vault/MCP + WebSocket 增量订阅）、`odoc-lint` 规则引擎与 `odoc-export` 排版。模型凭据只存系统 Keyring，秘密及以上公文在内核层禁止远程调用。Linux `.deb` 与本机验证、CI 原生 Linux/Windows 壳检查与安装包产物均已就绪。
 
 **M0–M4 里程碑已全部勾选**。可选增强：知识包在线安装与更新。发布自动更新前需生成签名密钥并在仓库 secrets 配置 `TAURI_SIGNING_PRIVATE_KEY`（详见 [`docs/PLAN.md` §9](docs/PLAN.md)）。
 
