@@ -1494,9 +1494,18 @@ fn typst_fonts(style: &Gb9704Style) -> Vec<(String, PathBuf)> {
 }
 
 fn map_pdf_error(error: ExportError) -> IpcError {
+    let message = match error {
+        ExportError::FontRead(..) | ExportError::InvalidFont(..) => {
+            "PDF 生成失败：未找到可用的中文字体。"
+        }
+        ExportError::TypstCompile(..) | ExportError::TypstPdfExport(..) => {
+            "PDF 生成失败：文档排版失败。"
+        }
+        _ => "PDF 生成失败。",
+    };
     IpcError {
         code: "export_failed",
-        message: format!("PDF 生成失败：{error}"),
+        message,
     }
 }
 
