@@ -203,7 +203,7 @@ fn cosine_similarity(left: &[f32], right: &[f32]) -> f32 {
 }
 
 fn matches_path_prefix(path: &str, prefix: Option<&str>) -> bool {
-    prefix.is_none_or(|prefix| path.replace('\\', "/").starts_with(prefix))
+    crate::types::path_matches_prefix(path, prefix)
 }
 
 /// Converts a zero-based rank into its fusion weight. Ranks are bounded by the retrieval limits,

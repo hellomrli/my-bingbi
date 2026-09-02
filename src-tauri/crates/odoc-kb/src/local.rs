@@ -1,14 +1,15 @@
 use crate::KbProvider;
 use crate::types::{
     ChangeEvent, ChangeKind, Frontmatter, KbError, KbHit, KbNote, KbQuery, MAX_NOTE_BYTES,
-    SearchMode, contains_invalid_note_control, normalize_relative_path, validate_relative_path,
+    SearchMode, contains_invalid_note_control, normalize_relative_path, path_matches_prefix,
+    validate_relative_path,
 };
 use async_trait::async_trait;
 use regex::Regex;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use tokio::sync::broadcast;
 use walkdir::WalkDir;
 
@@ -48,9 +49,9 @@ impl LocalVaultProvider {
         self.root.as_ref()
     }
 
-    fn note_path(&self, path: &str) -> Result<PathBuf, KbError> {
+    fn note_path_on(root: &Path, path: &str) -> Result<PathBuf, KbError> {
         let normalized = normalize_relative_path(path)?;
-        let candidate = self.root.join(&normalized);
+        let candidate = root.join(&normalized);
         let metadata = fs::symlink_metadata(&candidate).map_err(|error| {
             if error.kind() == std::io::ErrorKind::NotFound {
                 KbError::NotFound
@@ -61,7 +62,7 @@ impl LocalVaultProvider {
         if metadata.file_type().is_symlink() || !metadata.is_file() {
             return Err(KbError::InvalidPath);
         }
-        let canonical_root = fs::canonicalize(self.root.as_ref()).map_err(KbError::Io)?;
+        let canonical_root = fs::canonicalize(root).map_err(KbError::Io)?;
         let canonical_candidate = fs::canonicalize(&candidate).map_err(KbError::Io)?;
         if !canonical_candidate.starts_with(&canonical_root) {
             return Err(KbError::InvalidPath);
@@ -69,7 +70,7 @@ impl LocalVaultProvider {
         Ok(candidate)
     }
 
-    fn writable_note_path(&self, path: &str) -> Result<PathBuf, KbError> {
+    fn writable_note_path_on(root: &Path, path: &str) -> Result<PathBuf, KbError> {
         let normalized = normalize_relative_path(path)?;
         let relative = Path::new(&normalized);
         if relative.extension().and_then(|value| value.to_str()) != Some("md") {
@@ -77,7 +78,7 @@ impl LocalVaultProvider {
         }
 
         let parent = relative.parent().ok_or(KbError::InvalidPath)?;
-        let mut current = self.root.as_ref().clone();
+        let mut current = root.to_path_buf();
         for component in parent.components() {
             let std::path::Component::Normal(component) = component else {
                 return Err(KbError::InvalidPath);
@@ -104,13 +105,13 @@ impl LocalVaultProvider {
             }
         }
 
-        let canonical_root = fs::canonicalize(self.root.as_ref()).map_err(KbError::Io)?;
+        let canonical_root = fs::canonicalize(root).map_err(KbError::Io)?;
         let canonical_parent = fs::canonicalize(&current).map_err(KbError::Io)?;
         if !canonical_parent.starts_with(&canonical_root) {
             return Err(KbError::InvalidPath);
         }
 
-        let target = self.root.join(relative);
+        let target = root.join(relative);
         match fs::symlink_metadata(&target) {
             Ok(metadata) => {
                 if metadata.file_type().is_symlink() || !metadata.is_file() {
@@ -123,7 +124,8 @@ impl LocalVaultProvider {
         Ok(target)
     }
 
-    fn scan(&self, query: &KbQuery) -> Result<Vec<KbHit>, KbError> {
+    /// The synchronous vault scan; always run through [`offload`] from async contexts.
+    fn scan_on(root: &Path, vault: &str, query: &KbQuery) -> Result<Vec<KbHit>, KbError> {
         query.validate()?;
         let prefix = query
             .path_prefix
@@ -137,7 +139,7 @@ impl LocalVaultProvider {
         };
         let keyword = query.keyword.to_lowercase();
         let mut hits = Vec::new();
-        for entry in WalkDir::new(self.root.as_ref())
+        for entry in WalkDir::new(root)
             .follow_links(false)
             .into_iter()
             .filter_map(Result::ok)
@@ -148,23 +150,27 @@ impl LocalVaultProvider {
             if path.extension().and_then(|value| value.to_str()) != Some("md") {
                 continue;
             }
-            let relative = path
-                .strip_prefix(self.root.as_ref())
-                .map_err(|_| KbError::InvalidPath)?
-                .to_string_lossy()
-                .replace('\\', "/");
-            if prefix
-                .as_deref()
-                .is_some_and(|value| !relative.starts_with(value))
-            {
+            let relative = match path.strip_prefix(root) {
+                Ok(relative) => relative.to_string_lossy().replace('\\', "/"),
+                Err(_) => continue,
+            };
+            if !path_matches_prefix(&relative, prefix.as_deref()) {
                 continue;
             }
-            let bytes = fs::read(path).map_err(KbError::Io)?;
+            // One unreadable or malformed note (open frontmatter, non-UTF-8 bytes, a file
+            // deleted mid-walk) must not take down the whole vault search.
+            let Ok(bytes) = fs::read(path) else {
+                continue;
+            };
             if bytes.len() > MAX_NOTE_BYTES {
                 continue;
             }
-            let text = String::from_utf8(bytes).map_err(|_| KbError::InvalidNote)?;
-            let note = parse_markdown_note(&self.vault, &relative, &text)?;
+            let Ok(text) = String::from_utf8(bytes) else {
+                continue;
+            };
+            let Ok(note) = parse_markdown_note(vault, &relative, &text) else {
+                continue;
+            };
             if !filters_match(&note.frontmatter, &query.filters) {
                 continue;
             }
@@ -205,34 +211,26 @@ impl LocalVaultProvider {
         hits.truncate(query.normalized_limit() as usize);
         Ok(hits)
     }
-}
-
-#[async_trait]
-impl KbProvider for LocalVaultProvider {
-    async fn search(&self, query: &KbQuery) -> Result<Vec<KbHit>, KbError> {
-        self.scan(query)
-    }
-
-    async fn get(&self, path: &str) -> Result<KbNote, KbError> {
-        let path = self.note_path(path)?;
+    fn get_on(root: &Path, vault: &str, path: &str) -> Result<KbNote, KbError> {
+        let path = Self::note_path_on(root, path)?;
         let bytes = fs::read(&path).map_err(KbError::Io)?;
         if bytes.len() > MAX_NOTE_BYTES {
             return Err(KbError::TooLarge);
         }
         let content = String::from_utf8(bytes).map_err(|_| KbError::InvalidNote)?;
         let relative = path
-            .strip_prefix(self.root.as_ref())
+            .strip_prefix(root)
             .map_err(|_| KbError::InvalidPath)?
             .to_string_lossy()
             .replace('\\', "/");
-        parse_markdown_note(&self.vault, &relative, &content)
+        parse_markdown_note(vault, &relative, &content)
     }
 
-    async fn backlinks(&self, path: &str) -> Result<Vec<String>, KbError> {
+    fn backlinks_on(root: &Path, path: &str) -> Result<Vec<String>, KbError> {
         let path = normalize_relative_path(path)?;
         let needle = link_target(&path);
         let mut links = Vec::new();
-        for entry in WalkDir::new(self.root.as_ref())
+        for entry in WalkDir::new(root)
             .follow_links(false)
             .into_iter()
             .filter_map(Result::ok)
@@ -241,13 +239,15 @@ impl KbProvider for LocalVaultProvider {
             if entry.path().extension().and_then(|value| value.to_str()) != Some("md") {
                 continue;
             }
-            let relative = entry
-                .path()
-                .strip_prefix(self.root.as_ref())
-                .map_err(|_| KbError::InvalidPath)?
-                .to_string_lossy()
-                .replace('\\', "/");
-            let text = fs::read_to_string(entry.path()).map_err(KbError::Io)?;
+            let relative = match entry.path().strip_prefix(root) {
+                Ok(relative) => relative.to_string_lossy().replace('\\', "/"),
+                Err(_) => continue,
+            };
+            // read_to_string also rejects non-UTF-8 notes; a single bad file must not fail
+            // the whole backlink scan.
+            let Ok(text) = fs::read_to_string(entry.path()) else {
+                continue;
+            };
             if extract_wikilinks(&text)
                 .iter()
                 .any(|value| value == &needle)
@@ -263,17 +263,94 @@ impl KbProvider for LocalVaultProvider {
         Ok(links)
     }
 
+    fn write_on(root: &Path, path: &str, content: &str) -> Result<(), KbError> {
+        if content.len() > MAX_NOTE_BYTES || contains_invalid_note_control(content) {
+            return Err(KbError::InvalidNote);
+        }
+        let target = Self::writable_note_path_on(root, path)?;
+        fs::write(&target, content).map_err(KbError::Io)
+    }
+
+    fn list_notes_on(root: &Path, vault: &str, prefix: Option<&str>, limit: usize) -> Vec<KbNote> {
+        let mut paths = WalkDir::new(root)
+            .follow_links(false)
+            .into_iter()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_type().is_file())
+            .filter_map(|entry| {
+                let path = entry.path();
+                (path.extension().and_then(|value| value.to_str()) == Some("md"))
+                    .then(|| path.to_path_buf())
+            })
+            .collect::<Vec<_>>();
+        paths.sort();
+        let mut notes = Vec::new();
+        for path in paths.into_iter().take(MAX_SCAN_FILES) {
+            let relative = match path.strip_prefix(root) {
+                Ok(relative) => relative.to_string_lossy().replace('\\', "/"),
+                Err(_) => continue,
+            };
+            if !path_matches_prefix(&relative, prefix) {
+                continue;
+            }
+            let Ok(bytes) = fs::read(&path) else {
+                continue;
+            };
+            if bytes.len() > MAX_NOTE_BYTES {
+                continue;
+            }
+            let Ok(source) = String::from_utf8(bytes) else {
+                continue;
+            };
+            let Ok(mut note) = parse_markdown_note(vault, &relative, &source) else {
+                continue;
+            };
+            note.modified_at = fs::metadata(&path)
+                .ok()
+                .and_then(|metadata| metadata.modified().ok())
+                .and_then(|value| value.duration_since(std::time::UNIX_EPOCH).ok())
+                .and_then(|value| i64::try_from(value.as_millis()).ok());
+            notes.push(note);
+            if notes.len() >= limit {
+                break;
+            }
+        }
+        notes
+    }
+}
+
+#[async_trait]
+impl KbProvider for LocalVaultProvider {
+    async fn search(&self, query: &KbQuery) -> Result<Vec<KbHit>, KbError> {
+        let root = Arc::clone(&self.root);
+        let vault = self.vault.clone();
+        let query = query.clone();
+        offload(move || Self::scan_on(root.as_path(), &vault, &query)).await
+    }
+
+    async fn get(&self, path: &str) -> Result<KbNote, KbError> {
+        let root = Arc::clone(&self.root);
+        let vault = self.vault.clone();
+        let path = path.to_owned();
+        offload(move || Self::get_on(root.as_path(), &vault, &path)).await
+    }
+
+    async fn backlinks(&self, path: &str) -> Result<Vec<String>, KbError> {
+        let root = Arc::clone(&self.root);
+        let path = path.to_owned();
+        offload(move || Self::backlinks_on(root.as_path(), &path)).await
+    }
+
     async fn outlinks(&self, path: &str) -> Result<Vec<String>, KbError> {
         let note = self.get(path).await?;
         Ok(note.links)
     }
 
     async fn write(&self, path: &str, content: &str) -> Result<(), KbError> {
-        if content.len() > MAX_NOTE_BYTES || contains_invalid_note_control(content) {
-            return Err(KbError::InvalidNote);
-        }
-        let target = self.writable_note_path(path)?;
-        fs::write(&target, content).map_err(KbError::Io)?;
+        let root = Arc::clone(&self.root);
+        let path_owned = path.to_owned();
+        let content_owned = content.to_owned();
+        offload(move || Self::write_on(root.as_path(), &path_owned, &content_owned)).await?;
         let _ = self.events.send(ChangeEvent {
             kind: ChangeKind::Modified,
             vault: self.vault.clone(),
@@ -327,48 +404,17 @@ impl KbProvider for LocalVaultProvider {
         let prefix = path_prefix.map(normalize_relative_path).transpose()?;
         let scan_ceiling = u32::try_from(MAX_SCAN_FILES).unwrap_or(u32::MAX);
         let limit = usize::try_from(limit.clamp(1, scan_ceiling)).unwrap_or(MAX_SCAN_FILES);
-        let mut paths = WalkDir::new(self.root.as_ref())
-            .follow_links(false)
-            .into_iter()
-            .filter_map(Result::ok)
-            .filter(|entry| entry.file_type().is_file())
-            .filter_map(|entry| {
-                let path = entry.path();
-                (path.extension().and_then(|value| value.to_str()) == Some("md"))
-                    .then(|| path.to_path_buf())
-            })
-            .collect::<Vec<_>>();
-        paths.sort();
-        let mut notes = Vec::new();
-        for path in paths.into_iter().take(MAX_SCAN_FILES) {
-            let relative = path
-                .strip_prefix(self.root.as_ref())
-                .map_err(|_| KbError::InvalidPath)?
-                .to_string_lossy()
-                .replace('\\', "/");
-            if prefix
-                .as_deref()
-                .is_some_and(|value| !relative.starts_with(value))
-            {
-                continue;
-            }
-            let bytes = fs::read(&path).map_err(KbError::Io)?;
-            if bytes.len() > MAX_NOTE_BYTES {
-                continue;
-            }
-            let source = String::from_utf8(bytes).map_err(|_| KbError::InvalidNote)?;
-            let mut note = parse_markdown_note(&self.vault, &relative, &source)?;
-            note.modified_at = fs::metadata(&path)
-                .ok()
-                .and_then(|metadata| metadata.modified().ok())
-                .and_then(|value| value.duration_since(std::time::UNIX_EPOCH).ok())
-                .and_then(|value| i64::try_from(value.as_millis()).ok());
-            notes.push(note);
-            if notes.len() >= limit {
-                break;
-            }
-        }
-        Ok(notes)
+        let root = Arc::clone(&self.root);
+        let vault = self.vault.clone();
+        offload(move || {
+            Ok(Self::list_notes_on(
+                root.as_path(),
+                &vault,
+                prefix.as_deref(),
+                limit,
+            ))
+        })
+        .await
     }
 
     fn watch(&self) -> Option<broadcast::Receiver<ChangeEvent>> {
@@ -455,10 +501,23 @@ fn yaml_value_text(value: &serde_yaml::Value) -> Result<String, KbError> {
     }
 }
 
+/// Runs blocking vault IO on the blocking thread pool so large scans never stall a tokio
+/// worker. A panicking task is surfaced as an IO error instead of aborting the runtime.
+async fn offload<T, F>(task: F) -> Result<T, KbError>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, KbError> + Send + 'static,
+{
+    tokio::task::spawn_blocking(task)
+        .await
+        .map_err(|error| KbError::Io(std::io::Error::other(error.to_string())))?
+}
+
 fn extract_wikilinks(content: &str) -> Vec<String> {
-    let regex =
-        Regex::new(r"\[\[([^\]|#]+)(?:#[^\]|]+)?(?:\|[^\]]+)?\]\]").expect("static wikilink regex");
-    let mut links = regex
+    static WIKILINK: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"\[\[([^\]|#]+)(?:#[^\]|]+)?(?:\|[^\]]+)?\]\]").expect("static wikilink regex")
+    });
+    let mut links = WIKILINK
         .captures_iter(content)
         .filter_map(|capture| capture.get(1).map(|value| value.as_str().trim().to_owned()))
         .filter(|value| !value.is_empty())
@@ -469,8 +528,9 @@ fn extract_wikilinks(content: &str) -> Vec<String> {
 }
 
 fn extract_tags(content: &str, frontmatter: &Frontmatter) -> Vec<String> {
-    let regex = Regex::new(r"(?m)(?:^|\s)#([\p{L}\p{N}_/-]+)").expect("static tag regex");
-    let mut tags = regex
+    static TAG: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?m)(?:^|\s)#([\p{L}\p{N}_/-]+)").expect("static tag regex"));
+    let mut tags = TAG
         .captures_iter(content)
         .filter_map(|capture| capture.get(1).map(|value| value.as_str().to_owned()))
         .collect::<Vec<_>>();
@@ -674,5 +734,43 @@ mod tests {
             normalize_relative_path(r"公文\2026\请示.md").unwrap(),
             "公文/2026/请示.md"
         );
+    }
+
+    #[tokio::test]
+    async fn skips_unreadable_or_malformed_notes_instead_of_failing() {
+        let directory = tempdir().expect("temp dir should exist");
+        let provider =
+            LocalVaultProvider::open(directory.path(), "vault").expect("vault should open");
+        provider
+            .write("公文/完好.md", "防汛工作部署会议纪要")
+            .await
+            .expect("note should write");
+        // An unclosed frontmatter block: a very common real-world note defect.
+        std::fs::write(
+            directory.path().join("公文/坏笔记.md"),
+            "---\ntitle: 未闭合\n正文",
+        )
+        .expect("broken note should write");
+        // Non-UTF-8 bytes.
+        std::fs::write(directory.path().join("公文/二进制.md"), [0xff, 0xfe, 0x00])
+            .expect("binary note should write");
+
+        let query = KbQuery {
+            keyword: "防汛".to_owned(),
+            ..KbQuery::default()
+        };
+        let hits = provider.search(&query).await.expect("search should work");
+        assert_eq!(hits.len(), 1);
+        let notes = provider
+            .list_notes(None, 10)
+            .await
+            .expect("list should work");
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].path, "公文/完好.md");
+        let links = provider
+            .backlinks("政策/防汛.md")
+            .await
+            .expect("backlinks should work");
+        assert!(links.is_empty());
     }
 }

@@ -1,3 +1,4 @@
+use crate::types::path_matches_prefix;
 use crate::{Frontmatter, KbError, KbHit, KbNote, KbProvider, KbQuery, SearchMode};
 use async_trait::async_trait;
 use futures_util::StreamExt;
@@ -168,10 +169,7 @@ impl KbProvider for McpProvider {
                 if let Some(mut hit) =
                     hit_from_mcp(note, query.vault.as_deref().unwrap_or(&self.vault))
                 {
-                    if path_prefix
-                        .as_deref()
-                        .is_some_and(|prefix| !hit.path.starts_with(prefix))
-                    {
+                    if !path_matches_prefix(&hit.path, path_prefix.as_deref()) {
                         continue;
                     }
                     if !query.filters.is_empty() {
@@ -299,10 +297,7 @@ impl KbProvider for McpProvider {
             let Some(hit) = hit_from_mcp(row, &self.vault) else {
                 continue;
             };
-            if prefix
-                .as_deref()
-                .is_some_and(|value| !hit.path.starts_with(value))
-            {
+            if !path_matches_prefix(&hit.path, prefix.as_deref()) {
                 continue;
             }
             match self.get(&hit.path).await {

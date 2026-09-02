@@ -2,7 +2,7 @@ use crate::KbProvider;
 use crate::types::{
     ChangeEvent, ChangeKind, Frontmatter, KbError, KbHit, KbNote, KbQuery, MAX_NOTE_BYTES,
     SearchMode, contains_invalid_note_control, normalize_relative_path, parse_fns_base_url,
-    validate_relative_path,
+    path_matches_prefix, validate_relative_path,
 };
 use async_trait::async_trait;
 use futures_util::StreamExt;
@@ -191,10 +191,7 @@ impl KbProvider for FnsProvider {
             .collect::<Vec<_>>();
         let mut hits = Vec::new();
         for mut hit in candidates {
-            if path_prefix
-                .as_deref()
-                .is_some_and(|prefix| !hit.path.starts_with(prefix))
-            {
+            if !path_matches_prefix(&hit.path, path_prefix.as_deref()) {
                 continue;
             }
             if !query.filters.is_empty() {
@@ -340,10 +337,7 @@ impl KbProvider for FnsProvider {
                 else {
                     continue;
                 };
-                if prefix
-                    .as_deref()
-                    .is_some_and(|value| !hit.path.starts_with(value))
-                {
+                if !path_matches_prefix(&hit.path, prefix.as_deref()) {
                     continue;
                 }
                 useful_rows += 1;

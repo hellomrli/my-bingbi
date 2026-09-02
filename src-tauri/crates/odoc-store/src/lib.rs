@@ -201,7 +201,7 @@ CREATE INDEX IF NOT EXISTS idx_crash_events_created_at ON crash_events(created_a
 }
 
 const SCHEMA_V1: &str = r"
-CREATE TABLE documents (
+CREATE TABLE IF NOT EXISTS documents (
     id            TEXT PRIMARY KEY,
     title         TEXT NOT NULL,
     doc_type      TEXT NOT NULL,
@@ -212,10 +212,10 @@ CREATE TABLE documents (
     updated_at    INTEGER NOT NULL
 );
 
-CREATE INDEX idx_documents_updated_at ON documents(updated_at DESC);
-CREATE INDEX idx_documents_doc_type ON documents(doc_type);
+CREATE INDEX IF NOT EXISTS idx_documents_updated_at ON documents(updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_documents_doc_type ON documents(doc_type);
 
-CREATE TABLE doc_versions (
+CREATE TABLE IF NOT EXISTS doc_versions (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     doc_id        TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
     seq           INTEGER NOT NULL,
@@ -226,15 +226,15 @@ CREATE TABLE doc_versions (
     UNIQUE(doc_id, seq)
 );
 
-CREATE INDEX idx_doc_versions_doc_seq ON doc_versions(doc_id, seq DESC);
+CREATE INDEX IF NOT EXISTS idx_doc_versions_doc_seq ON doc_versions(doc_id, seq DESC);
 
-CREATE TABLE app_settings (
+CREATE TABLE IF NOT EXISTS app_settings (
     key           TEXT PRIMARY KEY,
     value_json    TEXT NOT NULL,
     updated_at    INTEGER NOT NULL
 );
 
-CREATE TABLE sessions (
+CREATE TABLE IF NOT EXISTS sessions (
     id            TEXT PRIMARY KEY,
     doc_id        TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
     pipeline      TEXT NOT NULL,
@@ -245,7 +245,7 @@ CREATE TABLE sessions (
     updated_at    INTEGER NOT NULL
 );
 
-CREATE TABLE stage_runs (
+CREATE TABLE IF NOT EXISTS stage_runs (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id    TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
     stage_id      TEXT NOT NULL,
@@ -257,7 +257,7 @@ CREATE TABLE stage_runs (
     created_at    INTEGER NOT NULL
 );
 
-CREATE TABLE kb_notes (
+CREATE TABLE IF NOT EXISTS kb_notes (
     path              TEXT NOT NULL,
     vault             TEXT NOT NULL,
     title             TEXT NOT NULL,
@@ -267,7 +267,7 @@ CREATE TABLE kb_notes (
     PRIMARY KEY(vault, path)
 );
 
-CREATE TABLE kb_chunks (
+CREATE TABLE IF NOT EXISTS kb_chunks (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     vault         TEXT NOT NULL,
     path          TEXT NOT NULL,
@@ -277,9 +277,9 @@ CREATE TABLE kb_chunks (
     UNIQUE(vault, path, seq)
 );
 
-CREATE VIRTUAL TABLE kb_fts USING fts5(vault UNINDEXED, path UNINDEXED, title, content);
+CREATE VIRTUAL TABLE IF NOT EXISTS kb_fts USING fts5(vault UNINDEXED, path UNINDEXED, title, content);
 
-CREATE TABLE findings (
+CREATE TABLE IF NOT EXISTS findings (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     doc_id        TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
     rule_id       TEXT NOT NULL,
@@ -289,7 +289,7 @@ CREATE TABLE findings (
     created_at    INTEGER NOT NULL
 );
 
-CREATE TABLE providers (
+CREATE TABLE IF NOT EXISTS providers (
     id            TEXT PRIMARY KEY,
     kind          TEXT NOT NULL,
     display_name  TEXT NOT NULL,

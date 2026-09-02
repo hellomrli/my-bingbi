@@ -103,7 +103,8 @@ impl DocumentStore {
         let frontmatter = serde_json::to_string(&note.frontmatter)?;
         let tags = serde_json::to_string(&note.tags)?;
         let links = serde_json::to_string(&note.links)?;
-        self.connection.execute(
+        let transaction = self.connection.unchecked_transaction()?;
+        transaction.execute(
             "INSERT INTO kb_notes(path, vault, title, frontmatter_json, mtime, hash, content, tags_json, links_json)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
              ON CONFLICT(vault, path) DO UPDATE SET title=excluded.title,
@@ -111,20 +112,20 @@ impl DocumentStore {
                content=excluded.content, tags_json=excluded.tags_json, links_json=excluded.links_json",
             params![note.path, note.vault, note.title, frontmatter, modified_at, hash, note.content, tags, links],
         )?;
-        self.connection.execute(
+        transaction.execute(
             "DELETE FROM kb_fts WHERE vault = ?1 AND path = ?2",
             params![note.vault, note.path],
         )?;
-        self.connection.execute(
+        transaction.execute(
             "INSERT INTO kb_fts(vault, path, title, content) VALUES (?1, ?2, ?3, ?4)",
             params![note.vault, note.path, note.title, note.content],
         )?;
-        self.connection.execute(
+        transaction.execute(
             "DELETE FROM kb_chunks WHERE vault = ?1 AND path = ?2",
             params![note.vault, note.path],
         )?;
         for (seq, chunk) in chunk_text(&note.content).into_iter().enumerate() {
-            self.connection.execute(
+            transaction.execute(
                 "INSERT INTO kb_chunks(vault, path, seq, text) VALUES (?1, ?2, ?3, ?4)",
                 params![
                     note.vault,
@@ -134,6 +135,7 @@ impl DocumentStore {
                 ],
             )?;
         }
+        transaction.commit()?;
         Ok(())
     }
 
@@ -143,18 +145,20 @@ impl DocumentStore {
     ///
     /// Returns [`StoreError`] when a cache delete fails.
     pub fn remove_cached_kb_note(&self, vault: &str, path: &str) -> Result<(), StoreError> {
-        self.connection.execute(
+        let transaction = self.connection.unchecked_transaction()?;
+        transaction.execute(
             "DELETE FROM kb_notes WHERE vault = ?1 AND path = ?2",
             params![vault, path],
         )?;
-        self.connection.execute(
+        transaction.execute(
             "DELETE FROM kb_fts WHERE vault = ?1 AND path = ?2",
             params![vault, path],
         )?;
-        self.connection.execute(
+        transaction.execute(
             "DELETE FROM kb_chunks WHERE vault = ?1 AND path = ?2",
             params![vault, path],
         )?;
+        transaction.commit()?;
         Ok(())
     }
 
@@ -179,15 +183,47 @@ impl DocumentStore {
         };
         let candidate_limit = i64::from(candidate_limit);
         let path_prefix = path_prefix.unwrap_or_default();
-        if keyword.trim().is_empty() {
-            let mut statement = self.connection.prepare(
-                "SELECT n.vault, n.path, n.title, substr(n.content, 1, 320), n.frontmatter_json
-                 FROM kb_notes n
-                 WHERE n.vault = ?1 AND (?2 = '' OR substr(n.path, 1, length(?2)) = ?2)
-                 ORDER BY n.mtime DESC, n.path LIMIT ?3",
-            )?;
-            let rows =
-                statement.query_map(params![vault, path_prefix, candidate_limit], |row| {
+        if keyword.trim().is_empty() || fts_query(keyword).is_empty() {
+            return self.list_cached_kb(vault, path_prefix, filters, result_limit, candidate_limit);
+        }
+        // The FTS5 unicode61 tokenizer treats a whole run of CJK characters as one token, so
+        // MATCH would only ever hit exact whole-run equality for Chinese keywords. Route CJK
+        // queries through a bounded LIKE scan over the local cache instead, which keeps
+        // substring semantics at the cost of ranking.
+        if contains_cjk(keyword) {
+            let terms: Vec<String> = keyword
+                .split_whitespace()
+                .take(MAX_LIKE_TERMS)
+                .map(escape_like_term)
+                .map(|term| format!("%{term}%"))
+                .collect();
+            if !terms.is_empty() {
+                let conditions = terms
+                    .iter()
+                    .enumerate()
+                    .map(|(index, _)| {
+                        format!(
+                            "(n.title LIKE ?{} ESCAPE '\\' OR n.content LIKE ?{} ESCAPE '\\')",
+                            index + 4,
+                            index + 4
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" AND ");
+                let sql = format!(
+                    "SELECT n.vault, n.path, n.title, substr(n.content, 1, 320), n.frontmatter_json
+                     FROM kb_notes n
+                     WHERE n.vault = ?1 AND (?2 = '' OR substr(n.path, 1, length(?2)) = ?2)
+                       AND {conditions}
+                     ORDER BY n.mtime DESC, n.path LIMIT ?3"
+                );
+                let mut statement = self.connection.prepare(&sql)?;
+                let mut bindings: Vec<&dyn rusqlite::ToSql> =
+                    vec![&vault, &path_prefix, &candidate_limit];
+                for term in &terms {
+                    bindings.push(term);
+                }
+                let rows = statement.query_map(bindings.as_slice(), |row| {
                     let frontmatter_json: String = row.get(4)?;
                     Ok(KbCacheHit {
                         vault: row.get(0)?,
@@ -198,10 +234,11 @@ impl DocumentStore {
                         frontmatter: serde_json::from_str(&frontmatter_json).unwrap_or_default(),
                     })
                 })?;
-            let hits = rows
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(StoreError::from)?;
-            return Ok(filter_cache_hits(hits, filters, result_limit));
+                let hits = rows
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(StoreError::from)?;
+                return Ok(filter_cache_hits(hits, filters, result_limit));
+            }
         }
         let query = fts_query(keyword);
         let mut statement = self.connection.prepare(
@@ -229,6 +266,39 @@ impl DocumentStore {
                     frontmatter,
                 })
             })?;
+        let hits = rows
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(StoreError::from)?;
+        Ok(filter_cache_hits(hits, filters, result_limit))
+    }
+
+    /// Lists the newest cached notes without full-text matching; used when the keyword is
+    /// empty or carries no searchable FTS syntax.
+    fn list_cached_kb(
+        &self,
+        vault: &str,
+        path_prefix: &str,
+        filters: &Frontmatter,
+        result_limit: u32,
+        candidate_limit: i64,
+    ) -> Result<Vec<KbCacheHit>, StoreError> {
+        let mut statement = self.connection.prepare(
+            "SELECT n.vault, n.path, n.title, substr(n.content, 1, 320), n.frontmatter_json
+             FROM kb_notes n
+             WHERE n.vault = ?1 AND (?2 = '' OR substr(n.path, 1, length(?2)) = ?2)
+             ORDER BY n.mtime DESC, n.path LIMIT ?3",
+        )?;
+        let rows = statement.query_map(params![vault, path_prefix, candidate_limit], |row| {
+            let frontmatter_json: String = row.get(4)?;
+            Ok(KbCacheHit {
+                vault: row.get(0)?,
+                path: row.get(1)?,
+                title: row.get(2)?,
+                snippet: row.get(3)?,
+                score: 0.0,
+                frontmatter: serde_json::from_str(&frontmatter_json).unwrap_or_default(),
+            })
+        })?;
         let hits = rows
             .collect::<Result<Vec<_>, _>>()
             .map_err(StoreError::from)?;
@@ -327,16 +397,15 @@ impl DocumentStore {
     ///
     /// Returns [`StoreError`] when a delete fails.
     pub fn clear_kb_index(&self, vault: &str) -> Result<(), StoreError> {
-        self.connection
-            .execute("DELETE FROM kb_notes WHERE vault = ?1", params![vault])?;
-        self.connection
-            .execute("DELETE FROM kb_chunks WHERE vault = ?1", params![vault])?;
-        self.connection
-            .execute("DELETE FROM kb_fts WHERE vault = ?1", params![vault])?;
-        self.connection.execute(
+        let transaction = self.connection.unchecked_transaction()?;
+        transaction.execute("DELETE FROM kb_notes WHERE vault = ?1", params![vault])?;
+        transaction.execute("DELETE FROM kb_chunks WHERE vault = ?1", params![vault])?;
+        transaction.execute("DELETE FROM kb_fts WHERE vault = ?1", params![vault])?;
+        transaction.execute(
             "DELETE FROM kb_index_state WHERE vault = ?1",
             params![vault],
         )?;
+        transaction.commit()?;
         Ok(())
     }
 
@@ -500,6 +569,9 @@ fn chunk_text(content: &str) -> Vec<String> {
     chunks
 }
 
+/// CJK keyword queries are capped before they turn into a chain of LIKE conditions.
+const MAX_LIKE_TERMS: usize = 8;
+
 fn fts_query(keyword: &str) -> String {
     keyword
         .split_whitespace()
@@ -507,6 +579,20 @@ fn fts_query(keyword: &str) -> String {
         .filter(|term| term != "\"\"")
         .collect::<Vec<_>>()
         .join(" AND ")
+}
+
+fn contains_cjk(value: &str) -> bool {
+    value.chars().any(|character| {
+        ('\u{3400}'..='\u{9fff}').contains(&character)
+            || ('\u{f900}'..='\u{faff}').contains(&character)
+    })
+}
+
+/// Neutralizes LIKE wildcards so a keyword of `%` or `_` matches literally.
+fn escape_like_term(term: &str) -> String {
+    term.replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
 }
 
 fn filter_cache_hits(
@@ -564,6 +650,55 @@ mod tests {
                 .expect("cleared events should load")
                 .is_empty()
         );
+    }
+
+    fn cached_note(vault: &str, path: &str, title: &str, content: &str) -> KbNote {
+        KbNote {
+            vault: vault.to_owned(),
+            path: path.to_owned(),
+            title: title.to_owned(),
+            content: content.to_owned(),
+            frontmatter: Frontmatter::new(),
+            tags: Vec::new(),
+            links: Vec::new(),
+            modified_at: None,
+        }
+    }
+
+    #[test]
+    fn chinese_keywords_match_cjk_substrings_and_bad_syntax_never_errors() {
+        let store = DocumentStore::open_in_memory().expect("store should open");
+        store
+            .cache_kb_note(&cached_note(
+                "vault",
+                "公文/防汛.md",
+                "防汛通知",
+                "关于做好防汛工作的通知，落实属地责任。",
+            ))
+            .expect("note should cache");
+        store
+            .cache_kb_note(&cached_note(
+                "vault",
+                "公文/预算.md",
+                "预算报告",
+                "本年度预算执行情况良好。",
+            ))
+            .expect("note should cache");
+
+        // A CJK substring inside a longer run: unicode61 would treat the whole run as one
+        // token, so this goes through the LIKE path.
+        let hits = store
+            .search_cached_kb("vault", "防汛", None, &Frontmatter::new(), 10)
+            .expect("chinese search should work");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].path, "公文/防汛.md");
+
+        // A keyword that only contained quotes would otherwise produce `MATCH ''` errors;
+        // it degrades to the newest-notes list instead.
+        let hits = store
+            .search_cached_kb("vault", "\"", None, &Frontmatter::new(), 10)
+            .expect("a quote-only keyword must not error");
+        assert_eq!(hits.len(), 2);
     }
 
     #[test]

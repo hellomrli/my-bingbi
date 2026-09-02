@@ -122,10 +122,7 @@ pub fn fact_check_document(document: &ODoc) -> Result<FactCheckReport, LintError
         );
         checked_tokens = checked_tokens.saturating_add(tokens.len().try_into().unwrap_or(u32::MAX));
         for token in tokens {
-            if verified
-                .iter()
-                .any(|term| token == *term || token.contains(term) || term.contains(&token))
-            {
+            if verified.iter().any(|term| fact_covers_token(&token, term)) {
                 continue;
             }
             findings.push(Finding {
@@ -218,12 +215,16 @@ fn apply_regex_rule(
                     location: rule.scope.clone(),
                     text: String::new(),
                 });
-                push_finding(findings, pack_id, rule, &target);
+                push_finding(findings, pack_id, rule, &target, 1);
             }
         }
         Some(RegexMatchMode::Forbidden) => {
-            for target in targets.iter().filter(|target| regex.is_match(&target.text)) {
-                push_finding(findings, pack_id, rule, target);
+            for (occurrence, target) in targets
+                .iter()
+                .filter(|target| regex.is_match(&target.text))
+                .enumerate()
+            {
+                push_finding(findings, pack_id, rule, target, occurrence + 1);
             }
         }
         None => return Err(LintError::InvalidPattern),
@@ -259,7 +260,7 @@ fn apply_density_rule(
             location: rule.scope.clone(),
             text: String::new(),
         });
-        push_finding(findings, pack_id, rule, &target);
+        push_finding(findings, pack_id, rule, &target, 1);
     }
     Ok(())
 }
@@ -274,6 +275,7 @@ fn apply_structure_rule(
         return Err(LintError::InvalidPattern);
     }
     let min_run = rule.min_run.unwrap_or(3) as usize;
+    let mut occurrence = 0_usize;
     for target in targets {
         let max_run = target
             .text
@@ -290,7 +292,8 @@ fn apply_structure_rule(
             })
             .1;
         if max_run >= min_run {
-            push_finding(findings, pack_id, rule, target);
+            occurrence += 1;
+            push_finding(findings, pack_id, rule, target, occurrence);
         }
     }
     Ok(())
@@ -320,7 +323,7 @@ fn apply_format_rule(
             location: rule.scope.clone(),
             text: String::new(),
         });
-        push_finding(findings, pack_id, rule, &target);
+        push_finding(findings, pack_id, rule, &target, 1);
     }
     Ok(())
 }
@@ -330,20 +333,15 @@ fn push_finding(
     pack_id: &str,
     rule: &RuleDefinition,
     target: &Target,
+    occurrence: usize,
 ) {
     let base_id = format!("{pack_id}/{}", rule.id);
-    let id = if findings.iter().any(|finding| finding.id == base_id) {
-        format!(
-            "{}-{}",
-            base_id,
-            findings
-                .iter()
-                .filter(|finding| finding.id.starts_with(&base_id))
-                .count()
-                + 1
-        )
-    } else {
+    // Every rule runs exactly once per lint pass, so the occurrence within that pass decides
+    // the suffix. This keeps ID generation O(1) instead of rescanning all findings per push.
+    let id = if occurrence <= 1 {
         base_id
+    } else {
+        format!("{base_id}-{occurrence}")
     };
     findings.push(Finding {
         id,
@@ -676,6 +674,50 @@ fn verified_fact_terms(facts: &[Fact]) -> BTreeSet<String> {
         .collect()
 }
 
+/// Whether a verified fact term covers a token found in the body text.
+///
+/// Only exact equality or numeric equality with the same unit tail counts: a verified `"15"`
+/// must not silently clear `"150万元"`, and a verified full date must not clear every bare
+/// year that happens to appear inside it.
+fn fact_covers_token(token: &str, term: &str) -> bool {
+    if token == term {
+        return true;
+    }
+    match (fact_numeric_part(token), fact_numeric_part(term)) {
+        (Some((token_number, token_suffix)), Some((term_number, term_suffix))) => {
+            // Both sides are parsed from decimal digit runs, so equal decimals parse to the
+            // identical float and an exact bit comparison is the intended semantics.
+            token_number.to_bits() == term_number.to_bits() && token_suffix == term_suffix
+        }
+        _ => false,
+    }
+}
+
+/// Splits the first numeric run of a value into the parsed number and its trailing text, so
+/// `"已完成80%"` and `"80%"` compare as the same fact while `"15"` and `"15万元"` do not.
+fn fact_numeric_part(value: &str) -> Option<(f64, &str)> {
+    let start = value.find(|character: char| character.is_ascii_digit())?;
+    let bytes = value.as_bytes();
+    let mut end = start;
+    let mut seen_decimal_point = false;
+    while end < bytes.len() {
+        let byte = bytes[end];
+        if byte.is_ascii_digit() {
+            end += 1;
+        } else if byte == b'.'
+            && !seen_decimal_point
+            && bytes.get(end + 1).is_some_and(u8::is_ascii_digit)
+        {
+            seen_decimal_point = true;
+            end += 1;
+        } else {
+            break;
+        }
+    }
+    let number = value[start..end].parse::<f64>().ok()?;
+    Some((number, &value[end..]))
+}
+
 fn document_fallback_id() -> String {
     "document".to_owned()
 }
@@ -747,5 +789,20 @@ mod tests {
         ));
         let verified = fact_check_document(&document).expect("fact check should run");
         assert_eq!(verified.unresolved_tokens, 0);
+    }
+
+    #[test]
+    fn does_not_clear_tokens_through_substring_matches() {
+        // A verified "15" must not clear "150万元", and a full date must not clear bare years.
+        assert!(!fact_covers_token("150万元", "15"));
+        assert!(!fact_covers_token("2026年", "2026年12月31日"));
+        // Different units are different facts even when the number matches.
+        assert!(!fact_covers_token("15亿", "15万元"));
+        assert!(!fact_covers_token("15万元", "15"));
+        // Equal numbers with the same unit tail match wherever they appear in the value.
+        assert!(fact_covers_token("80%", "已完成80%"));
+        assert!(fact_covers_token("15万元", "15万元"));
+        assert!(fact_covers_token("15", "15"));
+        assert!(fact_covers_token("15.5万元", "15.50万元"));
     }
 }

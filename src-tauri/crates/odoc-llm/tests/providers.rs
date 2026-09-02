@@ -154,7 +154,7 @@ async fn openai_stream_handles_fragmented_sse_and_done_marker() {
         "data: {\"choices\":[{\"delta\":{\"content\":\"你\"},\"finish_reason\":null}]}\n\n";
     let event_two = "data: {\"choices\":[{\"delta\":{\"content\":\"好\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n";
     let split = event_one.find('你').expect("UTF-8 content should exist") + 1;
-    let (base_url, _request_rx, task) = spawn_server(MockResponse {
+    let (base_url, request_rx, task) = spawn_server(MockResponse {
         status: "200 OK",
         content_type: "text/event-stream",
         chunks: vec![
@@ -191,6 +191,10 @@ async fn openai_stream_handles_fragmented_sse_and_done_marker() {
             .and_then(|delta| delta.finish_reason.as_deref()),
         Some("stop")
     );
+    // The usage-bearing final chunk only arrives when the request asks for it.
+    let request_bytes = request_rx.await.expect("request should arrive");
+    let request = String::from_utf8_lossy(&request_bytes);
+    assert!(request.contains("\"stream_options\":{\"include_usage\":true}"));
     task.await.expect("mock server should finish");
 }
 
@@ -415,7 +419,9 @@ async fn anthropic_stream_parses_content_block_deltas_and_stop() {
     let event_one = "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":8,\"output_tokens\":0}}}\n\n";
     let event_two = "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"你\"}}\n\n";
     let event_three = "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"好\"}}\n\n";
-    let event_four = "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":4,\"input_tokens\":8}}\n\n";
+    // Real Anthropic streams never carry `input_tokens` on `message_delta`; the prompt count
+    // only arrives on `message_start` and must be merged by the client.
+    let event_four = "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":4}}\n\n";
     let event_five = "data: {\"type\":\"message_stop\"}\n\n";
     let split = event_two.find('你').expect("UTF-8 content should exist") + 1;
     let (base_url, _request_rx, task) = spawn_server(MockResponse {

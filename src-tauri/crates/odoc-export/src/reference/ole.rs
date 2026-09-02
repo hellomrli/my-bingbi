@@ -7,6 +7,19 @@ use std::path::PathBuf;
 
 const MAX_STREAM_BYTES: usize = 64 * 1024 * 1024;
 const OLE_MAGIC: &[u8] = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1";
+// Cell-count and decoded-text budgets for the BIFF parser. LABELSST records only carry a
+// shared-string index, so the cell map itself stays small; the caps bound the rendered text.
+const MAX_CELLS: usize = 100_000;
+const MAX_SST_BYTES: usize = 64 * 1024 * 1024;
+const MAX_CELL_TEXT_BYTES: usize = 64 * 1024 * 1024;
+const MAX_RENDER_BYTES: usize = 4 * 1024 * 1024;
+
+/// One spreadsheet cell: either a shared-string-table index (resolved at render time, so
+/// millions of LABELSST records cannot clone the referenced string) or decoded inline text.
+enum CellValue {
+    Shared(u32),
+    Text(String),
+}
 
 pub(super) fn extract_xls(bytes: &[u8]) -> Result<String, ExportError> {
     let mut compound = open_compound(bytes)?;
@@ -154,7 +167,9 @@ fn parse_biff_workbook(stream: &[u8]) -> Result<String, ExportError> {
     let mut offset = 0;
     let mut code_page = 1252;
     let mut shared = Vec::new();
-    let mut cells: BTreeMap<(usize, usize), String> = BTreeMap::new();
+    let mut shared_bytes = 0_usize;
+    let mut text_bytes = 0_usize;
+    let mut cells: BTreeMap<(usize, usize), CellValue> = BTreeMap::new();
     let mut pending_formula_string = None;
     while offset + 4 <= stream.len() {
         let record = read_u16(&stream[offset..]);
@@ -167,35 +182,58 @@ fn parse_biff_workbook(stream: &[u8]) -> Result<String, ExportError> {
         let data = &stream[offset..end];
         match record {
             0x0042 if data.len() >= 2 => code_page = read_u16(data),
-            0x00fc => parse_sst(data, code_page, &mut shared)?,
+            0x00fc => parse_sst(data, code_page, &mut shared, &mut shared_bytes)?,
             0x00fd if data.len() >= 10 => {
                 let position = (read_u16(data) as usize, read_u16(&data[2..]) as usize);
-                if let Some(value) = shared.get(read_u32(&data[6..]) as usize) {
-                    cells.insert(position, value.clone());
-                }
+                insert_cell(
+                    &mut cells,
+                    &mut text_bytes,
+                    position,
+                    CellValue::Shared(read_u32(&data[6..])),
+                )?;
             }
             0x0204 if data.len() >= 8 => {
                 let position = (read_u16(data) as usize, read_u16(&data[2..]) as usize);
                 if let Some((value, _)) = decode_biff_string(&data[6..], code_page) {
-                    cells.insert(position, value);
+                    insert_cell(
+                        &mut cells,
+                        &mut text_bytes,
+                        position,
+                        CellValue::Text(value),
+                    )?;
                 }
             }
             0x0203 if data.len() >= 14 => {
                 let position = (read_u16(data) as usize, read_u16(&data[2..]) as usize);
-                cells.insert(position, format_number(read_f64(&data[6..])));
+                insert_cell(
+                    &mut cells,
+                    &mut text_bytes,
+                    position,
+                    CellValue::Text(format_number(read_f64(&data[6..]))),
+                )?;
             }
             0x027e if data.len() >= 10 => {
                 let position = (read_u16(data) as usize, read_u16(&data[2..]) as usize);
-                cells.insert(position, decode_rk(&data[6..]));
+                insert_cell(
+                    &mut cells,
+                    &mut text_bytes,
+                    position,
+                    CellValue::Text(decode_rk(&data[6..])),
+                )?;
             }
-            0x00bd => parse_mulrk(data, &mut cells),
+            0x00bd => parse_mulrk(data, &mut cells, &mut text_bytes)?,
             0x0006 if data.len() >= 14 => {
                 let position = (read_u16(data) as usize, read_u16(&data[2..]) as usize);
                 let result = &data[6..14];
                 if result[6] == 0xff && result[7] == 0xff {
                     pending_formula_string = Some(position);
                 } else {
-                    cells.insert(position, format_number(read_f64(result)));
+                    insert_cell(
+                        &mut cells,
+                        &mut text_bytes,
+                        position,
+                        CellValue::Text(format_number(read_f64(result))),
+                    )?;
                 }
             }
             0x0207 if pending_formula_string.is_some() => {
@@ -203,63 +241,125 @@ fn parse_biff_workbook(stream: &[u8]) -> Result<String, ExportError> {
                     pending_formula_string.take(),
                     decode_biff_string(data, code_page),
                 ) {
-                    cells.insert(position, value);
+                    insert_cell(
+                        &mut cells,
+                        &mut text_bytes,
+                        position,
+                        CellValue::Text(value),
+                    )?;
                 }
             }
             0x0205 if data.len() >= 8 => {
                 let position = (read_u16(data) as usize, read_u16(&data[2..]) as usize);
-                cells.insert(
+                insert_cell(
+                    &mut cells,
+                    &mut text_bytes,
                     position,
-                    if data[6] == 0 { "FALSE" } else { "TRUE" }.to_owned(),
-                );
+                    CellValue::Text(if data[6] == 0 { "FALSE" } else { "TRUE" }.to_owned()),
+                )?;
             }
             _ => {}
         }
         offset = end;
-        if cells.len() > 100_000 {
+    }
+    render_cells(&cells, &shared)
+}
+
+fn insert_cell(
+    cells: &mut BTreeMap<(usize, usize), CellValue>,
+    text_bytes: &mut usize,
+    position: (usize, usize),
+    value: CellValue,
+) -> Result<(), ExportError> {
+    if cells.len() >= MAX_CELLS {
+        return Err(ExportError::PackageTooLarge);
+    }
+    if let CellValue::Text(text) = &value {
+        *text_bytes = text_bytes.saturating_add(text.len());
+        if *text_bytes > MAX_CELL_TEXT_BYTES {
             return Err(ExportError::PackageTooLarge);
         }
     }
-    render_cells(&cells)
+    cells.insert(position, value);
+    Ok(())
 }
 
-fn render_cells(cells: &BTreeMap<(usize, usize), String>) -> Result<String, ExportError> {
+fn render_cells(
+    cells: &BTreeMap<(usize, usize), CellValue>,
+    shared: &[String],
+) -> Result<String, ExportError> {
     if cells.is_empty() {
         return Err(ExportError::InvalidReference);
     }
+    // BTreeMap iteration yields rows in ascending order with columns sorted inside each row,
+    // so grouping by row is linear instead of rescanning every key per row.
     let mut output = String::new();
-    for row in 0..=cells.keys().map(|(row, _)| *row).max().unwrap_or(0) {
-        let Some(last) = cells
-            .keys()
-            .filter(|(candidate, _)| *candidate == row)
-            .map(|(_, column)| *column)
-            .max()
-        else {
-            continue;
-        };
-        if !output.is_empty() {
-            output.push('\n');
+    let mut current_row: Option<usize> = None;
+    let mut line: Vec<(usize, &CellValue)> = Vec::new();
+    for (&(row, column), value) in cells {
+        if Some(row) != current_row {
+            render_row(&mut output, &line, shared)?;
+            line.clear();
+            current_row = Some(row);
         }
-        output.push_str(
-            &(0..=last)
-                .map(|column| cells.get(&(row, column)).map_or("", String::as_str))
-                .collect::<Vec<_>>()
-                .join("\t"),
-        );
+        line.push((column, value));
     }
+    render_row(&mut output, &line, shared)?;
     Ok(output)
 }
 
-fn parse_sst(data: &[u8], code_page: u16, output: &mut Vec<String>) -> Result<(), ExportError> {
+fn render_row(
+    output: &mut String,
+    line: &[(usize, &CellValue)],
+    shared: &[String],
+) -> Result<(), ExportError> {
+    let Some(&(last, _)) = line.last() else {
+        return Ok(());
+    };
+    if !output.is_empty() {
+        output.push('\n');
+    }
+    let mut cursor = 0;
+    for column in 0..=last {
+        if column > 0 {
+            output.push('\t');
+        }
+        if cursor < line.len() && line[cursor].0 == column {
+            output.push_str(match line[cursor].1 {
+                CellValue::Shared(index) => shared
+                    .get(*index as usize)
+                    .map(String::as_str)
+                    .unwrap_or_default(),
+                CellValue::Text(text) => text.as_str(),
+            });
+            cursor += 1;
+        }
+        if output.len() > MAX_RENDER_BYTES {
+            return Err(ExportError::PackageTooLarge);
+        }
+    }
+    Ok(())
+}
+
+fn parse_sst(
+    data: &[u8],
+    code_page: u16,
+    output: &mut Vec<String>,
+    decoded_bytes: &mut usize,
+) -> Result<(), ExportError> {
     if data.len() < 8 {
         return Err(ExportError::InvalidReference);
     }
     let count = read_u32(&data[4..]) as usize;
     let mut offset = 8;
-    for _ in 0..count.min(100_000) {
+    for _ in 0..count.min(MAX_CELLS) {
         let Some((value, consumed)) = decode_biff_string(&data[offset..], code_page) else {
             return Err(ExportError::InvalidReference);
         };
+        *decoded_bytes = decoded_bytes.saturating_add(value.len());
+        if *decoded_bytes > MAX_SST_BYTES {
+            return Err(ExportError::PackageTooLarge);
+        }
         output.push(value);
         offset = offset.saturating_add(consumed);
         if offset > data.len() {
@@ -269,9 +369,13 @@ fn parse_sst(data: &[u8], code_page: u16, output: &mut Vec<String>) -> Result<()
     Ok(())
 }
 
-fn parse_mulrk(data: &[u8], cells: &mut BTreeMap<(usize, usize), String>) {
+fn parse_mulrk(
+    data: &[u8],
+    cells: &mut BTreeMap<(usize, usize), CellValue>,
+    text_bytes: &mut usize,
+) -> Result<(), ExportError> {
     if data.len() < 6 {
-        return;
+        return Ok(());
     }
     let row = read_u16(data) as usize;
     let first = read_u16(&data[2..]) as usize;
@@ -281,8 +385,14 @@ fn parse_mulrk(data: &[u8], cells: &mut BTreeMap<(usize, usize), String>) {
         if start + 6 > data.len().saturating_sub(2) {
             break;
         }
-        cells.insert((row, first + index), decode_rk(&data[start + 2..start + 6]));
+        insert_cell(
+            cells,
+            text_bytes,
+            (row, first + index),
+            CellValue::Text(decode_rk(&data[start + 2..start + 6])),
+        )?;
     }
+    Ok(())
 }
 
 fn decode_rk(bytes: &[u8]) -> String {
@@ -833,6 +943,67 @@ mod tests {
             clean_word_text("标题\r正文第一段\r正文第二段"),
             "标题\n正文第一段\n正文第二段"
         );
+    }
+
+    #[test]
+    fn resolves_shared_string_labels_without_cloning() {
+        let mut stream = Vec::new();
+        let mut sst = vec![0_u8; 8];
+        sst[4..8].copy_from_slice(&1_u32.to_le_bytes());
+        sst.extend_from_slice(&[2, 0, 0x01, 0x2d, 0x4e, 0x87, 0x65]);
+        stream.extend(biff_record(0x00fc, &sst));
+        for row in 0..3_u16 {
+            let mut label = Vec::new();
+            label.extend_from_slice(&row.to_le_bytes());
+            label.extend_from_slice(&0_u16.to_le_bytes());
+            label.extend_from_slice(&0_u16.to_le_bytes());
+            label.extend_from_slice(&0_u32.to_le_bytes());
+            stream.extend(biff_record(0x00fd, &label));
+        }
+
+        assert_eq!(parse_biff_workbook(&stream).unwrap(), "中文\n中文\n中文");
+    }
+
+    #[test]
+    fn renders_rows_with_sparse_columns() {
+        let mut cells = BTreeMap::new();
+        cells.insert((0, 0), CellValue::Text("甲".to_owned()));
+        cells.insert((0, 2), CellValue::Text("丙".to_owned()));
+        cells.insert((1, 1), CellValue::Shared(0));
+
+        assert_eq!(
+            render_cells(&cells, &["乙".to_owned()]).unwrap(),
+            "甲\t\t丙\n\t乙"
+        );
+    }
+
+    #[test]
+    fn rejects_cells_beyond_the_budget() {
+        let mut stream = Vec::new();
+        for index in 0..=MAX_CELLS {
+            let row = u16::try_from(index % 0x1_0000).unwrap_or(u16::MAX);
+            let column = u16::try_from(index / 0x1_0000).unwrap_or(u16::MAX);
+            let mut label = Vec::new();
+            label.extend_from_slice(&row.to_le_bytes());
+            label.extend_from_slice(&column.to_le_bytes());
+            label.extend_from_slice(&0_u16.to_le_bytes());
+            label.extend_from_slice(&0_u32.to_le_bytes());
+            stream.extend(biff_record(0x00fd, &label));
+        }
+
+        assert!(matches!(
+            parse_biff_workbook(&stream),
+            Err(ExportError::PackageTooLarge)
+        ));
+    }
+
+    fn biff_record(id: u16, data: &[u8]) -> Vec<u8> {
+        let mut record = Vec::with_capacity(data.len() + 4);
+        record.extend_from_slice(&id.to_le_bytes());
+        let length = u16::try_from(data.len()).expect("test record should fit in a BIFF length");
+        record.extend_from_slice(&length.to_le_bytes());
+        record.extend_from_slice(data);
+        record
     }
 
     fn write_utf16(output: &mut [u8], offset: usize, value: &str) {

@@ -15,6 +15,9 @@ use url::Url;
 
 const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+/// Streaming responses have no whole-request deadline: a long local generation may legitimately
+/// run for minutes. Only silence between chunks is treated as a timeout.
+const STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
 
 #[async_trait]
 pub trait LlmProvider: Send + Sync {
@@ -80,6 +83,8 @@ pub trait LlmProvider: Send + Sync {
 pub struct ProviderClient {
     profile: ProviderProfile,
     client: Client,
+    /// Same policy as `client` but without a whole-request deadline, for streaming responses.
+    stream_client: Client,
     api_key: Option<String>,
 }
 
@@ -118,9 +123,16 @@ impl ProviderClient {
             .user_agent(concat!("bingbi/", env!("CARGO_PKG_VERSION")))
             .build()
             .map_err(|_| LlmError::InvalidConfiguration)?;
+        let stream_client = Client::builder()
+            .connect_timeout(DEFAULT_CONNECT_TIMEOUT.min(timeout))
+            .redirect(reqwest::redirect::Policy::none())
+            .user_agent(concat!("bingbi/", env!("CARGO_PKG_VERSION")))
+            .build()
+            .map_err(|_| LlmError::InvalidConfiguration)?;
         Ok(Self {
             profile,
             client,
+            stream_client,
             api_key,
         })
     }
@@ -207,9 +219,24 @@ impl ProviderClient {
         Ok(self.authorize(self.client.post(self.chat_endpoint()?).json(body)))
     }
 
+    /// Streams have no whole-request deadline: the body may trickle in for minutes, so only
+    /// the connect timeout applies per chunk (see `STREAM_IDLE_TIMEOUT`).
+    fn post_stream(&self, body: &impl Serialize) -> Result<reqwest::RequestBuilder, LlmError> {
+        Ok(self.authorize(self.stream_client.post(self.chat_endpoint()?).json(body)))
+    }
+
     async fn send(&self, body: &impl Serialize) -> Result<Response, LlmError> {
         let response = self
             .post(body)?
+            .send()
+            .await
+            .map_err(|error| map_reqwest_error(&error))?;
+        ensure_success(response)
+    }
+
+    async fn send_streaming(&self, body: &impl Serialize) -> Result<Response, LlmError> {
+        let response = self
+            .post_stream(body)?
             .send()
             .await
             .map_err(|error| map_reqwest_error(&error))?;
@@ -238,7 +265,7 @@ impl ProviderClient {
             .next()
             .ok_or(LlmError::InvalidResponse)?;
         Ok(ChatResponse {
-            content: choice.message.content,
+            content: choice.message.content.unwrap_or_default(),
             finish_reason: choice.finish_reason,
             usage: response.usage.map(OpenAiUsage::into_usage),
         })
@@ -250,7 +277,7 @@ impl ProviderClient {
         sender: Sender<ChatDelta>,
     ) -> Result<(), LlmError> {
         let body = OpenAiRequest::new(&self.profile.model, request, true);
-        let response = self.send(&body).await?;
+        let response = self.send_streaming(&body).await?;
         let mut stream = response.bytes_stream();
         let mut decoder = SseDecoder::default();
         let mut terminal = false;
@@ -258,8 +285,8 @@ impl ProviderClient {
         loop {
             tokio::select! {
                 () = sender.closed() => return Err(LlmError::Cancelled),
-                next = stream.next() => match next {
-                    Some(Ok(chunk)) => {
+                next = tokio::time::timeout(STREAM_IDLE_TIMEOUT, stream.next()) => match next {
+                    Ok(Some(Ok(chunk))) => {
                         for event in decoder.push(&chunk)? {
                             if process_openai_event(&event, &sender).await? {
                                 return Ok(());
@@ -267,8 +294,9 @@ impl ProviderClient {
                             terminal |= openai_event_is_terminal(&event)?;
                         }
                     }
-                    Some(Err(error)) => return Err(map_reqwest_error(&error)),
-                    None => break,
+                    Ok(Some(Err(error))) => return Err(map_reqwest_error(&error)),
+                    Ok(None) => break,
+                    Err(_elapsed) => return Err(LlmError::Timeout),
                 }
             }
         }
@@ -304,23 +332,24 @@ impl ProviderClient {
         sender: Sender<ChatDelta>,
     ) -> Result<(), LlmError> {
         let body = OllamaRequest::new(&self.profile.model, request, true);
-        let response = self.send(&body).await?;
+        let response = self.send_streaming(&body).await?;
         let mut stream = response.bytes_stream();
         let mut decoder = LineDecoder::default();
 
         loop {
             tokio::select! {
                 () = sender.closed() => return Err(LlmError::Cancelled),
-                next = stream.next() => match next {
-                    Some(Ok(chunk)) => {
+                next = tokio::time::timeout(STREAM_IDLE_TIMEOUT, stream.next()) => match next {
+                    Ok(Some(Ok(chunk))) => {
                         for line in decoder.push(&chunk)? {
                             if process_ollama_line(&line, &sender).await? {
                                 return Ok(());
                             }
                         }
                     }
-                    Some(Err(error)) => return Err(map_reqwest_error(&error)),
-                    None => break,
+                    Ok(Some(Err(error))) => return Err(map_reqwest_error(&error)),
+                    Ok(None) => break,
+                    Err(_elapsed) => return Err(LlmError::Timeout),
                 }
             }
         }
@@ -348,30 +377,32 @@ impl ProviderClient {
         sender: Sender<ChatDelta>,
     ) -> Result<(), LlmError> {
         let body = AnthropicRequest::new(&self.profile.model, request, true);
-        let response = self.send(&body).await?;
+        let response = self.send_streaming(&body).await?;
         let mut stream = response.bytes_stream();
         let mut decoder = SseDecoder::default();
         let mut terminal = false;
+        let mut prompt_tokens = None;
 
         loop {
             tokio::select! {
                 () = sender.closed() => return Err(LlmError::Cancelled),
-                next = stream.next() => match next {
-                    Some(Ok(chunk)) => {
+                next = tokio::time::timeout(STREAM_IDLE_TIMEOUT, stream.next()) => match next {
+                    Ok(Some(Ok(chunk))) => {
                         for event in decoder.push(&chunk)? {
-                            if process_anthropic_event(&event, &sender).await? {
+                            if process_anthropic_event(&event, &mut prompt_tokens, &sender).await? {
                                 return Ok(());
                             }
                             terminal |= anthropic_event_is_terminal(&event)?;
                         }
                     }
-                    Some(Err(error)) => return Err(map_reqwest_error(&error)),
-                    None => break,
+                    Ok(Some(Err(error))) => return Err(map_reqwest_error(&error)),
+                    Ok(None) => break,
+                    Err(_elapsed) => return Err(LlmError::Timeout),
                 }
             }
         }
         for event in decoder.finish()? {
-            if process_anthropic_event(&event, &sender).await? {
+            if process_anthropic_event(&event, &mut prompt_tokens, &sender).await? {
                 return Ok(());
             }
             terminal |= anthropic_event_is_terminal(&event)?;
@@ -595,6 +626,8 @@ struct OpenAiRequest<'a> {
     messages: Vec<ChatMessage>,
     stream: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
+    stream_options: Option<StreamOptions>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     temperature: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     max_tokens: Option<u32>,
@@ -608,6 +641,11 @@ impl<'a> OpenAiRequest<'a> {
             model,
             messages: request.messages,
             stream,
+            // Without this flag the API never sends a usage chunk on the stream path, which
+            // would record zero tokens for every streaming stage.
+            stream_options: stream.then_some(StreamOptions {
+                include_usage: true,
+            }),
             temperature: request.temperature,
             max_tokens: request.max_tokens,
             response_format: request.json_mode.then_some(ResponseFormat {
@@ -615,6 +653,11 @@ impl<'a> OpenAiRequest<'a> {
             }),
         }
     }
+}
+
+#[derive(Serialize)]
+struct StreamOptions {
+    include_usage: bool,
 }
 
 #[derive(Serialize)]
@@ -637,7 +680,8 @@ struct OpenAiChoice {
 
 #[derive(Deserialize)]
 struct OpenAiMessage {
-    content: String,
+    // `content` can be null when the finish reason is content_filter or the gateway truncates.
+    content: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -851,9 +895,11 @@ struct AnthropicContent {
 
 #[derive(Deserialize)]
 struct AnthropicUsage {
-    #[serde(rename = "input_tokens")]
+    // `input_tokens` only appears on the `message_start` event while `message_delta` carries
+    // just `output_tokens`, so neither field can be required.
+    #[serde(default, rename = "input_tokens")]
     input: u32,
-    #[serde(rename = "output_tokens")]
+    #[serde(default, rename = "output_tokens")]
     output: u32,
 }
 
@@ -872,6 +918,12 @@ struct AnthropicStreamEvent {
     #[serde(rename = "type")]
     kind: String,
     delta: Option<AnthropicStreamDelta>,
+    message: Option<AnthropicStartMessage>,
+    usage: Option<AnthropicUsage>,
+}
+
+#[derive(Deserialize)]
+struct AnthropicStartMessage {
     usage: Option<AnthropicUsage>,
 }
 
@@ -891,12 +943,26 @@ fn anthropic_event_is_terminal(event: &str) -> Result<bool, LlmError> {
 
 async fn process_anthropic_event(
     event: &str,
+    prompt_tokens: &mut Option<u32>,
     sender: &Sender<ChatDelta>,
 ) -> Result<bool, LlmError> {
     let event: AnthropicStreamEvent =
         serde_json::from_str(event).map_err(|_| LlmError::InvalidResponse)?;
     let delta = match event.kind.as_str() {
         "message_stop" => return Ok(true),
+        // The real protocol splits usage across events: `message_start` carries the prompt
+        // count, `message_delta` only the output count. Merge them so the final report is
+        // complete instead of dropping whichever side arrives last.
+        "message_start" => {
+            let input = event
+                .message
+                .and_then(|message| message.usage)
+                .map(|usage| usage.input);
+            if input.is_some() {
+                *prompt_tokens = input;
+            }
+            return Ok(false);
+        }
         "content_block_delta" => {
             let text = event
                 .delta
@@ -910,16 +976,23 @@ async fn process_anthropic_event(
                 usage: None,
             }
         }
-        "message_delta" => ChatDelta {
-            content: String::new(),
-            finish_reason: event
-                .delta
-                .as_ref()
-                .and_then(|delta| delta.stop_reason.clone()),
-            usage: event.usage.map(AnthropicUsage::into_usage),
-        },
-        // message_start, content_block_start, content_block_stop, ping, and any future
-        // event types carry no user-visible text.
+        "message_delta" => {
+            let prompt = prompt_tokens.unwrap_or_default();
+            ChatDelta {
+                content: String::new(),
+                finish_reason: event
+                    .delta
+                    .as_ref()
+                    .and_then(|delta| delta.stop_reason.clone()),
+                usage: event.usage.map(|usage| TokenUsage {
+                    prompt_tokens: prompt,
+                    completion_tokens: usage.output,
+                    total_tokens: prompt.saturating_add(usage.output),
+                }),
+            }
+        }
+        // content_block_start, content_block_stop, ping, and any future event types carry no
+        // user-visible text.
         _ => return Ok(false),
     };
     send_delta(sender, delta).await?;

@@ -2,6 +2,7 @@ use crate::{ChangeEvent, ChangeKind, KbError};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
+use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
@@ -9,6 +10,12 @@ use url::Url;
 
 const MAX_WS_MESSAGE_BYTES: usize = 8 * 1024 * 1024;
 const MAX_SYNC_DETAIL_COUNT: usize = 100_000;
+/// A host that accepts TCP but stalls the opening handshake must not park the sync
+/// supervisor until the OS-level TCP timeout (minutes).
+const WEBSOCKET_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+/// Bounds the pending detail-page table against a hostile server that keeps sending frames
+/// with fresh page indexes.
+const MAX_PENDING_PAGES: usize = 1_000;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FnsWatchConfig {
@@ -62,9 +69,11 @@ pub async fn watch_fns_notes(
 ) -> Result<mpsc::Receiver<Result<FnsWatchEvent, KbError>>, KbError> {
     validate_config(&config)?;
     let endpoint = websocket_endpoint(&config.base_url)?;
-    let (stream, _) = connect_async(endpoint.as_str())
-        .await
-        .map_err(|_| KbError::Network)?;
+    let (stream, _) =
+        tokio::time::timeout(WEBSOCKET_CONNECT_TIMEOUT, connect_async(endpoint.as_str()))
+            .await
+            .map_err(|_| KbError::Network)?
+            .map_err(|_| KbError::Network)?;
     let (mut writer, mut reader) = stream.split();
     writer
         .send(Message::Text(
@@ -157,6 +166,11 @@ pub async fn watch_fns_notes(
                         legacy_page = Some(page.page_index);
                         if page.is_last {
                             last_page_index = Some(page.page_index);
+                        }
+                        if pages.len() >= MAX_PENDING_PAGES && !pages.contains_key(&page.page_index)
+                        {
+                            let _ = sender.send(Err(KbError::TooLarge)).await;
+                            return;
                         }
                         pages.insert(
                             page.page_index,

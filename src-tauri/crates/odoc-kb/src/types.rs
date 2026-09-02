@@ -369,6 +369,19 @@ fn is_local_host(host: &str) -> bool {
         || matches!(host.as_str(), "::1" | "[::1]")
 }
 
+/// Whether `path` lives under `prefix` on a directory boundary. A bare `starts_with` would
+/// let the prefix "公文" also match "公文备份/x.md", so the boundary slash is required.
+pub(crate) fn path_matches_prefix(path: &str, prefix: Option<&str>) -> bool {
+    let Some(prefix) = prefix else {
+        return true;
+    };
+    if prefix.is_empty() {
+        return true;
+    }
+    let path = path.replace('\\', "/");
+    path == prefix || path.starts_with(&format!("{prefix}/"))
+}
+
 pub(crate) fn validate_relative_path(value: &str) -> Result<(), KbError> {
     if value.is_empty() || value.len() > 1024 || value.chars().any(char::is_control) {
         return Err(KbError::InvalidPath);

@@ -5,6 +5,9 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 const MAX_SESSION_ID_BYTES: usize = 128;
+/// Sessions (with their stage runs, which cascade) kept per database; older ones are pruned
+/// whenever a new session starts, so `stage_runs` snapshots cannot grow the file forever.
+const MAX_SESSIONS: u32 = 200;
 const MAX_PIPELINE_BYTES: usize = 256;
 const MAX_STAGE_ID_BYTES: usize = 64;
 const MAX_STATE_BYTES: usize = 16 * 1024 * 1024;
@@ -71,12 +74,20 @@ impl DocumentStore {
             return Err(StoreError::DocumentNotFound(document_id.to_owned()));
         }
         let now = unix_millis()?;
-        self.connection.execute(
+        let transaction = self.connection.unchecked_transaction()?;
+        transaction.execute(
             "INSERT INTO sessions(
                 id, doc_id, pipeline, state_json, cost_tokens, cost_money, created_at, updated_at
              ) VALUES (?1, ?2, ?3, ?4, 0, 0, ?5, ?5)",
             params![session_id, document_id, pipeline, state_json, now],
         )?;
+        transaction.execute(
+            "DELETE FROM sessions WHERE id NOT IN (
+                SELECT id FROM sessions ORDER BY updated_at DESC, id DESC LIMIT ?1
+            )",
+            params![i64::from(MAX_SESSIONS)],
+        )?;
+        transaction.commit()?;
         Ok(())
     }
 
@@ -217,7 +228,8 @@ impl DocumentStore {
             ));
         }
         if let Some(document_id) = document_id {
-            validate_identifier(document_id, MAX_SESSION_ID_BYTES, "document ID")?;
+            // Document ids follow the document store's rules (256 bytes), not session ids.
+            validate_identifier(document_id, 256, "document ID")?;
         }
         let mut statement = self.connection.prepare(
             "SELECT id, doc_id, pipeline, state_json, cost_tokens, created_at, updated_at

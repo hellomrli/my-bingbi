@@ -9,6 +9,8 @@ use ts_rs::TS;
 
 const MAX_DOCUMENT_ID_BYTES: usize = 256;
 const MAX_LIST_LIMIT: u32 = 200;
+/// Per-document version snapshots kept by `save_document`; older snapshots are pruned on insert.
+const MAX_VERSIONS_PER_DOCUMENT: u32 = 50;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -134,6 +136,19 @@ impl DocumentStore {
         } else {
             current_seq
         };
+        if version_created {
+            // Retention: every content change snapshots the whole document, so unbounded
+            // history would grow the database forever. Keep the newest MAX_VERSIONS_PER_DOCUMENT.
+            transaction.execute(
+                "DELETE FROM doc_versions
+                 WHERE doc_id = ?1 AND seq <= ?2 - ?3",
+                params![
+                    document.id,
+                    version_seq,
+                    i64::from(MAX_VERSIONS_PER_DOCUMENT)
+                ],
+            )?;
+        }
         transaction.commit()?;
 
         Ok(SaveDocumentResult {
