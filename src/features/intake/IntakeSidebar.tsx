@@ -361,6 +361,7 @@ export function IntakeSidebar({
           <label className="field">
             <span>发文字号</span>
             <input
+              data-node-id={document.header?.id}
               value={document.header?.documentNumber ?? ""}
               onChange={(event) => updateHeader("documentNumber", event.target.value)}
               placeholder="机关代字〔年份〕序号"
@@ -392,7 +393,7 @@ export function IntakeSidebar({
           </label>
           <label className="field">
             <span>成文日期</span>
-            <input value={document.body.date?.value ?? ""} onChange={(event) => updateDate(event.target.value)} placeholder="2026年8月12日" />
+            <input data-node-id={document.body.date?.id} value={document.body.date?.value ?? ""} onChange={(event) => updateDate(event.target.value)} placeholder="2026年8月12日" />
           </label>
           <label className="field">
             <span>密级</span>
@@ -424,7 +425,6 @@ export function IntakeSidebar({
               onChange={(event) => changeMaterial(event.target.value)}
               placeholder="写下想解决什么问题、准备做什么、对象和时限即可；也可以只上传/引用文件，让模型先提取事实再起草。"
               rows={6}
-              maxLength={MAX_DRAFT_MATERIAL_BYTES}
               disabled={drafting}
             />
             <small>{material.length.toLocaleString("zh-CN")} 字符 · {materialByteLength(material).toLocaleString("zh-CN")} 字节 / 2 MiB</small>
@@ -486,7 +486,6 @@ export function IntakeSidebar({
               onChange={(event) => onModelTextChange(event.target.value)}
               placeholder="粘贴一篇本单位同类公文。起草前模型会先提炼它的笔法：结构、句式、用词与惯用表述。"
               rows={4}
-              maxLength={2 * 1024 * 1024}
               disabled={drafting}
             />
             <small>{modelText.trim() ? "提供范文时将按仿写流程起草" : "留空则使用普通起草流程"}</small>

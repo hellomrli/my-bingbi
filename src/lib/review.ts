@@ -30,7 +30,8 @@ export interface ReviewStartInput {
 }
 
 export function isReviewStage(value: string): value is ReviewStageId {
-  return value in reviewStageLabels;
+  // `in` would also match inherited properties like "toString" from a hostile event source.
+  return Object.hasOwn(reviewStageLabels, value);
 }
 
 /**

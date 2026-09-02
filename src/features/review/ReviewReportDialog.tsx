@@ -9,6 +9,7 @@ import {
   TriangleAlert,
   X,
 } from "lucide-react";
+import { useModal } from "../../hooks/useModal";
 import { useMemo } from "react";
 import { documentTypeLabels } from "../../lib/document";
 import type {
@@ -132,6 +133,7 @@ export function ReviewReportDialog({
     [outcome],
   );
 
+  const sectionRef = useModal<HTMLElement>(open, onClose);
   if (!open) return null;
 
   const typeMismatch = outcome !== null && outcome.declaredDocType !== outcome.typeDecision.value;
@@ -149,7 +151,7 @@ export function ReviewReportDialog({
       role="presentation"
       onMouseDown={(event) => event.target === event.currentTarget && !running && onClose()}
     >
-      <section className="modal review-dialog" role="dialog" aria-modal="true" aria-labelledby="review-dialog-title">
+      <section ref={sectionRef} tabIndex={-1} className="modal review-dialog" role="dialog" aria-modal="true" aria-labelledby="review-dialog-title">
         <header className="modal-header">
           <div>
             <h2 id="review-dialog-title">公文体检报告</h2>

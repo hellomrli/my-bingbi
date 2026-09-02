@@ -73,7 +73,8 @@ function errorCode(error: unknown): string | null {
 }
 
 function isDraftStage(value: string): value is DraftStageId {
-  return value in draftStageLabels;
+  // `in` would also match inherited properties like "toString" from a hostile event source.
+  return Object.hasOwn(draftStageLabels, value);
 }
 
 function App() {

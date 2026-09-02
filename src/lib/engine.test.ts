@@ -7,10 +7,12 @@ import {
   imitateStages,
   polishStages,
   rerunStage,
+  shouldApplyDraftOutcome,
   startDraft,
   startImitate,
   startPolish,
 } from "./engine";
+import type { DraftOutcome } from "./generated/engine";
 
 it("does not run or rerun the draft pipeline in browser preview", async () => {
   await expect(
@@ -80,5 +82,34 @@ describe("draft stage identity", () => {
     for (const stage of polishStages) {
       expect(draftStageLabels[stage]).toBeTruthy();
     }
+  });
+});
+
+describe("shouldApplyDraftOutcome", () => {
+  function outcomeWithRevision(revision: number): DraftOutcome {
+    return {
+      sessionId: "session-1",
+      document: {
+        schemaVersion: "0.1.0",
+        id: "doc-1",
+        revision,
+      },
+    } as unknown as DraftOutcome;
+  }
+
+  it("applies when the active document is still behind the outcome", () => {
+    expect(shouldApplyDraftOutcome("doc-1", 5, outcomeWithRevision(6))).toBe(true);
+  });
+
+  it("skips the duplicate application after the final event already applied it", () => {
+    expect(shouldApplyDraftOutcome("doc-1", 6, outcomeWithRevision(6))).toBe(false);
+  });
+
+  it("never clobbers edits made while the pipeline ran", () => {
+    expect(shouldApplyDraftOutcome("doc-1", 8, outcomeWithRevision(6))).toBe(false);
+  });
+
+  it("skips a different document", () => {
+    expect(shouldApplyDraftOutcome("doc-2", 5, outcomeWithRevision(6))).toBe(false);
   });
 });

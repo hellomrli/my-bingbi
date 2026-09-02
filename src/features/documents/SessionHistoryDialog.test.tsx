@@ -126,8 +126,7 @@ describe("SessionHistoryDialog cost panel", () => {
   });
 
   it("falls back to the raw stage id when a stage label is unknown", async () => {
-    mockedInvoke.mockImplementation(async (command: string, args?: unknown) => {
-      const params = args as Record<string, unknown> | undefined;
+    mockedInvoke.mockImplementation(async (command: string) => {
       if (command === "list_sessions") {
         return [
           {

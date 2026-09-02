@@ -163,6 +163,10 @@ export function documentPlainText(document: ODoc): string {
     .join("\n");
 }
 
+/**
+ * Word-style character count for the status bar: every CJK ideograph counts as one "字", and
+ * each contiguous run of Latin letters or digits counts as one, so "2026年" is 2 instead of 5.
+ */
 export function countChineseCharacters(document: ODoc): number {
-  return (documentPlainText(document).match(/[\u3400-\u9fff\w]/g) ?? []).length;
+  return (documentPlainText(document).match(/[\u3400-\u9fff]|[0-9A-Za-z]+/g) ?? []).length;
 }

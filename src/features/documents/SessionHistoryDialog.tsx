@@ -1,4 +1,5 @@
 import { ChevronDown, History, LoaderCircle, X } from "lucide-react";
+import { useModal } from "../../hooks/useModal";
 import { useEffect, useState } from "react";
 import { draftStageLabels, type DraftStageId } from "../../lib/engine";
 import { ipcErrorMessage, listSessions, listStageRuns } from "../../lib/ipc";
@@ -14,6 +15,7 @@ interface SessionHistoryDialogProps {
 const pipelineLabels: Record<string, string> = {
   draft: "起草",
   imitate: "仿写",
+  polish: "润色",
   review: "审核",
 };
 
@@ -49,13 +51,23 @@ export function SessionHistoryDialog({
 
   useEffect(() => {
     if (!open || !documentId) return;
+    // A stale response (the user switched documents while loading) must not replace the
+    // sessions of the currently targeted document.
+    let active = true;
     setSessions(null);
     setError(null);
     setExpanded(null);
     setRuns({});
     listSessions(documentId, 20)
-      .then(setSessions)
-      .catch((loadError) => setError(ipcErrorMessage(loadError)));
+      .then((loaded) => {
+        if (active) setSessions(loaded);
+      })
+      .catch((loadError) => {
+        if (active) setError(ipcErrorMessage(loadError));
+      });
+    return () => {
+      active = false;
+    };
   }, [open, documentId]);
 
   async function toggleRuns(session: SessionSummary) {
@@ -78,11 +90,12 @@ export function SessionHistoryDialog({
 
   const totalTokens = (sessions ?? []).reduce((sum, session) => sum + session.costTokens, 0);
 
+  const sectionRef = useModal<HTMLElement>(open, onClose);
   if (!open || !documentId) return null;
 
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <section className="modal session-history" role="dialog" aria-modal="true" aria-labelledby="session-history-title">
+      <section ref={sectionRef} tabIndex={-1} className="modal session-history" role="dialog" aria-modal="true" aria-labelledby="session-history-title">
         <header className="modal-header">
           <div>
             <h2 id="session-history-title">起草记录</h2>

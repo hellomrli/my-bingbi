@@ -793,7 +793,7 @@ function isProviderProfile(value: unknown): value is ProviderProfile {
   if (typeof value !== "object" || value === null) return false;
   const profile = value as Partial<ProviderProfile>;
   return typeof profile.id === "string"
-    && (profile.kind === "openai_compatible" || profile.kind === "ollama")
+    && (profile.kind === "openai_compatible" || profile.kind === "anthropic" || profile.kind === "ollama")
     && typeof profile.displayName === "string"
     && typeof profile.baseUrl === "string"
     && typeof profile.model === "string"

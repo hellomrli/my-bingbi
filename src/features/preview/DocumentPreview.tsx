@@ -6,6 +6,8 @@ import { useWorkbenchStore } from "../../store/workbench";
 const chineseDigits = ["零", "一", "二", "三", "四", "五", "六", "七", "八", "九", "十"];
 
 function chineseNumber(value: number): string {
+  // Chinese numerals stay readable up to 99; headings beyond that fall back to Arabic digits.
+  if (value > 99) return String(value);
   if (value <= 10) return chineseDigits[value];
   if (value < 20) return `十${chineseDigits[value - 10]}`;
   const tens = Math.floor(value / 10);
@@ -61,7 +63,7 @@ function renderBlocks(blocks: Block[], tokens: Record<string, string[]>) {
       return (
         <ol className={block.style === "unordered" ? "official-list unordered" : "official-list"} key={block.id}>
           {block.items.map((item) => (
-            <li key={item.id}>{item.content}</li>
+            <li key={item.id}>{renderMarked(item.content, tokens[block.id])}</li>
           ))}
         </ol>
       );
@@ -73,7 +75,7 @@ function renderBlocks(blocks: Block[], tokens: Record<string, string[]>) {
           {block.rows.map((row) => (
             <tr key={row.id}>
               {row.cells.map((cell) => (
-                <td key={cell.id}>{cell.content}</td>
+                <td key={cell.id}>{renderMarked(cell.content, tokens[block.id])}</td>
               ))}
             </tr>
           ))}

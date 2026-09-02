@@ -1,4 +1,5 @@
 import { FileText, History, Receipt, RefreshCw, Trash2, X } from "lucide-react";
+import { useModal } from "../../hooks/useModal";
 import { documentTypeLabels } from "../../lib/document";
 import type { DocumentSummary } from "../../lib/store";
 
@@ -36,11 +37,12 @@ export function DocumentLibrary({
   onSessions,
   onDelete,
 }: DocumentLibraryProps) {
+  const sectionRef = useModal<HTMLElement>(open, onClose);
   if (!open) return null;
 
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <section className="modal document-library" role="dialog" aria-modal="true" aria-labelledby="document-library-title">
+      <section ref={sectionRef} tabIndex={-1} className="modal document-library" role="dialog" aria-modal="true" aria-labelledby="document-library-title">
         <header className="modal-header">
           <div>
             <h2 id="document-library-title">最近文档</h2>

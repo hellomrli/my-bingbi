@@ -1,4 +1,5 @@
 import { Archive, Check, LoaderCircle, X } from "lucide-react";
+import { useModal } from "../../hooks/useModal";
 import { FormEvent, useEffect, useState } from "react";
 import type { ArchiveResult } from "../../lib/ipc";
 
@@ -44,6 +45,7 @@ export function ArchiveDialog({
     setMessage(null);
   }, [open, title]);
 
+  const sectionRef = useModal<HTMLElement>(open, onClose, busy);
   if (!open) return null;
 
   async function submit(event: FormEvent) {
@@ -69,7 +71,7 @@ export function ArchiveDialog({
 
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && !busy && onClose()}>
-      <section className="modal archive-dialog" role="dialog" aria-modal="true" aria-labelledby="archive-dialog-title">
+      <section ref={sectionRef} tabIndex={-1} className="modal archive-dialog" role="dialog" aria-modal="true" aria-labelledby="archive-dialog-title">
         <header className="modal-header">
           <div>
             <h2 id="archive-dialog-title">归档到知识库</h2>

@@ -14,6 +14,10 @@ export interface FontProbe {
  * The preview uses open-source substitutes while the exported DOCX keeps the standard font
  * names, so missing fonts only matter for on-screen fidelity. `supported` is false in
  * runtimes without `document.fonts` (e.g. jsdom), where the caller should stay quiet.
+ *
+ * `document.fonts.check` is best-effort: WebKitGTK has a long-standing bug where it reports
+ * unknown families as available, so a "no missing fonts" result on Linux may be a false
+ * negative and the warning should be treated as advisory, not authoritative.
  */
 export function probeGbFonts(): FontProbe {
   const fonts = typeof document !== "undefined" ? document.fonts : undefined;

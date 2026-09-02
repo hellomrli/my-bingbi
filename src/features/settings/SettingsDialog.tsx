@@ -15,6 +15,7 @@ import {
   Unplug,
   X,
 } from "lucide-react";
+import { useModal } from "../../hooks/useModal";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
   applyUpdate,
@@ -146,6 +147,7 @@ export function SettingsDialog({ open, config, onClose, onSave, onShowGuide }: S
       .finally(() => setSecretBusy(false));
   }, [creatingProvider, desktop, open, selectedProfile]);
 
+  const sectionRef = useModal<HTMLElement>(open, onClose);
   if (!open) return null;
 
   async function submitGeneral(event: FormEvent) {
@@ -338,7 +340,7 @@ export function SettingsDialog({ open, config, onClose, onSave, onShowGuide }: S
 
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <section className="modal settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+      <section ref={sectionRef} tabIndex={-1} className="modal settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
         <header className="modal-header">
           <div>
             <h2 id="settings-title">设置</h2>

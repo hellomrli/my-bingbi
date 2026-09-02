@@ -73,6 +73,22 @@ export function markUnverifiedSegments(text: string, tokens: string[] | undefine
   return segments;
 }
 
+const CHINESE_DATE_PATTERN = /^(\d{4})年(1[0-2]|[1-9])月(3[01]|[12]\d|[1-9])日$/;
+
+/**
+ * Whether the GB/T 9704 date string names a real calendar day: format per the standard plus
+ * month-length and leap-year checks, so "2026年2月29日" or "4月31日" is rejected.
+ */
+export function isValidChineseDate(value: string): boolean {
+  const match = CHINESE_DATE_PATTERN.exec(value);
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  // Day 0 of the next month index is the last day of `month` itself; Date handles leap years.
+  return day <= new Date(year, month, 0).getDate();
+}
+
 const slogans = ["走深走实", "提质增效", "凝心聚力", "开拓创新", "真抓实干", "持续发力", "全面推动", "不断完善"];
 const vagueActorPattern = /(相关部门|有关方面|各有关单位)/;
 
@@ -120,7 +136,7 @@ export function lintDocument(document: ODoc): Finding[] {
   }
 
   const date = document.body.date?.value.trim();
-  if (date && !/^\d{4}年(?:1[0-2]|[1-9])月(?:3[01]|[12]\d|[1-9])日$/.test(date)) {
+  if (date && !isValidChineseDate(date)) {
     findings.push({
       id: "DATE-001",
       severity: "error",

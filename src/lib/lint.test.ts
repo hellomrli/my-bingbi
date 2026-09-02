@@ -1,6 +1,22 @@
 import { describe, expect, it } from "vitest";
 import { createDemoDocument, createEmptyDocument } from "./document";
-import { lintDocument, markUnverifiedSegments, unverifiedTokenMap, type Finding } from "./lint";
+import { isValidChineseDate, lintDocument, markUnverifiedSegments, unverifiedTokenMap, type Finding } from "./lint";
+
+describe("isValidChineseDate", () => {
+  it("accepts real calendar days in GB/T 9704 format", () => {
+    expect(isValidChineseDate("2026年8月12日")).toBe(true);
+    expect(isValidChineseDate("2024年2月29日")).toBe(true);
+    expect(isValidChineseDate("2026年9月30日")).toBe(true);
+  });
+
+  it("rejects malformed or impossible dates", () => {
+    expect(isValidChineseDate("2026年13月1日")).toBe(false);
+    expect(isValidChineseDate("2026年2月29日")).toBe(false);
+    expect(isValidChineseDate("2026年4月31日")).toBe(false);
+    expect(isValidChineseDate("2026年8月32日")).toBe(false);
+    expect(isValidChineseDate("2026-08-12")).toBe(false);
+  });
+});
 
 describe("lintDocument", () => {
   it("reports required fields on an empty request", () => {

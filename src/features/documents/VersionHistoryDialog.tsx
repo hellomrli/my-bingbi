@@ -1,4 +1,5 @@
 import { GitCompareArrows, History, LoaderCircle, RotateCcw, X } from "lucide-react";
+import { useModal } from "../../hooks/useModal";
 import { useEffect, useMemo, useState } from "react";
 import {
   diffDocumentVersions,
@@ -50,11 +51,25 @@ function alignDiffLines(diff: VersionDiff): DiffRow[] {
   const left = diff.leftText.split("\n");
   const right = diff.rightText.split("\n");
   if (left.length * right.length > 2_000_000) {
-    return Array.from({ length: Math.max(left.length, right.length) }, (_, index) => ({
-      left: left[index] ?? null,
-      right: right[index] ?? null,
-      kind: left[index] === right[index] ? "same" : left[index] === undefined ? "added" : "removed",
-    }));
+    // Degraded pairwise alignment: a changed line is shown as a removed/added pair so both
+    // sides stay visible, matching how the counts degrade to "everything changed".
+    const rows: DiffRow[] = [];
+    const common = Math.min(left.length, right.length);
+    for (let index = 0; index < common; index += 1) {
+      if (left[index] === right[index]) {
+        rows.push({ left: left[index], right: right[index], kind: "same" });
+      } else {
+        rows.push({ left: left[index], right: null, kind: "removed" });
+        rows.push({ left: null, right: right[index], kind: "added" });
+      }
+    }
+    for (const line of left.slice(common)) {
+      rows.push({ left: line, right: null, kind: "removed" });
+    }
+    for (const line of right.slice(common)) {
+      rows.push({ left: null, right: line, kind: "added" });
+    }
+    return rows;
   }
   const matrix = Array.from({ length: left.length + 1 }, () => new Uint32Array(right.length + 1));
   for (let row = left.length - 1; row >= 0; row -= 1) {
@@ -134,6 +149,7 @@ export function VersionHistoryDialog({
 
   const rows = useMemo(() => diff ? alignDiffLines(diff) : [], [diff]);
 
+  const sectionRef = useModal<HTMLElement>(open, onClose, restoring);
   if (!open || !documentId) return null;
 
   async function restoreSelected() {
@@ -152,7 +168,7 @@ export function VersionHistoryDialog({
 
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && !restoring && onClose()}>
-      <section className="modal version-dialog" role="dialog" aria-modal="true" aria-labelledby="version-dialog-title">
+      <section ref={sectionRef} tabIndex={-1} className="modal version-dialog" role="dialog" aria-modal="true" aria-labelledby="version-dialog-title">
         <header className="modal-header">
           <div>
             <h2 id="version-dialog-title">版本历史</h2>

@@ -52,16 +52,18 @@ export type DraftStageId =
  *
  * The runtime delivers the outcome both through the stream's final event and as the command's
  * return value; the workbench applies the return value only when the document is the same one
- * that was drafted AND its revision has not already caught up. Requiring the same id keeps a
- * draft that finished after the user switched documents from clobbering the now-active
- * document's unsaved edits.
+ * that was drafted AND its revision is still behind the outcome's. Requiring the same id keeps
+ * a draft that finished after the user switched documents from clobbering the now-active
+ * document's unsaved edits; requiring the earlier revision keeps edits made while the pipeline
+ * ran from being clobbered by a stale outcome (once applied, the revision has caught up and
+ * the return value is a no-op).
  */
 export function shouldApplyDraftOutcome(
   currentId: string,
   currentRevision: number,
   outcome: DraftOutcome,
 ): boolean {
-  return currentId === outcome.document.id && currentRevision !== outcome.document.revision;
+  return currentId === outcome.document.id && currentRevision < outcome.document.revision;
 }
 
 /** Same write-back guard for single-stage re-runs, which must never touch another document. */
