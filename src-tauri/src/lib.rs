@@ -267,9 +267,9 @@ fn list_pack_summaries(packs: State<'_, PackRegistry>) -> Vec<PackSummary> {
 
 /// Checks the configured update endpoint for a newer version.
 ///
-/// The updater plugin is only registered when `BINGBI_UPDATER_PUBKEY` is set at startup (the
-/// release pipeline injects it); without it, this command reports the service as unconfigured
-/// instead of failing.
+/// The updater plugin is only registered when the build embeds an updater public key in
+/// `tauri.conf.json` (`plugins.updater.pubkey`, injected by the release pipeline); without it,
+/// this command fails with `update_unavailable`.
 #[tauri::command]
 async fn check_for_update<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
@@ -526,7 +526,7 @@ fn restore_document_version(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn diff_document_versions(
     state: State<'_, AppState>,
     document_id: String,
@@ -1195,10 +1195,12 @@ async fn draft_start<R: tauri::Runtime>(
 
 /// Re-executes one draft-pipeline stage from the input snapshot recorded in its session.
 ///
-/// The provider, pipeline, knowledge pack and knowledge-base configuration are taken from the
-/// session record rather than from the request, so a rerun always reproduces the configuration
-/// the stage originally ran with. Only draft sessions support single-stage rerun; a review must
-/// be re-run as a whole because the kernel cannot rebuild a review-only pipeline stage here.
+/// The provider and pipeline come from the session record rather than from the request, so a
+/// rerun reproduces the model configuration the stage originally ran with. The knowledge base
+/// and knowledge packs, however, are read from the current settings: rerunning the retrieve
+/// stage after the user switched vaults queries the new vault. Only draft sessions support
+/// single-stage rerun; a review must be re-run as a whole because the kernel cannot rebuild a
+/// review-only pipeline stage here.
 #[tauri::command]
 async fn rerun_stage<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
@@ -1349,7 +1351,7 @@ async fn review_start<R: tauri::Runtime>(
 ///
 /// The frontend sends only an identifier.  Reading the document and its security-sensitive
 /// facts here prevents a stale or browser-modified payload from bypassing export checks.
-#[tauri::command]
+#[tauri::command(async)]
 fn export_docx(
     state: State<'_, AppState>,
     packs: State<'_, PackRegistry>,
@@ -1391,7 +1393,7 @@ fn export_docx(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn import_docx(
     state: State<'_, AppState>,
     bytes: Vec<u8>,
@@ -1407,13 +1409,13 @@ fn import_docx(
 ///
 /// This is intentionally separate from `import_docx`: an uploaded reference is only input to a
 /// later drafting run and must not appear in the document library as an imported draft.
-#[tauri::command]
+#[tauri::command(async)]
 fn extract_docx_text(bytes: Vec<u8>) -> Result<String, IpcError> {
     extract_reference_text("reference.docx".to_owned(), bytes)
 }
 
 /// Extracts bounded plain text from a binary drafting reference without importing it.
-#[tauri::command]
+#[tauri::command(async)]
 fn extract_reference_text(file_name: String, bytes: Vec<u8>) -> Result<String, IpcError> {
     if bytes.is_empty() || bytes.len() > MAX_REFERENCE_FILE_BYTES {
         return Err(IpcError {
@@ -1440,7 +1442,7 @@ fn extract_reference_text(file_name: String, bytes: Vec<u8>) -> Result<String, I
     Ok(text)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn export_pdf(
     state: State<'_, AppState>,
     packs: State<'_, PackRegistry>,
@@ -1521,7 +1523,7 @@ fn export_capabilities(state: State<'_, AppState>) -> Result<ExportCapabilities,
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn save_docx_template(state: State<'_, AppState>, bytes: Vec<u8>) -> Result<(), IpcError> {
     validate_docx_template(&bytes).map_err(map_template_error)?;
     lock_documents(&state)?
@@ -2108,10 +2110,19 @@ fn now_millis() -> i64 {
         .unwrap_or(0)
 }
 
+/// Beyond this many lines per side the LCS becomes too slow to run synchronously and the
+/// counts degrade to "everything changed" (the text diff itself is unaffected).
+const MAX_DIFF_LCS_LINES: usize = 20_000;
+
 fn changed_line_counts(left: &str, right: &str) -> (u32, u32) {
     let left = left.lines().collect::<Vec<_>>();
     let right = right.lines().collect::<Vec<_>>();
-    let common = longest_common_subsequence_len(&left, &right);
+    let common = if left.len() > MAX_DIFF_LCS_LINES || right.len() > MAX_DIFF_LCS_LINES {
+        // Conservative fallback: no common lines assumed, so no edit is ever under-counted.
+        0
+    } else {
+        longest_common_subsequence_len(&left, &right)
+    };
     let removed = left.len().saturating_sub(common);
     let added = right.len().saturating_sub(common);
     (
@@ -2598,14 +2609,23 @@ pub fn run() {
             );
             crash_reporter.install();
             let secrets = KeyringSecretStore::new(DEFAULT_SECRET_SERVICE)?;
-            // The updater needs a release signing key; only the release pipeline has one, so
-            // the plugin is registered conditionally and dev/CI builds stay signature-free.
-            if let Ok(pubkey) = std::env::var("BINGBI_UPDATER_PUBKEY")
-                && !pubkey.trim().is_empty()
-            {
+            // The updater needs a release signing key. Release builds embed the public key in
+            // tauri.conf.json (`plugins.updater.pubkey`, injected by the release pipeline via
+            // --config); register the plugin only when that key is present so dev/CI builds
+            // stay signature-free.
+            let updater_pubkey = app
+                .config()
+                .plugins
+                .0
+                .get("updater")
+                .and_then(|config| config.get("pubkey"))
+                .and_then(|pubkey| pubkey.as_str())
+                .map(str::trim)
+                .filter(|pubkey| !pubkey.is_empty());
+            if let Some(pubkey) = updater_pubkey {
                 app.handle().plugin(
                     tauri_plugin_updater::Builder::new()
-                        .pubkey(pubkey.trim().to_owned())
+                        .pubkey(pubkey.to_owned())
                         .build(),
                 )?;
             }

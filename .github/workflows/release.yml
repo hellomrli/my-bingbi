@@ -19,10 +19,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Linux ships the .deb installer plus an AppImage: the Tauri bundler only emits
+          # updater signatures (.sig) for AppImage, so the AppImage is the update channel.
           - platform: linux
             os: ubuntu-latest
-            bundle: deb
-            artifact: src-tauri/target/release/bundle/deb/*.deb
+            bundle: deb appimage
+            artifact: |
+              src-tauri/target/release/bundle/deb/*.deb
+              src-tauri/target/release/bundle/appimage/*.AppImage
           - platform: windows
             os: windows-latest
             bundle: nsis
@@ -31,6 +35,17 @@ jobs:
     steps:
       - name: Check out tagged source
         uses: actions/checkout@v4
+
+      - name: Verify tag matches package version
+        shell: bash
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          NPM_VERSION=$(node -p "require('./package.json').version")
+          TAURI_VERSION=$(node -p "JSON.parse(require('fs').readFileSync('src-tauri/tauri.conf.json','utf8')).version")
+          if [ "$TAG_VERSION" != "$NPM_VERSION" ] || [ "$TAG_VERSION" != "$TAURI_VERSION" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match package.json (${NPM_VERSION}) or tauri.conf.json (${TAURI_VERSION}). Bump the versions and re-tag."
+            exit 1
+          fi
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -66,13 +81,18 @@ jobs:
       - name: Install JavaScript dependencies
         run: npm ci
 
-      - name: Verify update signing key
+      - name: Verify update signing keys
         shell: bash
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PUBLIC_KEY: ${{ secrets.TAURI_SIGNING_PUBLIC_KEY }}
         run: |
           if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
             echo "::error::TAURI_SIGNING_PRIVATE_KEY secret missing. Generate one with 'tauri signer generate' and configure it in repository secrets before tagging a release."
+            exit 1
+          fi
+          if [ -z "$TAURI_SIGNING_PUBLIC_KEY" ]; then
+            echo "::error::TAURI_SIGNING_PUBLIC_KEY secret missing. It is the public half of the signing key and gets embedded into the updater configuration."
             exit 1
           fi
 
@@ -81,9 +101,9 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          BINGBI_UPDATER_PUBKEY: ${{ secrets.TAURI_SIGNING_PUBLIC_KEY }}
+          TAURI_SIGNING_PUBLIC_KEY: ${{ secrets.TAURI_SIGNING_PUBLIC_KEY }}
         run: |
-          CONFIG=$(printf '{"bundle":{"createUpdaterArtifacts":true},"plugins":{"updater":{"pubkey":"%s"}}}' "$BINGBI_UPDATER_PUBKEY")
+          CONFIG=$(printf '{"bundle":{"createUpdaterArtifacts":true},"plugins":{"updater":{"pubkey":"%s"}}}' "$TAURI_SIGNING_PUBLIC_KEY")
           npm run tauri -- build --bundles ${{ matrix.bundle }} --ci --config "$CONFIG"
 
       - name: Upload installer and update artifacts
@@ -92,7 +112,6 @@ jobs:
           name: my-bingbi-${{ matrix.platform }}
           path: |
             ${{ matrix.artifact }}
-            src-tauri/target/release/bundle/latest.json
             src-tauri/target/release/bundle/**/*.sig
           if-no-files-found: error
           retention-days: 1
@@ -123,14 +142,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          LINUX_DEB=$(basename release-assets/deb/*.deb)
-          LINUX_SIG=$(tr -d '\n' < release-assets/deb/*.sig)
+          # The updater channel points at AppImage on Linux: only AppImage bundles get
+          # updater signatures from the Tauri bundler.
+          LINUX_APPIMAGE=$(basename release-assets/appimage/*.AppImage)
+          LINUX_SIG=$(tr -d '\n' < release-assets/appimage/*.AppImage.sig)
           WINDOWS_EXE=$(basename release-assets/nsis/*.exe)
-          WINDOWS_SIG=$(tr -d '\n' < release-assets/nsis/*.sig)
+          WINDOWS_SIG=$(tr -d '\n' < release-assets/nsis/*.exe.sig)
           jq -n \
             --arg version "${GITHUB_REF_NAME#v}" \
             --arg pub_date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            --arg linux_url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/${LINUX_DEB}" \
+            --arg linux_url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/${LINUX_APPIMAGE}" \
             --arg linux_sig "$LINUX_SIG" \
             --arg windows_url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/${WINDOWS_EXE}" \
             --arg windows_sig "$WINDOWS_SIG" \
