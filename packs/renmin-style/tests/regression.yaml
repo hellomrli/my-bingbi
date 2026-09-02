@@ -1,3 +1,5 @@
+# 人工回归参照用例：尚未接入自动化 runner（pack-test runner 见 docs/PLAN.md 后续规划）。
+# 其中文档类型路由类断言依赖模型阶段，无法纯本地判定；lint_rules 类断言可由 odoc-lint 手工复现。
 - id: request-vs-report
   input: 申请购置应急排水设备经费十五万元，请予批准
   expect:

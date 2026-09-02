@@ -1,6 +1,6 @@
 [package]
 name = "my-bingbi"
-version = "0.1.5"
+version = "0.1.6"
 description = "A local-first Chinese official document writing workbench"
 authors = ["my-bingbi contributors"]
 edition = "2024"

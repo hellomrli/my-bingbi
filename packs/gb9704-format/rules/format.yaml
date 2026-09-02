@@ -22,7 +22,9 @@
   severity: error
   type: regex
   scope: body.date.value
-  pattern: '^\d{4}年(?:1[0-2]|[1-9])月(?:3[01]|[12]\d|[1-9])日$'
+  # Month-length aware (31/30/28-day groups); leap-year Feb 29 cannot be expressed in a
+  # declarative pattern and stays accepted.
+  pattern: '^\d{4}年(?:1[02]月(?:3[01]|[12]\d|[1-9])|[13578]月(?:3[01]|[12]\d|[1-9])|[469]月(?:30|[12]\d|[1-9])|11月(?:30|[12]\d|[1-9])|2月(?:2\d|[1-9]))日$'
   match: required
   when_present: true
   message: 成文日期应使用阿拉伯数字全称
