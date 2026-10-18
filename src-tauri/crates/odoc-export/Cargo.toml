@@ -6,7 +6,7 @@ edition = "2024"
 rust-version = "1.85"
 
 [dependencies]
-cfb = "0.7.3"
+cfb = "0.15.0"
 calamine = "0.32.0"
 encoding_rs = "0.8.35"
 flate2 = "1.1.9"
