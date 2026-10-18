@@ -8,7 +8,7 @@ import type {
 
 export type { RerunOutcome, Score };
 import type { DocumentType } from "./odoc";
-import { isDesktopRuntime } from "./ipc";
+import { IpcError, isDesktopRuntime } from "./ipc";
 
 /** The persisted draft pipeline order used by both the engine and workbench UI. */
 export const draftStages = [
@@ -100,6 +100,8 @@ export interface DraftStartInput {
   confirmedDocType?: DocumentType | null;
   /** Reference text for imitate mode; its presence selects the imitate pipeline. */
   modelText?: string | null;
+  /** Knowledge-pack scenario template (`notice-meeting`); empty means the per-type default. */
+  templateId?: string | null;
 }
 
 /** Starts the persisted desktop drafting pipeline and forwards ordered stage events. */
@@ -108,10 +110,7 @@ export async function startDraft(
   onEvent: (event: DraftEvent) => void,
 ): Promise<DraftOutcome> {
   if (!isDesktopRuntime()) {
-    throw {
-      code: "model_runtime_unavailable",
-      message: "模型调用仅在桌面应用中可用。",
-    };
+    throw new IpcError("model_runtime_unavailable", "模型调用仅在桌面应用中可用。");
   }
   const channel = new Channel<DraftEvent>();
   channel.onmessage = onEvent;
@@ -122,6 +121,7 @@ export async function startDraft(
       providerId: input.providerId,
       confirmedDocType: input.confirmedDocType ?? null,
       modelText: input.modelText ?? null,
+      templateId: input.templateId ?? null,
     },
     onEvent: channel,
   });
@@ -136,10 +136,7 @@ export async function startImitate(
   onEvent: (event: DraftEvent) => void,
 ): Promise<DraftOutcome> {
   if (!isDesktopRuntime()) {
-    throw {
-      code: "model_runtime_unavailable",
-      message: "模型调用仅在桌面应用中可用。",
-    };
+    throw new IpcError("model_runtime_unavailable", "模型调用仅在桌面应用中可用。");
   }
   return startDraft(input, onEvent);
 }
@@ -153,10 +150,7 @@ export async function startPolish(
   onEvent: (event: DraftEvent) => void,
 ): Promise<DraftOutcome> {
   if (!isDesktopRuntime()) {
-    throw {
-      code: "model_runtime_unavailable",
-      message: "模型调用仅在桌面应用中可用。",
-    };
+    throw new IpcError("model_runtime_unavailable", "模型调用仅在桌面应用中可用。");
   }
   const channel = new Channel<DraftEvent>();
   channel.onmessage = onEvent;
@@ -185,10 +179,7 @@ export async function rerunStage(
   onEvent: (event: DraftEvent) => void,
 ): Promise<RerunOutcome> {
   if (!isDesktopRuntime()) {
-    throw {
-      code: "model_runtime_unavailable",
-      message: "模型调用仅在桌面应用中可用。",
-    };
+    throw new IpcError("model_runtime_unavailable", "模型调用仅在桌面应用中可用。");
   }
   const channel = new Channel<DraftEvent>();
   channel.onmessage = onEvent;

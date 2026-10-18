@@ -90,7 +90,10 @@ fn loads_repository_pack_and_resolves_declared_resources() {
             .read_template(&resource.relative_path)
             .expect("template should parse");
         assert_eq!(template.doc_type, doc_type);
-        assert!(!template.blocks.is_empty());
+        assert!(
+            !template.blocks.is_empty(),
+            "template {doc_type:?} should render at least one block"
+        );
     }
 }
 
@@ -357,6 +360,33 @@ fn user_pack_root_tolerates_bad_packs_and_reports_issues() {
 }
 
 #[test]
+fn lists_scenario_templates_beyond_the_defaults() {
+    let pack_path = repository_pack();
+    let registry =
+        PackRegistry::load(pack_path.parent().unwrap()).expect("repository registry should load");
+    let templates = registry.list_templates();
+
+    assert!(
+        templates.len() >= 50,
+        "expected the default set plus scenario variants, got {}",
+        templates.len()
+    );
+    let meeting = templates
+        .iter()
+        .find(|template| template.id == "notice-meeting")
+        .expect("meeting notice variant should be declared");
+    assert_eq!(meeting.name, "会议通知");
+    assert_eq!(meeting.doc_type, DocumentType::Notice);
+    assert!(!meeting.is_default);
+    assert!(meeting.scenario.is_some());
+    assert!(
+        templates
+            .iter()
+            .any(|template| template.id == "notice" && template.is_default)
+    );
+}
+
+#[test]
 fn user_pack_root_may_be_missing() {
     let temp = tempfile::tempdir().expect("temporary directory should exist");
     let builtin = temp.path().join("builtin");
@@ -364,6 +394,9 @@ fn user_pack_root_may_be_missing() {
     let (registry, issues) =
         PackRegistry::load_with_user_root(&builtin, temp.path().join("user-missing"))
             .expect("built-in root should load");
-    assert!(registry.is_empty());
-    assert!(issues.is_empty());
+    assert!(registry.is_empty(), "an empty built-in root has no packs");
+    assert!(
+        issues.is_empty(),
+        "an empty built-in root reports no issues"
+    );
 }

@@ -1,5 +1,5 @@
 import { AlertCircle, CheckCircle2, ClipboardList, Lightbulb, Plus, Trash2, TriangleAlert } from "lucide-react";
-import { FormEvent, useMemo, useState } from "react";
+import { type FormEvent, useMemo, useState } from "react";
 import type { FactKind, FactSource } from "../../lib/odoc";
 import type { Finding, Severity } from "../../lib/lint";
 import { useWorkbenchStore, type FindingFilter } from "../../store/workbench";

@@ -151,11 +151,36 @@ pub struct ResolvedResource {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DocumentTemplate {
+    /// Optional stable identifier; defaults to the template file stem.
+    #[serde(default)]
+    pub id: Option<String>,
+    /// Human-readable template name, e.g. "会议通知".
+    #[serde(default)]
+    pub name: Option<String>,
+    /// One-line usage hint shown in the template picker.
+    #[serde(default)]
+    pub scenario: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
     pub doc_type: DocumentType,
     #[serde(default)]
     pub required: TemplateRequirements,
     #[serde(default)]
     pub blocks: Vec<TemplateBlock>,
+}
+
+/// Lightweight template metadata for the drafting UI.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct TemplateSummary {
+    pub id: String,
+    pub name: String,
+    #[ts(type = "DocumentType")]
+    pub doc_type: DocumentType,
+    pub scenario: Option<String>,
+    pub description: Option<String>,
+    pub is_default: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -171,6 +196,9 @@ pub enum TemplateBlock {
     Paragraph {
         role: String,
         guidance: Option<String>,
+        /// Fixed text seeded into the skeleton (salutations, standard closings).
+        #[serde(default)]
+        content: Option<String>,
     },
     Heading {
         level: HeadingLevel,

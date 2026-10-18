@@ -1,6 +1,6 @@
 [package]
 name = "my-bingbi"
-version = "0.1.6"
+version = "1.0.0"
 description = "A local-first Chinese official document writing workbench"
 authors = ["my-bingbi contributors"]
 edition = "2024"
@@ -24,6 +24,8 @@ odoc-pack = { path = "crates/odoc-pack" }
 odoc-store = { path = "crates/odoc-store" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+open = "5"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 tauri = { version = "2.9", features = [] }
 tauri-plugin-updater = "2"
 tokio = { version = "1.43", features = ["sync", "time"] }

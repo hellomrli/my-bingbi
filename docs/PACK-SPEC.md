@@ -89,25 +89,34 @@ stage ID 的声明顺序即规范执行顺序，流水线必须按此顺序列�
 
 ## 5. 文种模板
 
-模板文件以 ODoc 的 `Body` 子集表达骨架，不直接存最终正文：
+模板文件以 ODoc 的 `Body` 子集表达骨架，不直接存最终正文。同一文种可以有多份场景模板（如“会议通知”“工作部署通知”），以文件名为模板 ID：
 
 ```yaml
-doc_type: request
+id: notice-meeting          # 可选，默认取文件名
+name: 会议通知              # 选择器显示名
+doc_type: notice
+scenario: 召开会议，明确时间地点、参会人员与议题
+description: 适用于部署会、推进会等会议通知
 required:
   main_recipients: true
-  closing: 妥否，请批示。
+  closing: 特此通知。
 blocks:
   - type: paragraph
-    role: rationale
+    role: purpose
+    guidance: 交代会议背景、依据和目的
   - type: heading
     level: l1
-    title: 基本情况
-  - type: heading
-    level: l1
-    title: 请示事项
+    title: 会议安排
+  - type: paragraph
+    role: closing
+    content: 特此通知。
 ```
 
-`role` 是流水线提示和模型输出校验使用的语义标签，不进入最终 ODoc。
+- `required.closing` 写入正文末段，不占用附注字段。
+- `blocks[].content` 可放固定称谓或固定结语；没有 `content` 的段落由模型起草。
+- `role` 是流水线提示和模型输出校验使用的语义标签，不进入最终 ODoc。
+- `templates/{doc_type}.yaml` 是该文种的默认模板；其他场景模板必须在 `outline` 绑定的 `inject` 中显式声明。
+- 起草请求可携带 `templateId`；内核只加载该模板，未指定时回退到默认模板。模板的 `doc_type` 必须与最终确认文种一致。
 
 ## 6. 版式文件
 

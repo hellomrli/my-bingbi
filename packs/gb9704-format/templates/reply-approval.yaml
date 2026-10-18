@@ -1,0 +1,22 @@
+id: "reply-approval"
+name: "批复"
+doc_type: reply
+scenario: "上级答复下级请示事项，明确同意与否及办理边界"
+description: "适用于项目、经费、事项的正式批复"
+required:
+  main_recipients: true
+  closing: "此复。"
+blocks:
+  - type: paragraph
+    role: reference
+    guidance: "引述来文名称、文号和请示事项"
+  - type: heading
+    level: l1
+    title: "批复意见"
+    role: reply
+  - type: paragraph
+    role: requirements
+    guidance: "写明执行边界、资金管理、完成时限和报告要求"
+  - type: paragraph
+    role: closing
+    guidance: "使用规范批复结语，不夹带新的请示事项"

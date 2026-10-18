@@ -1,0 +1,26 @@
+id: "request-funding"
+name: "申请经费请示"
+doc_type: request
+scenario: "申请专项资金、项目经费或追加预算"
+description: "适用于设备购置、项目建设、活动保障等经费请示"
+required:
+  main_recipients: true
+  closing: "妥否，请批示。"
+blocks:
+  - type: paragraph
+    role: rationale
+    guidance: "说明申请背景、政策依据和必要性"
+  - type: heading
+    level: l1
+    title: "基本情况"
+    role: background
+  - type: heading
+    level: l1
+    title: "申请事项"
+    role: request
+  - type: paragraph
+    role: budget
+    guidance: "写明金额、构成、资金来源和采购方式，数字必须来自材料"
+  - type: paragraph
+    role: closing
+    guidance: "使用规范请示结语"

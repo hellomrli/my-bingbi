@@ -13,7 +13,7 @@
 1. Fork 仓库并创建特性分支;
 2. 遵循现有代码风格,提交前确保通过:
    ```bash
-   npm test
+   npm run check   # lint + typecheck + 单元测试
    npm run build
    cd src-tauri
    cargo test --workspace --exclude my-bingbi

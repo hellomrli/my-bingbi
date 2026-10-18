@@ -1,0 +1,23 @@
+id: "work_report-annual"
+name: "年度工作汇报"
+doc_type: work_report
+scenario: "面向上级或会议汇报年度履职、成效、问题和打算"
+description: "适用于年度述职、目标考核、工作汇报会"
+required:
+  main_recipients: true
+blocks:
+  - type: paragraph
+    role: overview
+    guidance: "概括年度履职情况和总体成效"
+  - type: heading
+    level: l1
+    title: "主要工作及成效"
+    role: achievements
+  - type: heading
+    level: l1
+    title: "存在问题"
+    role: problems
+  - type: heading
+    level: l1
+    title: "下一步打算"
+    role: next_steps

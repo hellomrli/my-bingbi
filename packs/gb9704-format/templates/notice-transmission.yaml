@@ -1,0 +1,24 @@
+id: "notice-transmission"
+name: "转发通知"
+doc_type: notice
+scenario: "转发上级文件或通知，并结合本级实际提出落实要求"
+description: "适用于转发政策文件、上级通知、工作方案"
+required:
+  main_recipients: true
+blocks:
+  - type: paragraph
+    role: reference
+    guidance: "引述被转发文件的名称、文号和转发目的"
+  - type: paragraph
+    role: transmitted
+    guidance: "概述被转发文件的核心要求，不整段照抄"
+  - type: heading
+    level: l1
+    title: "落实要求"
+    role: requirements
+  - type: paragraph
+    role: reporting
+    guidance: "明确责任分工、完成时限和反馈方式"
+  - type: paragraph
+    role: closing
+    content: "请认真贯彻执行。"

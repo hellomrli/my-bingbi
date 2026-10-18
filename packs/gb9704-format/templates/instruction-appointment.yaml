@@ -1,0 +1,17 @@
+id: "instruction-appointment"
+name: "任免命令"
+doc_type: instruction
+scenario: "依法公布任免事项，适用于有命令发布权的机关"
+description: "适用于法定主体的任免命令，需命令号和签署人"
+required:
+  main_recipients: true
+blocks:
+  - type: paragraph
+    role: basis
+    guidance: "写明任免依据和决定程序"
+  - type: paragraph
+    role: decision
+    guidance: "逐项写明任免人员及职务"
+  - type: paragraph
+    role: closing
+    guidance: "写明生效时间，署名和日期由文书要素承载"

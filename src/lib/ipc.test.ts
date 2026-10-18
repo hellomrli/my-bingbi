@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createEmptyDocument } from "./document";
 import {
   applyUpdate,
@@ -19,6 +19,8 @@ import {
   listProviderProfiles,
   listDocuments,
   listCrashEvents,
+  listDocumentVersions,
+  loadDocumentVersion,
   loadKbConfig,
   loadAppConfig,
   loadDocument,
@@ -64,6 +66,39 @@ describe("browser document repository", () => {
     await saveDocument(document, "user_save");
     expect(await deleteDocument(document.id)).toBe(true);
     await expect(loadDocument(document.id)).rejects.toMatchObject({ code: "document_not_found" });
+  });
+
+  it("keeps a bounded version window while sequence numbers stay addressable", async () => {
+    const document = createEmptyDocument();
+    let latest = await saveDocument(document, "user_save");
+    for (let index = 0; index < 54; index += 1) {
+      document.revision += 1;
+      document.body.title.text = `第 ${index + 2} 版`;
+      latest = await saveDocument(document, "autosave");
+    }
+    // 55 saves total; the preview keeps the newest 50 snapshots.
+    expect(latest.versionSeq).toBe(55);
+
+    const versions = await listDocumentVersions(document.id);
+    expect(versions).toHaveLength(50);
+    expect(versions[0].seq).toBe(55);
+    expect(versions[versions.length - 1].seq).toBe(6);
+
+    const oldestKept = await loadDocumentVersion(document.id, 6);
+    expect(oldestKept.body.title.text).toBe("第 6 版");
+    await expect(loadDocumentVersion(document.id, 5)).rejects.toMatchObject({ code: "version_not_found" });
+  });
+
+  it("reports a full browser storage instead of a raw quota error", async () => {
+    const document = createEmptyDocument();
+    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("quota", "QuotaExceededError");
+    });
+    try {
+      await expect(saveDocument(document, "user_save")).rejects.toMatchObject({ code: "storage_full" });
+    } finally {
+      setItem.mockRestore();
+    }
   });
 
   it("rejects stale revisions that would overwrite newer content", async () => {

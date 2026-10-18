@@ -1,0 +1,27 @@
+id: "summary-special"
+name: "专项工作总结"
+doc_type: summary
+scenario: "总结某一专项工作的做法、成效、经验和问题"
+description: "适用于行动、整治、创建、培训等专项总结"
+required:
+  main_recipients: true
+blocks:
+  - type: paragraph
+    role: background
+    guidance: "说明专项工作的背景、目标和组织部署"
+  - type: heading
+    level: l1
+    title: "主要做法"
+    role: actions
+  - type: heading
+    level: l1
+    title: "工作成效"
+    role: results
+  - type: heading
+    level: l1
+    title: "经验与不足"
+    role: lessons
+  - type: heading
+    level: l1
+    title: "下一步安排"
+    role: next_steps

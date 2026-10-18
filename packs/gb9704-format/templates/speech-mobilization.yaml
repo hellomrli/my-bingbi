@@ -1,0 +1,26 @@
+id: "speech-mobilization"
+name: "动员讲话"
+doc_type: speech
+scenario: "在部署会、誓师会、专项行动启动会上作动员讲话"
+description: "适用于防汛、安全、创建等工作的动员部署"
+required:
+  main_recipients: true
+blocks:
+  - type: paragraph
+    role: salutation
+    guidance: "根据场合使用准确称谓，简短开场"
+  - type: heading
+    level: l1
+    title: "认清形势，增强紧迫感"
+    role: situation
+  - type: heading
+    level: l1
+    title: "聚焦重点，抓好任务落实"
+    role: tasks
+  - type: heading
+    level: l1
+    title: "压实责任，确保取得实效"
+    role: implementation
+  - type: paragraph
+    role: closing
+    guidance: "结合场合自然收束，不使用万能结论"

@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "my-bingbi",
-  "version": "0.1.6",
+  "version": "1.0.0",
   "identifier": "cn.bingbi.workbench",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -22,7 +22,8 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: http://asset.localhost data: blob:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost",
+      "devCsp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: http://asset.localhost data: blob:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:1420 ws://127.0.0.1:1420 http://localhost:1420 ws://localhost:1420"
     }
   },
   "bundle": {
@@ -45,6 +46,7 @@
       "endpoints": [
         "https://github.com/hellomrli/my-bingbi/releases/latest/download/latest.json"
       ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEVGMEJFOTAzMDA3QzU4RTYKUldUbVdId0FBK2tMNzc0cmMzbnl4cTd0Y25tS3EzbkdaRForL3FQT1RyakZIQzZQY0Q0UnNPRFUK",
       "windows": {
         "installMode": "passive"
       }

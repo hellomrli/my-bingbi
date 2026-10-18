@@ -1,0 +1,23 @@
+id: "briefing-work"
+name: "工作简报"
+doc_type: briefing
+scenario: "快速反映工作动态、经验做法和存在问题"
+description: "适用于内部信息、工作动态、经验交流简报"
+required:
+  main_recipients: true
+blocks:
+  - type: paragraph
+    role: lead
+    guidance: "用一两句话概括本期核心信息"
+  - type: heading
+    level: l1
+    title: "工作动态"
+    role: updates
+  - type: heading
+    level: l1
+    title: "经验做法"
+    role: practices
+  - type: heading
+    level: l1
+    title: "存在问题及建议"
+    role: problems

@@ -1,7 +1,7 @@
 use crate::{
     DocumentTemplate, PACK_SCHEMA_VERSION, PackCapability, PackError, PackManifest, RegexMatchMode,
     ResolvedResource, ResourceRole, RuleDefinition, RuleType, StageBinding, StageId,
-    StructureDetector,
+    StructureDetector, TemplateSummary,
 };
 use odoc_model::DocumentType;
 use regex::Regex;
@@ -140,6 +140,45 @@ impl LoadedPack {
     /// Returns an error from safe resource reading or template YAML deserialization.
     pub fn read_template(&self, relative_path: &str) -> Result<DocumentTemplate, PackError> {
         self.read_yaml(relative_path)
+    }
+
+    /// Lists every declared template, including scenario variants beyond the per-type default.
+    ///
+    /// Invalid template files are skipped instead of failing the whole list: a user pack may be
+    /// mid-edit, and the drafting UI should still show the templates that do load.
+    #[must_use]
+    pub fn list_templates(&self) -> Vec<TemplateSummary> {
+        let mut templates = self
+            .declared_resources
+            .iter()
+            .filter(|path| {
+                path.starts_with("templates/") && matches!(extension(path), Some("yaml" | "yml"))
+            })
+            .filter_map(|path| {
+                let template = self.read_template(path).ok()?;
+                let file_name = path.rsplit('/').next()?;
+                let id = file_name.rsplit_once('.')?.0.to_owned();
+                let default_path = format!("templates/{}.yaml", template.doc_type.as_str());
+                Some(TemplateSummary {
+                    name: template
+                        .name
+                        .unwrap_or_else(|| format!("{}（标准）", template.doc_type.label_zh())),
+                    id,
+                    doc_type: template.doc_type,
+                    scenario: template.scenario,
+                    description: template.description,
+                    is_default: path == &default_path,
+                })
+            })
+            .collect::<Vec<_>>();
+        templates.sort_by(|left, right| {
+            left.doc_type
+                .as_str()
+                .cmp(right.doc_type.as_str())
+                .then_with(|| right.is_default.cmp(&left.is_default))
+                .then_with(|| left.name.cmp(&right.name))
+        });
+        templates
     }
 
     fn validate_declared_resources(&mut self) -> Result<(), PackError> {
@@ -544,6 +583,26 @@ impl PackRegistry {
 
     pub fn get(&self, id: &str) -> Option<&LoadedPack> {
         self.packs.get(id)
+    }
+
+    /// Lists templates across every loaded pack, de-duplicated by template ID.
+    #[must_use]
+    pub fn list_templates(&self) -> Vec<TemplateSummary> {
+        let mut by_id: BTreeMap<String, TemplateSummary> = BTreeMap::new();
+        for pack in self.packs.values() {
+            for template in pack.list_templates() {
+                by_id.entry(template.id.clone()).or_insert(template);
+            }
+        }
+        let mut templates = by_id.into_values().collect::<Vec<_>>();
+        templates.sort_by(|left, right| {
+            left.doc_type
+                .as_str()
+                .cmp(right.doc_type.as_str())
+                .then_with(|| right.is_default.cmp(&left.is_default))
+                .then_with(|| left.name.cmp(&right.name))
+        });
+        templates
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &LoadedPack> {

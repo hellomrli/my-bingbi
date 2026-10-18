@@ -4,6 +4,8 @@
 
 把**规范**（GB/T 9704-2012 公文格式国标）、**语料**（你自己积累的历史公文库）、**模型**（可自由更换的大模型）三者打通，产出格式合规、事实可溯、少 AI 味、可直接交付的公文。
 
+![秉笔工作台：左侧是公文要素与写作材料，中间是国标版心预览，右侧是确定性质检与事实台账](docs/assets/workbench-desktop.png)
+
 ---
 
 ## 它解决什么问题
@@ -30,13 +32,129 @@
 
 - **跨平台** — Windows / Linux，Tauri 2 构建，安装包体积小、内存占用低
 - **对接 Obsidian** — 主通道走 [Fast Note Sync Service](https://github.com/haierkeys/fast-note-sync-service) REST API，复用其 SQLite FTS5 全文检索与双链接口；WebSocket 增量订阅已接入（后台同步守护 + 设置页开关）；也支持直读 vault 目录离线兜底
-- **模型可插拔** — 内置 DeepSeek / Claude（Anthropic）预设并支持上游模型嗅探；OpenAI 兼容（通义 / Kimi / 智谱 / vLLM 自建）、Ollama 本地模型。可按流水线阶段分配不同模型：便宜模型做提取，强模型做起草
+- **知识库可选** — 知识库未配置时，左侧引用检索与工具栏归档入口自动隐藏，界面只保留起草必需项；没有 Obsidian 也能用：一键创建本地 Markdown 知识库，在应用内新建资料并建立索引；在设置中启用后随配置出现，不打扰还没搭好库的用户
+- **模型可插拔** — 内置 DeepSeek / Claude / Qwen / Kimi / 智谱 / 混元 / 千帆 / 硅基流动 / Gemini / OpenRouter / Groq / xAI / Mistral 等常用服务预设，也支持任意 OpenAI 兼容（vLLM、LM Studio、自建网关）与 Ollama 本地模型。可按流水线阶段分配不同模型：便宜模型做提取，强模型做起草
+- **Cline Pass 订阅** — 对接 Cline Pass 网关，一个订阅使用 DeepSeek V4、GLM-5.x、Kimi K3、Qwen3.8 Max、MiniMax M3、MiMo 等国模；设置页可看 5 小时 / 每周 / 每月额度、切换模型、跳转订阅页，Key 只存系统凭据库
+- **在线更新** — 启动时自动检查（可关），发现新版本在右上角提示；更新包用 minisign 公钥验签，Windows 走 NSIS、Linux 走 AppImage，安装后自动重启
 - **材料驱动起草** — 只写大致意图、对象和时限即可，不要求先完成正文；可直接引用知识库文件，或上传 TXT / Markdown / CSV / JSON / YAML / PDF / OFD / DOC / DOCX / XLSX / XLS / WPS，材料统一进入完整起草流水线（Office/PDF 二进制文件由桌面内核解析）
-- **涉密可控** — 密级达到秘密及以上时强制走本地模型，密钥存系统 Keyring，全本地存储，无遥测
+- **向导模式** — 不想面对空白材料框时，按六步填写文种、事由、主送机关、关键事实、时限与补充材料；确认页展示将交给模型的完整材料，一键进入同一条起草流水线
+- **模板库** — 22 个文种默认骨架 + 33 个场景模板（会议通知、整改报告、经费请示、动员讲话等），按文种过滤选择，起草时直接加载对应骨架
+- **写作方法内置** — 文种路由、结构章法、规范句式、数字日期标点、降 AI 味、事实提取与质量量表以知识包参考材料注入对应阶段，不只是写在提示词里
+- **单段改写** — 在结构编辑里对任意段落用当前模型改写，先预览再应用；数字、日期、文号有变化时必须勾选确认，不会悄悄改掉事实
+- **快捷操作** — `Ctrl/⌘+K` 命令面板统一入口（向导、保存、导出、审核、设置、主题、切换视图），最近文档支持按标题或文种搜索
+- **涉密可控** — 密级达到秘密及以上时强制走本地模型，密钥存系统 Keyring，全本地存储，无遥测；WebView 启用严格 CSP（脚本仅限同源）
 - **知识包机制** — 公文规范、文种模板、校验规则都是可装卸的 Skill Pack，设置页可启用/停用；用户包目录（`config_dir/packs`）支持自建"本单位公文包"，首个空目录自动放入 `local-corpus` 示例包
 - **严格排版** — 按 GB/T 9704-2012 导出 docx：版心 156×225mm、天头 37mm、订口 28mm、行距 28pt 固定值、每面 22 行 × 28 字；支持机关 Word 模板注入；PDF 由内置 Typst 引擎零外部依赖生成（读取系统字体）
 - **成本可见** — 每次起草/仿写/审核的 token 消耗按会话记录，最近文档可打开「起草记录」查看阶段明细
 - **本地崩溃诊断** — 可选捕获 Rust 内核异常，只在本机 SQLite 中保留最近 100 条；设置页可查看、刷新和清空，不上传诊断数据
+
+### 常用模型服务
+
+设置 → 模型服务 →「常用服务」里选一个预设，表单会自动填好地址与默认模型；粘贴 API Key 后一次保存即可启用。预设只是模板，不会预先写入配置。
+
+| 预设 | 默认地址 | 默认模型 |
+| --- | --- | --- |
+| 通义千问（DashScope） | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `qwen-plus` |
+| Kimi（Moonshot） | `https://api.moonshot.cn/v1` | `moonshot-v1-32k` |
+| 智谱 GLM | `https://open.bigmodel.cn/api/paas/v4` | `glm-4-plus` |
+| 腾讯混元 | `https://api.hunyuan.cloud.tencent.com/v1` | `hunyuan-turbos-latest` |
+| 百度千帆（文心） | `https://qianfan.baidubce.com/v2` | `ernie-4.5-turbo-128k` |
+| 硅基流动 | `https://api.siliconflow.cn/v1` | `deepseek-ai/DeepSeek-V3` |
+| 讯飞星火 | `https://spark-api-open.xf-yun.com/v1` | `generalv3.5` |
+| Google Gemini | `https://generativelanguage.googleapis.com/v1beta/openai` | `gemini-2.5-flash` |
+| OpenRouter | `https://openrouter.ai/api/v1` | `openai/gpt-4o-mini` |
+| Groq | `https://api.groq.com/openai/v1` | `llama-3.3-70b-versatile` |
+| xAI Grok | `https://api.x.ai/v1` | `grok-3-mini` |
+| Mistral | `https://api.mistral.ai/v1` | `mistral-small-latest` |
+| LM Studio（本地） | `http://127.0.0.1:1234/v1` | `local-model` |
+| vLLM / 自建（本地） | `http://127.0.0.1:8000/v1` | 部署时指定的模型名 |
+
+模型名会随厂商更新，可在表单里直接改，或点「嗅探上游可用模型」。豆包（火山方舟）需要 `ep-` 接入点 ID，Azure OpenAI 使用 `api-key` 头而非 Bearer，两者暂未做预设，可用「新增模型服务」自行填写。
+
+![模型服务预设：选择常用服务后自动填好地址与默认模型](docs/assets/provider-presets.png)
+
+### Cline Pass 订阅
+
+Cline Pass 是一个聚合订阅网关，一个 Key 可以使用 DeepSeek、GLM、Kimi、Qwen、MiniMax、MiMo 等一批国模。设置 → **Cline Pass**：
+
+- 保存 API Key（写入系统 Keyring，界面只显示是否已保存）；
+- 刷新并查看 5 小时 / 每周 / 每月额度与重置时间；
+- 从订阅模型列表里搜索、切换当前模型，切换后自动启用 `cline-pass` 服务；
+- 「打开订阅页」在系统浏览器打开 [cline.bot/cline-pass](https://cline.bot/cline-pass) 办理或管理订阅，应用内不承载支付页面。
+
+网关地址为 `https://api.cline.bot/api/v1`，模型 ID 形如 `cline-pass/glm-5.3`。模型目录优先读取官方订阅列表与网关 `/models`，离线或接口不可用时回退到内置目录；额度读取的是 `/users/me/plan/usage-limits`。Key 与额度请求都只发生在 Rust 内核，WebView 不直接访问 Cline Pass。
+
+![Cline Pass 订阅面板：额度、模型目录与订阅入口](docs/assets/clinepass.png)
+
+### 建自己的知识库
+
+知识库是可选组件。没有 Obsidian 或 FNS 时，可以直接在 **设置 → 知识库 → 本地 Vault** 里点「创建本地知识库」：应用会在配置目录下建立 `knowledge-base/`，并准备好 `收件箱/`、`政策/`、`公文/` 三个目录和一份说明文件。已有目录不会被覆盖。
+
+建好后有两种使用方式：
+
+- **在应用内新建资料**：填写标题和正文，保存为 Markdown 到 `收件箱/`，勾选「保存后重建索引」即可立刻在左侧「知识库引用」里检索、引用；
+- **用自己的文件**：把 Markdown 放进 `政策/` 或 `公文/`，或在 Obsidian 里继续编辑同一目录，回到设置点「重建索引」。
+
+索引保存在本机 SQLite，原始笔记始终留在你的目录里，不会上传。FNS 与 MCP 仍保留给已经有远程库的用户：FNS 走 REST + WebSocket 增量同步，MCP 走 Bearer token；两者都只在明确配置后访问对应地址。
+
+本地检索按标题和正文匹配，`收件箱/` 里的新资料、`政策/` 里的依据和 `公文/` 里的历史件都会出现在引用面板。工具栏「归档」可把当前公文写回知识库，作为下一次写作的参考件。
+
+![知识库：本地 Vault 创建、资料新建与索引状态](docs/assets/knowledge-base.png)
+
+### 在线更新
+
+应用启动后会读取 GitHub Releases 的 `latest.json`（`https://github.com/hellomrli/my-bingbi/releases/latest/download/latest.json`），有更新时在右上角提示，点「立即更新」才会下载安装。设置 → 常规 → 关于与更新 也可手动检查，并显示当前版本与发现的新版本。
+
+- Windows 更新包为 NSIS 安装器，Linux 为 AppImage；两者都由发布流水线生成 `.sig` 并写入 `latest.json`。
+- 更新公钥已固化在 `src-tauri/tauri.conf.json`，本地构建也能检查同一条签名通道；私钥只存在仓库 secret `TAURI_SIGNING_PRIVATE_KEY`。
+- 校验失败、网络失败、清单缺少当前平台等错误会给出不同提示，不会把签名失败误报成"已是最新"。
+- **只有发布比当前更高的版本才会提示更新**。当前 v0.1.6 已是最新；v0.1.7 发布后，v0.1.6 及更早版本即可收到。
+
+![在线更新提示：显示当前版本与可安装的新版本](docs/assets/update-banner.png)
+
+发布新版本：同步提升 `package.json`、`src-tauri/tauri.conf.json` 和 `src-tauri/Cargo.toml` 的版本号，打 `vX.Y.Z` tag；release workflow 会构建、签名并上传安装器与 `latest.json`。公钥轮换时必须同时更新 `tauri.conf.json` 中的 `plugins.updater.pubkey` 和 `TAURI_SIGNING_PRIVATE_KEY` secret，否则旧版本无法验证新包。
+
+### 向导模式
+
+工具栏「向导模式」或左侧写作区的「不知道怎么写？用向导模式」都能打开六步向导。它只收集事实与约束，把答案拼成带"未提供的信息不要编造"约束的起草材料，再交给与自由写作完全相同的流水线——文种路由、事实提取、知识库检索、起草、回查都不变。
+
+![向导模式：确认页展示将交给模型的起草材料](docs/assets/wizard.png)
+
+### 模板库与写作方法
+
+模板分两层：每个文种有一份默认骨架（`templates/{doc_type}.yaml`），另有按场景细分的变体（如“会议通知”“工作部署通知”“经费请示”“整改报告”）。当前共 **55 份模板 / 22 个文种**：
+
+| 文种 | 场景模板 |
+| --- | --- |
+| 通知 | 会议、工作部署、转发、任免、节假日安排 |
+| 报告 | 情况、年度、整改 |
+| 请示 | 申请经费、事项批准 |
+| 函 | 商洽、复函、感谢 |
+| 纪要 | 办公会、专题会 |
+| 总结 | 年度、专项 |
+| 讲话稿 | 动员、总结 |
+| 方案 | 专项工作、实施方案 |
+| 工作汇报 / 简报 / 议案 / 命令 / 公告 / 通告 / 批复 / 邀请函 / 证明 / 备忘录 / 发言稿 / 表彰决定 | 各有场景骨架 |
+
+写作区与向导都能选模板；请求携带 `templateId`，内核只加载该模板的标题层级、固定称谓与结语。起草输出会按“一、/（一）/1.”解析回真实的 ODoc 标题与段落，不再把整篇正文塞进第一个段落。
+
+![向导中的场景模板选择](docs/assets/template-picker.png)
+
+写作方法来自两个 MIT 许可的写作 Skill 项目，已转成知识包参考材料并绑定到对应阶段：`document-type-router.md`（文种判断）、`structure.md` / `language.md`（结构与数字日期标点）、`drafting-patterns.md` / `sentence-bank.md`（章法与句式）、`fact-extraction.md`（事实台账）、`humanizer.md`（降 AI 味）、`scoring-rubric.md`（评分量表）。内容为提炼改写，不是原文照搬。
+
+### 改一段，不动全文
+
+结构编辑里每个文字块都有「AI 改写」按钮。选一个目标（写具体 / 压缩 / 更规范 / 去 AI 味 / 只校对）和可选的补充要求，模型只改写这一段；结果先进入预览，确认后才写回文档。
+
+改写提示带三条硬约束：不新增或修改数字、日期、文号、金额、单位、人名和机构名；不改变原意与段落功能；只输出正文。应用前还会对比原文与结果的数字、日期、文号：有新增或缺失时列出差异，必须勾选「我已核对上述变化」才能应用。改写使用当前选中的模型服务，涉密文档仍受「仅本地模型」限制。
+
+![段落改写：原文与结果并排预览，确认后才应用](docs/assets/rewrite-dialog.png)
+
+### 命令面板与文档搜索
+
+`Ctrl/⌘+K` 打开命令面板，统一执行向导、新建、最近文档、保存、导出、打印、审核、Cline Pass、设置、切换主题和切换视图；支持方向键与 Enter。最近文档对话框可按标题或文种即时过滤，文档多时不用翻列表。
+
+![命令面板：搜索并执行工作台操作](docs/assets/command-palette.png)
 
 ---
 
@@ -51,6 +169,7 @@
 | [`docs/ui/workbench.html`](docs/ui/workbench.html) | 界面设计稿（浏览器打开） |
 | [`src/styles/tokens.css`](src/styles/tokens.css) | 设计令牌与 GB/T 9704-2012 版面常量 |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | 贡献指南：报告问题、提交代码、行为准则 |
+| [`SECURITY.md`](SECURITY.md) | 安全策略：漏洞报告方式、数据边界与加固建议 |
 | [`LICENSE`](LICENSE) | 开源协议（MIT） |
 
 ---
@@ -69,9 +188,11 @@ npm run dev
 运行测试和生产构建：
 
 ```bash
-npm test                 # 前端单元测试（vitest + testing-library）
-npm run test:e2e         # Playwright 端到端（浏览器模式）
-npm run build
+npm run check             # lint + typecheck + 单元测试（提交前跑这一条即可）
+npm run lint              # ESLint（TypeScript + React Hooks 规则）
+npm test                  # 前端单元测试（vitest + testing-library）
+npm run test:e2e          # Playwright 端到端（浏览器模式）
+npm run build             # tsc -b + vite build（同时做类型检查）
 cd src-tauri
 cargo test --workspace --exclude my-bingbi   # 除 Tauri 壳外的全部 crate（壳需桌面系统依赖，见下）
 cargo clippy --workspace --exclude my-bingbi --all-targets -- -D warnings
@@ -127,7 +248,8 @@ git push origin v0.1.6
   ├─ odoc-lint     规则引擎（确定性校验）
   ├─ odoc-export   docx / pdf 排版导出
   ├─ odoc-engine   流水线编排 + 事实台账
-  └─ odoc-store    SQLite + Keyring
+  ├─ odoc-store    SQLite + Keyring
+  └─ src-tauri     Tauri 壳：commands/{document,export,config,kb,model,engine,lint,update}
 ```
 
 起草流水线共十步，每步可单独重跑（工具栏点击已完成阶段）：
@@ -150,7 +272,7 @@ git push origin v0.1.6
 ## 快速开始
 
 1. **首次运行**：桌面版会弹出三步引导（欢迎 → 选择模型服务 → 开始使用），设置页可随时重新查看。
-2. **准备材料**：在左侧写下大致写作意图、对象、事项和时限，不必先写正文；还可从「知识库引用」选择历史公文/政策文件，或一次上传多个 TXT、Markdown、CSV、JSON、YAML、PDF、OFD、DOC、DOCX、XLSX、XLS、WPS（这些二进制格式需桌面版）。
+2. **准备材料**：在左侧写下大致写作意图、对象、事项和时限，不必先写正文；不想自己组织语言时，点「向导模式」按步骤填写文种、事由、事实与时限即可；还可从「知识库引用」选择历史公文/政策文件，或一次上传多个 TXT、Markdown、CSV、JSON、YAML、PDF、OFD、DOC、DOCX、XLSX、XLS、WPS（这些二进制格式需桌面版）。
 3. **开始起草**：选择模型服务后点「开始起草」，上述内容会依次经过文种识别、事实提取、知识检索、骨架生成、正文起草、降 AI 味、规则校验、文本校对、事实回查和评分；提供范文并点「仿写起草」可模仿本单位笔法。
 4. **质检与回查**：右侧面板显示规则校验与事实回查结果，模型编造的数字/日期/文号标红，存在错误时导出被阻断。
 5. **审核**：工具栏「审核」对当前公文跑只读体检，报告可逐条定位到正文。
@@ -163,7 +285,7 @@ git push origin v0.1.6
 
 **M0–M4 主线功能已闭环。** 当前已有可运行的 React 工作台、A4 国标版心预览、结构化正文编辑、确定性质检、事实台账与回查标红、最近文档、自动保存、版本快照与 diff、起草/仿写/审核三种流水线、单步重跑、会话成本记录、知识包管理、字体检测、首次运行引导、自定义规则与本地崩溃诊断；桌面版可导出 GB/T 9704 严格 docx（支持机关模板注入）与零依赖 PDF（内置 Typst 引擎）。Rust 侧已建立 Tauri 壳、`odoc-model` AST、`odoc-store` SQLite 持久化、`odoc-llm` 多 Provider、`odoc-kb`（FNS/本地 Vault/MCP + WebSocket 增量订阅）、`odoc-lint` 规则引擎与 `odoc-export` 排版。模型凭据只存系统 Keyring，秘密及以上公文在内核层禁止远程调用。Linux `.deb` 与本机验证、CI 原生 Linux/Windows 壳检查与安装包产物均已就绪。
 
-**M0–M4 里程碑仅剩首次发布一项待完成**（打 `v*` tag 触发 [`release.yml`](.github/workflows/release.yml) 产出双平台安装包与 updater 产物，见 [`docs/PLAN.md` §9](docs/PLAN.md)）。可选增强：知识包在线安装与更新。
+**M0–M4 里程碑已完成。** v0.1.6 已于 2026-09-02 发布，GitHub Releases 提供 Linux（`.deb` / AppImage）与 Windows（NSIS `.exe`）安装包及 updater 清单；后续版本按 [`.github/workflows/release.yml`](.github/workflows/release.yml) 打 `v*` tag 发布（流程见 [`docs/PLAN.md` §9](docs/PLAN.md)）。可选增强：知识包在线安装与更新。
 
 ---
 

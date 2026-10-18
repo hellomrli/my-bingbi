@@ -11,13 +11,20 @@ import { DocumentPreview } from "./features/preview/DocumentPreview";
 import { ReviewReportDialog } from "./features/review/ReviewReportDialog";
 import { SessionHistoryDialog } from "./features/documents/SessionHistoryDialog";
 import { SettingsDialog } from "./features/settings/SettingsDialog";
+import { DraftWizard } from "./features/wizard/DraftWizard";
+import { composeWizardMaterial, type WizardDraft } from "./features/wizard/wizardModel";
+import { CommandPalette, type CommandAction } from "./features/workbench/CommandPalette";
 import { Toolbar } from "./features/workbench/Toolbar";
+import { UpdateBanner } from "./features/workbench/UpdateBanner";
+import { useDraftPipeline } from "./hooks/useDraftPipeline";
 import { countChineseCharacters, documentTypeLabels } from "./lib/document";
-import { draftStageLabels, draftStages, imitateStages, polishStages, rerunStage, shouldApplyDraftOutcome, shouldApplyRerunOutcome, startDraft, startImitate, startPolish, type DraftStageId } from "./lib/engine";
+import type { DraftStageId } from "./lib/engine";
 import { isReviewStage, startReview, type ReviewStageId } from "./lib/review";
 import {
   backendVersion,
   archiveDocumentToKb,
+  applyUpdate,
+  checkForUpdate,
   createEmptyDocument,
   defaultAppConfig,
   defaultKbConfig,
@@ -26,23 +33,29 @@ import {
   exportPdf,
   importDocx,
   ipcErrorMessage,
+  IpcError,
   isDesktopRuntime,
   listDocuments,
   loadKbConfig,
   listProviderProfiles,
+  listTemplates,
+  lintDocumentNow,
   loadAppConfig,
   loadDocument,
   saveAppConfig,
   saveDocument,
   type ArchiveResult,
   type RestoreVersionResult,
+  type UpdateCheckResult,
 } from "./lib/ipc";
-import type { DraftEvent, DraftOutcome, RerunOutcome, ReviewEvent, ReviewOutcome, TypeDecision } from "./lib/generated/engine";
+import type { DraftOutcome, RerunOutcome, ReviewEvent, ReviewOutcome } from "./lib/generated/engine";
 import type { FactCheckReport, LintReport } from "./lib/generated/lint";
 import type { ProviderProfile } from "./lib/llm";
 import type { KbConfig } from "./lib/kb";
 import type { DocumentType } from "./lib/odoc";
-import { lintDocument, unverifiedTokenMap, type Finding } from "./lib/lint";
+import type { TemplateSummary } from "./lib/pack";
+import { lintDocument, unverifiedTokenMap } from "./lib/lint";
+import { selectFindings, type RevisionedReport } from "./lib/report";
 import type { AppConfig, DocumentSummary } from "./lib/store";
 import { useWorkbenchStore } from "./store/workbench";
 
@@ -66,17 +79,6 @@ function downloadBytes(filename: string, bytes: Uint8Array, mimeType: string) {
   URL.revokeObjectURL(url);
 }
 
-function errorCode(error: unknown): string | null {
-  return typeof error === "object" && error !== null && "code" in error && typeof error.code === "string"
-    ? error.code
-    : null;
-}
-
-function isDraftStage(value: string): value is DraftStageId {
-  // `in` would also match inherited properties like "toString" from a hostile event source.
-  return Object.hasOwn(draftStageLabels, value);
-}
-
 function App() {
   const document = useWorkbenchStore((state) => state.document);
   const view = useWorkbenchStore((state) => state.view);
@@ -88,6 +90,7 @@ function App() {
   const setView = useWorkbenchStore((state) => state.setView);
   const setTheme = useWorkbenchStore((state) => state.setTheme);
   const markSaved = useWorkbenchStore((state) => state.markSaved);
+  const updateDocumentType = useWorkbenchStore((state) => state.updateDocumentType);
   const importInputRef = useRef<HTMLInputElement>(null);
   const [runtime, setRuntime] = useState("正在连接内核");
   const [notice, setNotice] = useState<string | null>(null);
@@ -96,7 +99,12 @@ function App() {
   const [documents, setDocuments] = useState<DocumentSummary[]>([]);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<"general" | "providers" | "clinepass" | "knowledge" | "packs">("general");
   const [guideOpen, setGuideOpen] = useState(false);
+  const [wizardOpen, setWizardOpen] = useState(false);
+  const [commandOpen, setCommandOpen] = useState(false);
+  const [availableUpdate, setAvailableUpdate] = useState<UpdateCheckResult | null>(null);
+  const [installingUpdate, setInstallingUpdate] = useState(false);
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [archiveBusy, setArchiveBusy] = useState(false);
   const [historyTarget, setHistoryTarget] = useState<{ id: string; title: string } | null>(null);
@@ -108,20 +116,10 @@ function App() {
   const [providerId, setProviderId] = useState("");
   const [material, setMaterial] = useState("");
   const [modelText, setModelText] = useState("");
-  const [drafting, setDrafting] = useState(false);
-  const [draftStage, setDraftStage] = useState<DraftStageId | null>(null);
-  const [completedStages, setCompletedStages] = useState<DraftStageId[]>([]);
-  const [failedStage, setFailedStage] = useState<DraftStageId | null>(null);
-  // The session id returned by the last completed draft; single stages can be re-run from it.
-  const [draftSessionId, setDraftSessionId] = useState<string | null>(null);
-  const [draftText, setDraftText] = useState("");
-  const [draftError, setDraftError] = useState<string | null>(null);
-  const [typeDecision, setTypeDecision] = useState<TypeDecision | null>(null);
-  const [confirmedDocType, setConfirmedDocType] = useState<DocumentType | null>(null);
-  const [engineLintReport, setEngineLintReport] = useState<LintReport | null>(null);
-  const [engineFactCheckReport, setEngineFactCheckReport] = useState<FactCheckReport | null>(null);
-  const [engineReportRevision, setEngineReportRevision] = useState<number | null>(null);
-  const [pipeline, setPipeline] = useState<"draft" | "review" | "imitate" | "polish">("draft");
+  const [templates, setTemplates] = useState<TemplateSummary[]>([]);
+  const [templateId, setTemplateId] = useState("");
+  const [engineLintReport, setEngineLintReport] = useState<RevisionedReport<LintReport> | null>(null);
+  const [engineFactCheckReport, setEngineFactCheckReport] = useState<RevisionedReport<FactCheckReport> | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [reviewing, setReviewing] = useState(false);
   const [reviewStage, setReviewStage] = useState<ReviewStageId | null>(null);
@@ -132,29 +130,14 @@ function App() {
   // Tracks the stage a failed review died on: the state value read inside the catch block would
   // still be whatever it was when the run started.
   const reviewStageRef = useRef<ReviewStageId | null>(null);
-  // The draft pipelines have the same catch-block staleness problem, so the stage a failure
-  // occurred on is tracked in a ref too, not in the render-time `draftStage` state.
-  const draftStageRef = useRef<DraftStageId | null>(null);
+  // `review` is a toolbar mode of its own; the draft hook only reports draft/imitate/polish.
+  const [reviewMode, setReviewMode] = useState(false);
   const selectNode = useWorkbenchStore((state) => state.selectNode);
   const findings = useMemo(() => lintDocument(document), [document]);
-  const displayedFindings = useMemo<Finding[]>(() => {
-    if (engineReportRevision !== document.revision || (!engineLintReport && !engineFactCheckReport)) {
-      return findings;
-    }
-    const engineFindings: Finding[] = [
-      ...(engineLintReport?.findings ?? []),
-      ...(engineFactCheckReport?.findings ?? []),
-    ].map((finding) => ({
-      id: finding.id,
-      severity: finding.severity,
-      nodeId: finding.nodeId,
-      message: finding.message,
-      location: finding.location,
-      ...(finding.suggestion ? { suggestion: finding.suggestion } : {}),
-      ...(finding.token ? { token: finding.token } : {}),
-    }));
-    return engineFindings;
-  }, [document.revision, engineFactCheckReport, engineLintReport, engineReportRevision, findings]);
+  const displayedFindings = useMemo(
+    () => selectFindings(document.id, document.revision, findings, engineLintReport, engineFactCheckReport),
+    [document.id, document.revision, engineFactCheckReport, engineLintReport, findings],
+  );
   const errorCount = displayedFindings.filter((finding) => finding.severity === "error").length;
   const desktopRuntime = isDesktopRuntime();
 
@@ -163,6 +146,91 @@ function App() {
     if (theme === "system") root.removeAttribute("data-theme");
     else root.dataset.theme = theme;
   }, [theme]);
+
+  // Desktop: keep the panel on the kernel's pack-driven rules. The local rule subset still
+  // renders instantly while the debounced kernel check runs, so typing stays responsive.
+  const lintFailureLogged = useRef(false);
+  useEffect(() => {
+    if (!desktopRuntime) return;
+    if (engineLintReport?.documentId === document.id && engineLintReport.revision === document.revision) return;
+    const snapshot = document;
+    const timeout = window.setTimeout(() => {
+      lintDocumentNow(snapshot)
+        .then((report) => {
+          setEngineLintReport((current) =>
+            current && current.documentId === snapshot.id && current.revision >= snapshot.revision
+              ? current
+              : { documentId: snapshot.id, revision: snapshot.revision, report },
+          );
+        })
+        .catch(() => {
+          if (lintFailureLogged.current) return;
+          lintFailureLogged.current = true;
+          console.warn("kernel lint unavailable; showing the local rule subset");
+        });
+    }, 250);
+    return () => window.clearTimeout(timeout);
+  }, [desktopRuntime, document, engineLintReport]);
+
+  // Desktop: template variants come from the knowledge pack; browser preview has none, so the
+  // template pickers stay hidden there.
+  useEffect(() => {
+    if (!desktopRuntime) return;
+    let active = true;
+    listTemplates()
+      .then((loaded) => {
+        if (active) setTemplates(loaded);
+      })
+      .catch((error) => setNotice(ipcErrorMessage(error)));
+    return () => {
+      active = false;
+    };
+  }, [desktopRuntime]);
+
+  // A scenario template belongs to one document type; switching type drops an incompatible choice.
+  useEffect(() => {
+    if (!templateId) return;
+    const selected = templates.find((template) => template.id === templateId);
+    if (selected && selected.docType !== document.meta.docType) setTemplateId("");
+  }, [document.meta.docType, templateId, templates]);
+
+  // Desktop: check the signed release channel once per start when auto-update is enabled. A
+  // failure stays silent; the settings page still offers a manual check with an explicit error.
+  useEffect(() => {
+    if (!desktopRuntime || !config.autoUpdateEnabled) return;
+    let active = true;
+    const timer = window.setTimeout(() => {
+      checkForUpdate()
+        .then((result) => {
+          if (active && result.available) setAvailableUpdate(result);
+        })
+        .catch(() => {});
+    }, 2500);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [config.autoUpdateEnabled, desktopRuntime]);
+
+  async function installAvailableUpdate() {
+    if (installingUpdate) return;
+    setInstallingUpdate(true);
+    try {
+      await applyUpdate();
+    } catch (error) {
+      setNotice(ipcErrorMessage(error));
+    } finally {
+      setInstallingUpdate(false);
+    }
+  }
+
+  // Fact-check highlights describe one revision; once the text moves on they must not linger.
+  useEffect(() => {
+    if (!engineFactCheckReport) return;
+    if (engineFactCheckReport.documentId === document.id && engineFactCheckReport.revision === document.revision) return;
+    if (Object.keys(useWorkbenchStore.getState().unverifiedTokens).length === 0) return;
+    setUnverifiedTokens({});
+  }, [document.id, document.revision, engineFactCheckReport, setUnverifiedTokens]);
 
   useEffect(() => {
     backendVersion().then(setRuntime).catch(() => setRuntime("内核连接失败"));
@@ -279,6 +347,11 @@ function App() {
 
   useEffect(() => {
     function handleShortcut(event: KeyboardEvent) {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setCommandOpen((current) => !current);
+        return;
+      }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
         event.preventDefault();
         void persistDocument("user_save");
@@ -295,7 +368,6 @@ function App() {
       setDocument(next, null);
       setEngineLintReport(null);
       setEngineFactCheckReport(null);
-      setEngineReportRevision(null);
       setSavedVersion(null);
       setView("structure");
       setNotice("已创建空白 ODoc");
@@ -313,7 +385,6 @@ function App() {
       setDocument(result.document, result.saved.savedAt);
       setEngineLintReport(null);
       setEngineFactCheckReport(null);
-      setEngineReportRevision(null);
       setSavedVersion(result.saved.versionSeq);
       setView("structure");
       setNotice("DOCX 已导入，复杂版式请在结构视图中复核");
@@ -339,7 +410,6 @@ function App() {
       setDocument(loaded, summary?.updatedAt ?? Date.now());
       setEngineLintReport(null);
       setEngineFactCheckReport(null);
-      setEngineReportRevision(null);
       setSavedVersion(summary?.versionCount ?? null);
       setLibraryOpen(false);
       setNotice("公文已打开");
@@ -360,7 +430,6 @@ function App() {
         setDocument(next, null);
         setEngineLintReport(null);
         setEngineFactCheckReport(null);
-        setEngineReportRevision(null);
         setSavedVersion(null);
         setView("structure");
       }
@@ -393,7 +462,6 @@ function App() {
     setDocument(result.document, result.saved.savedAt);
     setEngineLintReport(null);
     setEngineFactCheckReport(null);
-    setEngineReportRevision(null);
     setSavedVersion(result.saved.versionSeq);
     setView("structure");
     setHistoryTarget(null);
@@ -437,285 +505,77 @@ function App() {
   }
 
   function applyDraftOutcome(outcome: DraftOutcome) {
-    setDraftSessionId(outcome.sessionId);
     setDocument(outcome.document, Date.now());
     setUnverifiedTokens(unverifiedTokenMap(outcome.factCheckReport?.findings ?? []));
-    setEngineLintReport(outcome.lintReport);
-    setEngineFactCheckReport(outcome.factCheckReport);
-    setEngineReportRevision(outcome.document.revision);
-    setTypeDecision(null);
-    setConfirmedDocType(null);
-    setDraftText("");
-    setDraftError(null);
-    setDraftStage(null);
-    draftStageRef.current = null;
-    setFailedStage(null);
-    void refreshDocuments().then((loaded) => {
-      setSavedVersion(loaded.find((item) => item.id === outcome.document.id)?.versionCount ?? null);
-    });
-  }
-
-  function applyRerunOutcome(outcome: RerunOutcome, rerunStageId: DraftStageId) {
-    setDocument(outcome.document, Date.now());
-    // Only lint and factcheck report fresh results from a rerun; the panel falls back to live
-    // deterministic findings while their reports are null, which also drops stale highlights.
-    setUnverifiedTokens(unverifiedTokenMap(outcome.factCheckReport?.findings ?? []));
-    setEngineLintReport(outcome.lintReport);
-    setEngineFactCheckReport(outcome.factCheckReport);
-    setEngineReportRevision(outcome.document.revision);
-    setTypeDecision(null);
-    setConfirmedDocType(null);
-    setDraftText("");
-    setDraftError(null);
-    setDraftStage(null);
-    draftStageRef.current = null;
-    setFailedStage(null);
-    // Downstream stages ran against the previous output, so their records no longer hold.
-    // The stage order depends on the session's pipeline kind, which the closure captured.
-    const stageOrder: readonly DraftStageId[] = pipeline === "imitate"
-      ? imitateStages
-      : pipeline === "polish"
-        ? polishStages
-        : draftStages;
-    const rerunIndex = stageOrder.indexOf(rerunStageId);
-    setCompletedStages((current) =>
-      current.filter((stage) => stageOrder.indexOf(stage) <= rerunIndex),
+    setEngineLintReport(
+      outcome.lintReport
+        ? { documentId: outcome.document.id, revision: outcome.document.revision, report: outcome.lintReport }
+        : null,
+    );
+    setEngineFactCheckReport(
+      outcome.factCheckReport
+        ? { documentId: outcome.document.id, revision: outcome.document.revision, report: outcome.factCheckReport }
+        : null,
     );
     void refreshDocuments().then((loaded) => {
       setSavedVersion(loaded.find((item) => item.id === outcome.document.id)?.versionCount ?? null);
     });
   }
 
-  function handleDraftEvent(event: DraftEvent) {
-    if (event.type === "stage_started") {
-      if (isDraftStage(event.stageId)) {
-        draftStageRef.current = event.stageId;
-        setDraftStage(event.stageId);
-        setFailedStage(null);
-        if (event.stageId === "draft" || event.stageId === "deai") setDraftText("");
-      }
-      return;
-    }
-    if (event.type === "token") {
-      if (event.stageId === "draft" || event.stageId === "deai") setDraftText((current) => current + event.content);
-      return;
-    }
-    if (event.type === "needs_document_type") {
-      setTypeDecision(event.decision);
-      setConfirmedDocType(event.decision.value);
-      return;
-    }
-    if (event.type === "stage_completed") {
-      const stageId = event.output.stageId;
-      if (isDraftStage(stageId)) {
-        setCompletedStages((current) => current.includes(stageId) ? current : [...current, stageId]);
-        setDraftStage(stageId);
-        if ((stageId === "draft" || stageId === "deai") && event.output.content) {
-          setDraftText(event.output.content);
-        }
-      }
-      return;
-    }
-    if (event.type === "completed") applyDraftOutcome(event.outcome);
+  function applyRerunOutcome(outcome: RerunOutcome) {
+    setDocument(outcome.document, Date.now());
+    // Only lint and factcheck report fresh results from a rerun; the panel falls back to live
+    // deterministic findings while their reports are null, which also drops stale highlights.
+    setUnverifiedTokens(unverifiedTokenMap(outcome.factCheckReport?.findings ?? []));
+    setEngineLintReport(
+      outcome.lintReport
+        ? { documentId: outcome.document.id, revision: outcome.document.revision, report: outcome.lintReport }
+        : null,
+    );
+    setEngineFactCheckReport(
+      outcome.factCheckReport
+        ? { documentId: outcome.document.id, revision: outcome.document.revision, report: outcome.factCheckReport }
+        : null,
+    );
+    void refreshDocuments().then((loaded) => {
+      setSavedVersion(loaded.find((item) => item.id === outcome.document.id)?.versionCount ?? null);
+    });
   }
 
-  async function runDraft(nextConfirmedDocType: DocumentType | null = null) {
-    if (drafting || !material.trim() || !providerId) return;
-    const selected = providers.find((provider) => provider.id === providerId);
-    const restricted = document.meta.securityLevel === "secret" || document.meta.securityLevel === "confidential";
-    if (!selected?.enabled || (restricted && !selected.isLocal)) {
-      setDraftError(restricted ? "当前密级仅允许本地模型，请先选择本地服务。" : "模型服务不可用，请先在设置中启用服务。");
-      return;
-    }
-    setDrafting(true);
-    setPipeline("draft");
-    setDraftStage(null);
-    draftStageRef.current = null;
-    setCompletedStages([]);
-    setFailedStage(null);
-    setDraftText("");
-    setDraftError(null);
-    setDraftSessionId(null);
-    if (nextConfirmedDocType === null) {
-      setTypeDecision(null);
-      setConfirmedDocType(null);
-    }
-    try {
-      await saveBeforeDraft();
-      const snapshot = useWorkbenchStore.getState().document;
-      const outcome = await startDraft(
-        {
-          documentId: snapshot.id,
-          material: material.trim(),
-          providerId,
-          confirmedDocType: nextConfirmedDocType,
-        },
-        handleDraftEvent,
-      );
-      // Older runtimes may return the outcome without delivering the final channel event. Apply
-      // it only for the document that was drafted: if the user opened a different document while
-      // this ran, its unsaved edits must not be clobbered by the finished draft.
-      const current = useWorkbenchStore.getState().document;
-      if (shouldApplyDraftOutcome(current.id, current.revision, outcome)) {
-        applyDraftOutcome(outcome);
-      }
-    } catch (error) {
-      const code = errorCode(error);
-      if (code === "document_type_confirmation_required") {
-        setDraftError(null);
-      } else {
-        setDraftError(ipcErrorMessage(error));
-        if (isDraftStage(draftStageRef.current ?? "")) setFailedStage(draftStageRef.current);
-      }
-    } finally {
-      setDrafting(false);
-    }
+  const draftPipeline = useDraftPipeline({
+    document,
+    providers,
+    providerId,
+    material,
+    modelText,
+    templateId,
+    saveBeforeDraft,
+    onDraftOutcome: applyDraftOutcome,
+    onRerunOutcome: applyRerunOutcome,
+  });
+
+  function beginDraft(
+    confirmedDocType: DocumentType | null = null,
+    materialOverride?: string,
+    templateIdOverride?: string | null,
+  ) {
+    setReviewMode(false);
+    void draftPipeline.startDraft(confirmedDocType, materialOverride, templateIdOverride);
   }
 
-  async function runImitate() {
-    if (drafting || !material.trim() || !modelText.trim() || !providerId) return;
-    if (!desktopRuntime) {
-      setDraftError("模型调用仅在桌面应用中可用。");
-      return;
-    }
-    const selected = providers.find((provider) => provider.id === providerId);
-    const restricted = document.meta.securityLevel === "secret" || document.meta.securityLevel === "confidential";
-    if (!selected?.enabled || (restricted && !selected.isLocal)) {
-      setDraftError(restricted ? "当前密级仅允许本地模型，请先选择本地服务。" : "模型服务不可用，请先在设置中启用服务。");
-      return;
-    }
-    setDrafting(true);
-    setPipeline("imitate");
-    setDraftStage(null);
-    draftStageRef.current = null;
-    setCompletedStages([]);
-    setFailedStage(null);
-    setDraftText("");
-    setDraftError(null);
-    setDraftSessionId(null);
-    setTypeDecision(null);
-    setConfirmedDocType(null);
-    try {
-      await saveBeforeDraft();
-      const snapshot = useWorkbenchStore.getState().document;
-      const outcome = await startImitate(
-        {
-          documentId: snapshot.id,
-          material: material.trim(),
-          providerId,
-          modelText: modelText.trim(),
-          confirmedDocType: null,
-        },
-        handleDraftEvent,
-      );
-      // Older runtimes may return the outcome without delivering the final channel event. Apply
-      // it only for the document that was drafted: if the user opened a different document while
-      // this ran, its unsaved edits must not be clobbered by the finished draft.
-      const current = useWorkbenchStore.getState().document;
-      if (shouldApplyDraftOutcome(current.id, current.revision, outcome)) {
-        applyDraftOutcome(outcome);
-      }
-    } catch (error) {
-      const code = errorCode(error);
-      if (code === "document_type_confirmation_required") {
-        setDraftError(null);
-      } else {
-        setDraftError(ipcErrorMessage(error));
-        if (isDraftStage(draftStageRef.current ?? "")) setFailedStage(draftStageRef.current);
-      }
-    } finally {
-      setDrafting(false);
-    }
+  function beginImitate() {
+    setReviewMode(false);
+    void draftPipeline.startImitate();
   }
 
-  async function runPolish() {
-    if (drafting || !material.trim() || !providerId) return;
-    if (!desktopRuntime) {
-      setDraftError("模型调用仅在桌面应用中可用。");
-      return;
-    }
-    const selected = providers.find((provider) => provider.id === providerId);
-    const restricted = document.meta.securityLevel === "secret" || document.meta.securityLevel === "confidential";
-    if (!selected?.enabled || (restricted && !selected.isLocal)) {
-      setDraftError(restricted ? "当前密级仅允许本地模型，请先选择本地服务。" : "模型服务不可用，请先在设置中启用服务。");
-      return;
-    }
-    setDrafting(true);
-    setPipeline("polish");
-    setDraftStage(null);
-    draftStageRef.current = null;
-    setCompletedStages([]);
-    setFailedStage(null);
-    setDraftText("");
-    setDraftError(null);
-    setDraftSessionId(null);
-    setTypeDecision(null);
-    setConfirmedDocType(null);
-    try {
-      await saveBeforeDraft();
-      const snapshot = useWorkbenchStore.getState().document;
-      const outcome = await startPolish(
-        {
-          documentId: snapshot.id,
-          material: material.trim(),
-          providerId,
-          confirmedDocType: null,
-        },
-        handleDraftEvent,
-      );
-      // Older runtimes may return the outcome without delivering the final channel event. Apply
-      // it only for the document that was drafted: if the user opened a different document while
-      // this ran, its unsaved edits must not be clobbered by the finished draft.
-      const current = useWorkbenchStore.getState().document;
-      if (shouldApplyDraftOutcome(current.id, current.revision, outcome)) {
-        applyDraftOutcome(outcome);
-      }
-    } catch (error) {
-      const code = errorCode(error);
-      if (code === "document_type_confirmation_required") {
-        setDraftError(null);
-      } else {
-        setDraftError(ipcErrorMessage(error));
-        if (isDraftStage(draftStageRef.current ?? "")) setFailedStage(draftStageRef.current);
-      }
-    } finally {
-      setDrafting(false);
-    }
+  function beginPolish() {
+    setReviewMode(false);
+    void draftPipeline.startPolish();
   }
 
-  async function rerunPipelineStage(stageId: DraftStageId) {
-    if (drafting || reviewing || !draftSessionId) return;
-    if (!desktopRuntime) {
-      setDraftError("模型调用仅在桌面应用中可用。");
-      return;
-    }
-    setDrafting(true);
-    setDraftStage(stageId);
-    draftStageRef.current = stageId;
-    setFailedStage(null);
-    setDraftError(null);
-    if (stageId === "draft" || stageId === "deai") setDraftText("");
-    try {
-      const outcome = await rerunStage(draftSessionId, stageId, handleDraftEvent);
-      // The rerun streams only stage events, so the returned document is applied here; the
-      // content guard keeps this idempotent if a future runtime also delivers a final event.
-      // Like the full runs, never write back into a document the user has since switched away
-      // from — the rerun's snapshot belongs to the session's document, not the active one.
-      const current = useWorkbenchStore.getState().document;
-      if (shouldApplyRerunOutcome(current, outcome)) {
-        applyRerunOutcome(outcome, stageId);
-      }
-    } catch (error) {
-      const code = errorCode(error);
-      if (code === "document_type_confirmation_required") {
-        setDraftError(null);
-      } else {
-        setDraftError(ipcErrorMessage(error));
-        if (isDraftStage(draftStageRef.current ?? "")) setFailedStage(draftStageRef.current);
-      }
-    } finally {
-      setDrafting(false);
-    }
+  function beginRerun(stage: DraftStageId) {
+    setReviewMode(false);
+    void draftPipeline.rerun(stage);
   }
 
   function handleReviewEvent(event: ReviewEvent) {
@@ -744,16 +604,23 @@ function App() {
     setReviewStage(null);
     setFailedReviewStage(null);
     // The kernel reports on the stored revision, so its findings also drive the lint panel.
-    setEngineLintReport(outcome.lintReport);
-    setEngineFactCheckReport(outcome.factCheckReport);
-    setEngineReportRevision(outcome.revision);
+    setEngineLintReport({
+      documentId: outcome.documentId,
+      revision: outcome.revision,
+      report: outcome.lintReport,
+    });
+    setEngineFactCheckReport({
+      documentId: outcome.documentId,
+      revision: outcome.revision,
+      report: outcome.factCheckReport,
+    });
     setUnverifiedTokens(unverifiedTokenMap(outcome.factCheckReport?.findings ?? []));
   }
 
   async function runReview() {
     if (reviewing) return;
     setReviewOpen(true);
-    setPipeline("review");
+    setReviewMode(true);
     if (!desktopRuntime) {
       setReviewError("公文审核仅在桌面应用中可用。");
       return;
@@ -887,7 +754,7 @@ function App() {
         setNotice("PDF 已通过内置排版引擎导出");
       } else {
         const preview = window.open("", "_blank", "noopener,noreferrer");
-        if (!preview) throw { code: "popup_blocked", message: "浏览器阻止了打印预览窗口。" };
+        if (!preview) throw new IpcError("popup_blocked", "浏览器阻止了打印预览窗口。");
         preview.document.open();
         preview.document.write(result.html);
         preview.document.close();
@@ -911,7 +778,87 @@ function App() {
         : "尚未保存";
   const cloudAllowed = document.meta.securityLevel === "public" || document.meta.securityLevel === "internal";
   const selectedProvider = providers.find((provider) => provider.id === providerId);
-  const canReview = desktopRuntime && Boolean(selectedProvider?.enabled) && !drafting && !reviewing;
+  const wizardCanDraft = desktopRuntime
+    && Boolean(selectedProvider?.enabled)
+    && (cloudAllowed || selectedProvider?.isLocal === true);
+  const canReview = desktopRuntime && Boolean(selectedProvider?.enabled) && !draftPipeline.drafting && !reviewing;
+
+  function handleWizardFinish(input: WizardDraft) {
+    const materialText = composeWizardMaterial(input);
+    setWizardOpen(false);
+    setMaterial(materialText);
+    setTemplateId(input.templateId);
+    updateDocumentType(input.docType);
+    if (wizardCanDraft) {
+      beginDraft(input.docType, materialText, input.templateId);
+    } else {
+      setNotice("向导内容已填入写作区；选择可用的模型服务后即可开始起草");
+    }
+  }
+
+  const commandActions: CommandAction[] = [
+    {
+      id: "wizard",
+      label: "向导模式",
+      hint: "逐步填写要素后起草",
+      keywords: ["wizard", "向导", "起草"],
+      run: () => setWizardOpen(true),
+    },
+    { id: "new", label: "新建公文", keywords: ["new", "新建"], run: () => void handleNew() },
+    { id: "documents", label: "打开最近文档", keywords: ["document", "文档"], run: () => setLibraryOpen(true) },
+    { id: "save", label: "保存到本机", hint: "Ctrl+S", run: () => void persistDocument("user_save") },
+    {
+      id: "export",
+      label: desktopRuntime ? "导出 DOCX" : "导出 ODoc JSON",
+      keywords: ["export", "导出"],
+      run: () => void handleExport(),
+    },
+    { id: "print", label: "打印 / 导出 PDF", run: () => void handlePrint() },
+    {
+      id: "review",
+      label: "审核当前公文",
+      hint: "规则校验 + 语义评审",
+      disabled: !canReview,
+      run: () => void runReview(),
+    },
+    {
+      id: "clinepass",
+      label: "Cline Pass 订阅",
+      hint: "额度、模型目录与订阅入口",
+      keywords: ["cline", "订阅", "国模"],
+      run: () => {
+        setSettingsTab("clinepass");
+        setSettingsOpen(true);
+      },
+    },
+    {
+      id: "settings",
+      label: "设置",
+      keywords: ["settings", "配置"],
+      run: () => {
+        setSettingsTab("general");
+        setSettingsOpen(true);
+      },
+    },
+    {
+      id: "theme",
+      label: "切换主题",
+      hint: "跟随系统 / 亮色 / 暗色",
+      run: () => void handleThemeChange(theme === "system" ? "light" : theme === "light" ? "dark" : "system"),
+    },
+    {
+      id: "preview",
+      label: "切换到版式预览",
+      disabled: view === "preview",
+      run: () => setView("preview"),
+    },
+    {
+      id: "structure",
+      label: "切换到结构编辑",
+      disabled: view === "structure",
+      run: () => setView("structure"),
+    },
+  ];
 
   return (
     <div className="app-shell">
@@ -929,21 +876,25 @@ function App() {
           title: document.body.title.text.trim() || "未命名公文",
         })}
         onOpenDocuments={() => setLibraryOpen(true)}
-        onOpenSettings={() => setSettingsOpen(true)}
+        onOpenSettings={() => {
+          setSettingsTab("general");
+          setSettingsOpen(true);
+        }}
+        onOpenWizard={() => setWizardOpen(true)}
         onThemeChange={handleThemeChange}
         exportFormat={desktopRuntime ? "docx" : "odoc"}
-        pipeline={pipeline}
-        activeStage={drafting ? draftStage : null}
-        completedStages={completedStages}
-        failedStage={failedStage}
+        pipeline={reviewMode ? "review" : draftPipeline.kind}
+        activeStage={draftPipeline.drafting ? draftPipeline.stage : null}
+        completedStages={draftPipeline.completedStages}
+        failedStage={draftPipeline.failedStage}
         activeReviewStage={reviewing ? reviewStage : null}
         completedReviewStages={completedReviewStages}
         failedReviewStage={failedReviewStage}
         canReview={canReview}
         canArchive={desktopRuntime && kbConfig.enabled}
         hasVersions={savedVersion !== null && savedVersion > 0}
-        onRerunStage={(stage) => void rerunPipelineStage(stage)}
-        canRerunStage={desktopRuntime && !drafting && !reviewing && draftSessionId !== null}
+        onRerunStage={(stage) => beginRerun(stage)}
+        canRerunStage={desktopRuntime && !draftPipeline.drafting && !reviewing && draftPipeline.sessionId !== null}
       />
       <input
         ref={importInputRef}
@@ -958,20 +909,26 @@ function App() {
           onMaterialChange={setMaterial}
           modelText={modelText}
           onModelTextChange={setModelText}
-          onStartImitate={() => void runImitate()}
-          onStartPolish={() => void runPolish()}
+          onStartImitate={() => beginImitate()}
+          onStartPolish={() => beginPolish()}
           providers={providers}
           providerId={providerId}
           onProviderChange={setProviderId}
-          onStartDraft={() => void runDraft()}
-          drafting={drafting}
-          draftStage={draftStage}
-          draftText={draftText}
-          draftError={draftError}
-          typeDecision={typeDecision}
-          confirmedDocType={confirmedDocType}
-          onConfirmedDocTypeChange={setConfirmedDocType}
-          onConfirmDocType={() => confirmedDocType && void runDraft(confirmedDocType)}
+          templates={templates}
+          templateId={templateId}
+          onTemplateChange={setTemplateId}
+          onStartDraft={() => beginDraft()}
+          onOpenWizard={() => setWizardOpen(true)}
+          drafting={draftPipeline.drafting}
+          draftStage={draftPipeline.stage}
+          draftText={draftPipeline.text}
+          draftError={draftPipeline.error}
+          typeDecision={draftPipeline.typeDecision}
+          confirmedDocType={draftPipeline.confirmedDocType}
+          onConfirmedDocTypeChange={draftPipeline.setConfirmedDocType}
+          onConfirmDocType={() => {
+            if (draftPipeline.confirmedDocType) beginDraft(draftPipeline.confirmedDocType);
+          }}
           desktopRuntime={desktopRuntime}
           kbEnabled={desktopRuntime && kbConfig.enabled}
         />
@@ -991,7 +948,19 @@ function App() {
               {savedVersion !== null && <span>版本 {savedVersion}</span>}
             </div>
           </nav>
-          <div className="document-canvas">{view === "preview" ? <DocumentPreview /> : <StructureEditor />}</div>
+          <div className="document-canvas">
+            {view === "preview" ? (
+              <DocumentPreview />
+            ) : (
+              <StructureEditor
+                providerId={providerId}
+                providerName={selectedProvider?.displayName ?? ""}
+                modelReady={desktopRuntime
+                  && Boolean(selectedProvider?.enabled)
+                  && (cloudAllowed || selectedProvider?.isLocal === true)}
+              />
+            )}
+          </div>
         </section>
         <LintPanel findings={displayedFindings} />
       </main>
@@ -1046,6 +1015,7 @@ function App() {
       <SettingsDialog
         open={settingsOpen}
         config={config}
+        initialTab={settingsTab}
         onClose={() => void handleCloseSettings()}
         onSave={handleSaveConfig}
         onShowGuide={() => {
@@ -1056,11 +1026,21 @@ function App() {
       <WelcomeGuide
         open={guideOpen}
         onComplete={() => void completeGuide()}
+        onClose={() => setGuideOpen(false)}
         onOpenSettings={() => {
           setGuideOpen(false);
+          setSettingsTab("general");
           setSettingsOpen(true);
         }}
         onSelectProvider={(providerId) => setProviderId(providerId)}
+      />
+      <DraftWizard
+        open={wizardOpen}
+        initialDocType={document.meta.docType}
+        templates={templates}
+        canDraft={wizardCanDraft}
+        onClose={() => setWizardOpen(false)}
+        onFinish={handleWizardFinish}
       />
       <ReviewReportDialog
         open={reviewOpen}
@@ -1075,6 +1055,19 @@ function App() {
         onLocate={locateReviewNode}
         onRerun={() => void runReview()}
       />
+      <CommandPalette
+        open={commandOpen}
+        actions={commandActions}
+        onClose={() => setCommandOpen(false)}
+      />
+      {availableUpdate && (
+        <UpdateBanner
+          update={availableUpdate}
+          installing={installingUpdate}
+          onInstall={() => void installAvailableUpdate()}
+          onDismiss={() => setAvailableUpdate(null)}
+        />
+      )}
       {notice && <div className="toast" role="status">{notice}</div>}
     </div>
   );

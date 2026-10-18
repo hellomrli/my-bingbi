@@ -19,11 +19,50 @@ provides = ["format_rules", "templates", "references", "checklists", "style", "t
 
 [[bindings]]
 stage = "outline"
-inject = ["templates/{doc_type}.yaml"]
+inject = [
+  "templates/{doc_type}.yaml",
+  "templates/announcement-government.yaml",
+  "templates/briefing-work.yaml",
+  "templates/certificate-employment.yaml",
+  "templates/decision-commendation.yaml",
+  "templates/instruction-appointment.yaml",
+  "templates/invitation-forum.yaml",
+  "templates/letter-consultation.yaml",
+  "templates/letter-reply.yaml",
+  "templates/letter-thanks.yaml",
+  "templates/memo-negotiation.yaml",
+  "templates/minutes-office.yaml",
+  "templates/minutes-special.yaml",
+  "templates/notice-appointment.yaml",
+  "templates/notice-deployment.yaml",
+  "templates/notice-holiday.yaml",
+  "templates/notice-meeting.yaml",
+  "templates/notice-transmission.yaml",
+  "templates/presentation-experience.yaml",
+  "templates/proclamation-enforcement.yaml",
+  "templates/proposal-bill.yaml",
+  "templates/reply-approval.yaml",
+  "templates/report-annual.yaml",
+  "templates/report-rectification.yaml",
+  "templates/report-situation.yaml",
+  "templates/request-approval.yaml",
+  "templates/request-funding.yaml",
+  "templates/speech-mobilization.yaml",
+  "templates/speech-summary.yaml",
+  "templates/summary-annual.yaml",
+  "templates/summary-special.yaml",
+  "templates/work_plan-implementation.yaml",
+  "templates/work_plan-special.yaml",
+  "templates/work_report-annual.yaml",
+]
 
 [[bindings]]
 stage = "draft"
-inject = ["references/writing-guidance.md"]
+inject = [
+  "references/writing-guidance.md",
+  "references/structure.md",
+  "references/language.md",
+]
 retrieval = true
 
 [[bindings]]

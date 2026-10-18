@@ -1,0 +1,20 @@
+id: "certificate-employment"
+name: "在职证明"
+doc_type: certificate
+scenario: "证明人员在岗、职务、收入等可核验事实"
+description: "适用于在职、收入、工作经历等证明"
+required:
+  main_recipients: true
+blocks:
+  - type: paragraph
+    role: subject
+    guidance: "写明被证明人姓名、身份证号和职务"
+  - type: paragraph
+    role: facts
+    guidance: "逐项写明可核验事实，不作评价担保"
+  - type: paragraph
+    role: purpose
+    guidance: "写明证明用途和有效范围"
+  - type: paragraph
+    role: closing
+    content: "特此证明。"

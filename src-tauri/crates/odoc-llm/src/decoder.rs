@@ -127,7 +127,10 @@ mod tests {
         let bytes = payload.as_bytes();
         let split = payload.find('你').expect("character should exist") + 1;
         let mut decoder = SseDecoder::default();
-        assert!(decoder.push(&bytes[..split]).unwrap().is_empty());
+        assert!(
+            decoder.push(&bytes[..split]).unwrap().is_empty(),
+            "a half UTF-8 sequence should not emit an SSE event"
+        );
         let events = decoder.push(&bytes[split..]).unwrap();
         assert_eq!(events, ["{\"text\":\"你好\"}", "[DONE]"]);
     }
@@ -135,7 +138,10 @@ mod tests {
     #[test]
     fn line_decoder_keeps_partial_json_until_newline() {
         let mut decoder = LineDecoder::default();
-        assert!(decoder.push(b"{\"a\":").unwrap().is_empty());
+        assert!(
+            decoder.push(b"{\"a\":").unwrap().is_empty(),
+            "an incomplete JSON line should not emit an event"
+        );
         assert_eq!(decoder.push(b"1}\n{\"b\":2").unwrap(), ["{\"a\":1}"]);
         assert_eq!(decoder.finish().unwrap(), ["{\"b\":2"]);
     }

@@ -16,7 +16,7 @@ import {
   X,
 } from "lucide-react";
 import { useModal } from "../../hooks/useModal";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useState } from "react";
 import {
   applyUpdate,
   checkForUpdate,
@@ -35,13 +35,15 @@ import {
   type UpdateCheckResult,
 } from "../../lib/ipc";
 import type { ProviderKind, ProviderProfile, ProviderProfileInput } from "../../lib/llm";
+import { PROVIDER_PRESETS, providerPresetInput } from "../../lib/providerPresets";
 import { probeGbFonts, type FontProbe } from "../../lib/fonts";
 import type { AppConfig, AppTheme } from "../../lib/store";
 import { CrashDiagnosticsSettings } from "./CrashDiagnosticsSettings";
+import { ClinePassSettings } from "./ClinePassSettings";
 import { KnowledgeBaseSettings } from "./KnowledgeBaseSettings";
 import { PackSettings } from "./PackSettings";
 
-type SettingsTab = "general" | "providers" | "knowledge" | "packs";
+type SettingsTab = "general" | "providers" | "clinepass" | "knowledge" | "packs";
 
 interface SettingsDialogProps {
   open: boolean;
@@ -49,6 +51,8 @@ interface SettingsDialogProps {
   onClose: () => void;
   onSave: (config: AppConfig) => Promise<void>;
   onShowGuide?: () => void;
+  /** Tab to open on; command-palette and deep links use this. Defaults to 常规. */
+  initialTab?: SettingsTab;
 }
 
 const themeOptions: Array<{ value: AppTheme; label: string }> = [
@@ -81,7 +85,7 @@ function profileInput(profile: ProviderProfile): ProviderProfileInput {
   return input;
 }
 
-export function SettingsDialog({ open, config, onClose, onSave, onShowGuide }: SettingsDialogProps) {
+export function SettingsDialog({ open, config, onClose, onSave, onShowGuide, initialTab = "general" }: SettingsDialogProps) {
   const [tab, setTab] = useState<SettingsTab>("general");
   const [draft, setDraft] = useState(config);
   const [saving, setSaving] = useState(false);
@@ -90,6 +94,7 @@ export function SettingsDialog({ open, config, onClose, onSave, onShowGuide }: S
   const [creatingProvider, setCreatingProvider] = useState(false);
   const [providerBusy, setProviderBusy] = useState(false);
   const [providerMessage, setProviderMessage] = useState<string | null>(null);
+  const [presetNote, setPresetNote] = useState<string | null>(null);
   const [secret, setSecret] = useState("");
   const [showSecret, setShowSecret] = useState(false);
   const [secretExists, setSecretExists] = useState(false);
@@ -148,6 +153,11 @@ export function SettingsDialog({ open, config, onClose, onSave, onShowGuide }: S
   }, [creatingProvider, desktop, open, selectedProfile]);
 
   const sectionRef = useModal<HTMLElement>(open, onClose);
+
+  useEffect(() => {
+    if (open) setTab(initialTab);
+  }, [initialTab, open]);
+
   if (!open) return null;
 
   async function submitGeneral(event: FormEvent) {
@@ -195,6 +205,7 @@ export function SettingsDialog({ open, config, onClose, onSave, onShowGuide }: S
     setProviderDraft(profileInput(profile));
     setCreatingProvider(false);
     setProviderMessage(null);
+    setPresetNote(null);
     setSecret("");
     setSecretMessage(null);
     setModels([]);
@@ -205,6 +216,21 @@ export function SettingsDialog({ open, config, onClose, onSave, onShowGuide }: S
     setProviderDraft(newProviderDraft());
     setCreatingProvider(true);
     setProviderMessage(null);
+    setPresetNote(null);
+    setSecret("");
+    setSecretExists(false);
+    setSecretMessage(null);
+    setModels([]);
+    setSniffMessage(null);
+  }
+
+  function applyPreset(presetId: string) {
+    const preset = PROVIDER_PRESETS.find((candidate) => candidate.id === presetId);
+    if (!preset) return;
+    setProviderDraft(providerPresetInput(preset, profiles.map((profile) => profile.id)));
+    setCreatingProvider(true);
+    setProviderMessage(null);
+    setPresetNote(`${preset.note} 填写 API Key 后点「保存服务」即可启用。`);
     setSecret("");
     setSecretExists(false);
     setSecretMessage(null);
@@ -232,8 +258,16 @@ export function SettingsDialog({ open, config, onClose, onSave, onShowGuide }: S
     setProviderBusy(true);
     setProviderMessage(null);
     try {
-      await persistProvider();
-      setProviderMessage("服务配置已保存");
+      const saved = await persistProvider();
+      if (saved && secret.trim()) {
+        // A preset flow should be one shot: save the profile and its key together.
+        await setProviderSecret(saved.id, secret);
+        setSecret("");
+        setSecretExists(true);
+        setProviderMessage("服务配置与凭据已保存");
+      } else {
+        setProviderMessage("服务配置已保存");
+      }
     } catch (error) {
       setProviderMessage(ipcErrorMessage(error));
     } finally {
@@ -248,6 +282,13 @@ export function SettingsDialog({ open, config, onClose, onSave, onShowGuide }: S
     try {
       const saved = await persistProvider();
       if (!saved) return;
+      if (secret.trim()) {
+        // Testing right after adding a preset should not fail for lack of the key the user
+        // already typed into the form.
+        await setProviderSecret(saved.id, secret);
+        setSecret("");
+        setSecretExists(true);
+      }
       const result = await testProviderConnection(saved.id);
       setProviderMessage(`连接成功 · ${result.latencyMs} ms · ${result.model}`);
     } catch (error) {
@@ -358,6 +399,9 @@ export function SettingsDialog({ open, config, onClose, onSave, onShowGuide }: S
             <button className={tab === "providers" ? "is-active" : ""} type="button" onClick={() => setTab("providers")}>
               模型服务
             </button>
+            <button className={tab === "clinepass" ? "is-active" : ""} type="button" onClick={() => setTab("clinepass")}>
+              Cline Pass
+            </button>
             <button className={tab === "knowledge" ? "is-active" : ""} type="button" onClick={() => setTab("knowledge")}>
               知识库
             </button>
@@ -391,6 +435,18 @@ export function SettingsDialog({ open, config, onClose, onSave, onShowGuide }: S
                   type="checkbox"
                   checked={draft.autosaveEnabled}
                   onChange={(event) => setDraft({ ...draft, autosaveEnabled: event.target.checked })}
+                />
+              </label>
+              <label className="toggle-row">
+                <span>
+                  <b>自动检查更新</b>
+                  <small>启动时检查 GitHub Releases；下载安装仍需确认</small>
+                </span>
+                <input
+                  type="checkbox"
+                  checked={draft.autoUpdateEnabled}
+                  onChange={(event) => setDraft({ ...draft, autoUpdateEnabled: event.target.checked })}
+                  disabled={!desktop}
                 />
               </label>
               <CrashDiagnosticsSettings
@@ -468,7 +524,7 @@ export function SettingsDialog({ open, config, onClose, onSave, onShowGuide }: S
                 <label>关于与更新</label>
                 <div className="update-row">
                   <span className="settings-hint">
-                    更新包由发布签名验证，仅在桌面版可用；检查结果取决于是否配置了发布通道。
+                    当前 v{updateResult?.currentVersion ?? __APP_VERSION__}。更新包由发布签名验证，仅在桌面版可用。
                   </span>
                   <button
                     className="command-button"
@@ -483,7 +539,9 @@ export function SettingsDialog({ open, config, onClose, onSave, onShowGuide }: S
                 </div>
                 {updateResult?.available && (
                   <div className="update-available" role="status">
-                    <span>发现新版本 v{updateResult.version}，安装后将自动重启。</span>
+                    <span>
+                      发现新版本 v{updateResult.version}（当前 v{updateResult.currentVersion}），安装后将自动重启。
+                    </span>
                     <button
                       className="command-button primary"
                       type="button"
@@ -496,7 +554,9 @@ export function SettingsDialog({ open, config, onClose, onSave, onShowGuide }: S
                   </div>
                 )}
                 {updateResult && !updateResult.available && !updateMessage && (
-                  <div className="source-message" role="status">已是最新版本。</div>
+                  <div className="source-message" role="status">
+                    当前 v{updateResult.currentVersion} 已是最新版本。
+                  </div>
                 )}
                 {updateMessage && <div className="source-message is-error" role="alert">{updateMessage}</div>}
               </div>
@@ -516,6 +576,28 @@ export function SettingsDialog({ open, config, onClose, onSave, onShowGuide }: S
             </form>
           ) : tab === "providers" ? (
             <form className="settings-form provider-form" onSubmit={submitProvider}>
+              <div className="provider-preset-picker">
+                <label htmlFor="provider-preset">常用服务</label>
+                <select
+                  id="provider-preset"
+                  value=""
+                  onChange={(event) => applyPreset(event.target.value)}
+                  disabled={providerBusy}
+                >
+                  <option value="">选择预设快速填入…</option>
+                  <optgroup label="云端服务">
+                    {PROVIDER_PRESETS.filter((preset) => preset.group === "cloud").map((preset) => (
+                      <option value={preset.id} key={preset.id}>{preset.displayName}</option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="本地服务">
+                    {PROVIDER_PRESETS.filter((preset) => preset.group === "local").map((preset) => (
+                      <option value={preset.id} key={preset.id}>{preset.displayName}</option>
+                    ))}
+                  </optgroup>
+                </select>
+              </div>
+              {presetNote && <p className="provider-preset-note">{presetNote}</p>}
               <div className="provider-picker">
                 <label htmlFor="provider-picker">模型服务</label>
                 <select
@@ -634,7 +716,7 @@ export function SettingsDialog({ open, config, onClose, onSave, onShowGuide }: S
                             type={showSecret ? "text" : "password"}
                             value={secret}
                             onChange={(event) => setSecret(event.target.value)}
-                            disabled={!desktop || creatingProvider}
+                            disabled={!desktop}
                             autoComplete="new-password"
                             placeholder={secretExists ? "已保存，输入新值可替换" : "输入凭据"}
                           />
@@ -642,7 +724,7 @@ export function SettingsDialog({ open, config, onClose, onSave, onShowGuide }: S
                             className="icon-button tiny"
                             type="button"
                             onClick={() => setShowSecret(!showSecret)}
-                            disabled={!desktop || creatingProvider}
+                            disabled={!desktop}
                             title={showSecret ? "隐藏凭据" : "显示凭据"}
                             aria-label={showSecret ? "隐藏凭据" : "显示凭据"}
                           >
@@ -702,6 +784,8 @@ export function SettingsDialog({ open, config, onClose, onSave, onShowGuide }: S
                 <div className="modal-empty">{providerBusy ? "正在加载" : "没有可用的模型服务"}</div>
               )}
             </form>
+          ) : tab === "clinepass" ? (
+            <ClinePassSettings desktop={desktop} />
           ) : tab === "packs" ? (
             <PackSettings
               activePackIds={draft.activePackIds}

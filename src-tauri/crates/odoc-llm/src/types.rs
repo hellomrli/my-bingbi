@@ -152,6 +152,15 @@ pub fn builtin_provider_profiles() -> Vec<ProviderProfile> {
             is_local: false,
         },
         ProviderProfile {
+            id: "cline-pass".to_owned(),
+            kind: ProviderKind::OpenAiCompatible,
+            display_name: "Cline Pass".to_owned(),
+            base_url: "https://api.cline.bot/api/v1".to_owned(),
+            model: "cline-pass/deepseek-v4.1-flash".to_owned(),
+            enabled: false,
+            is_local: false,
+        },
+        ProviderProfile {
             id: "ollama".to_owned(),
             kind: ProviderKind::Ollama,
             display_name: "Ollama".to_owned(),

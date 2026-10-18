@@ -10,7 +10,8 @@ import type {
   ProviderProfileInput,
 } from "./llm";
 import type { ODoc } from "./odoc";
-import type { PackSummary } from "./pack";
+import type { PackSummary, TemplateSummary } from "./pack";
+import type { LintReport } from "./generated/lint";
 import type {
   AppConfig,
   CrashEvent,
@@ -26,6 +27,24 @@ const BROWSER_REPOSITORY_KEY = "bingbi-browser-repository-v1";
 const BROWSER_CONFIG_KEY = "bingbi-browser-config-v1";
 const BROWSER_PROVIDERS_KEY = "bingbi-browser-providers-v1";
 const BROWSER_KB_CONFIG_KEY = "bingbi-browser-kb-config-v1";
+
+/**
+ * Browser preview stores whole snapshots in localStorage, so it keeps a bounded window of
+ * versions. Sequence numbers stay stable (`firstVersionSeq`), which is what history, diff and
+ * restore address by.
+ */
+const MAX_BROWSER_VERSIONS = 50;
+
+/** IPC/browser-boundary failure with a stable machine-readable code. */
+export class IpcError extends Error {
+  readonly code: string;
+
+  constructor(code: string, message: string) {
+    super(message);
+    this.name = "IpcError";
+    this.code = code;
+  }
+}
 
 const builtinProviderProfiles: ProviderProfile[] = [
   {
@@ -56,6 +75,15 @@ const builtinProviderProfiles: ProviderProfile[] = [
     isLocal: false,
   },
   {
+    id: "cline-pass",
+    kind: "openai_compatible",
+    displayName: "Cline Pass",
+    baseUrl: "https://api.cline.bot/api/v1",
+    model: "cline-pass/deepseek-v4.1-flash",
+    enabled: false,
+    isLocal: false,
+  },
+  {
     id: "ollama",
     kind: "ollama",
     displayName: "Ollama",
@@ -77,6 +105,8 @@ interface BrowserDocumentRecord {
   createdAt: number;
   updatedAt: number;
   versions: BrowserVersion[];
+  /** Sequence number of `versions[0]`; older snapshots are dropped once the window is full. */
+  firstVersionSeq?: number;
 }
 
 interface BrowserRepository {
@@ -169,6 +199,12 @@ export async function listPackSummaries(): Promise<PackSummary[]> {
   return invoke<PackSummary[]>("list_pack_summaries");
 }
 
+/** Lists the knowledge-pack document templates; browser preview has no pack registry. */
+export async function listTemplates(): Promise<TemplateSummary[]> {
+  if (!isDesktopRuntime()) return [];
+  return invoke<TemplateSummary[]>("list_templates");
+}
+
 export async function saveDocument(document: ODoc, stage: string): Promise<SaveDocumentResult> {
   if (isDesktopRuntime()) return invoke<SaveDocumentResult>("save_document", { document, stage });
 
@@ -180,19 +216,25 @@ export async function saveDocument(document: ODoc, stage: string): Promise<SaveD
   }
   const versionCreated = !existing || JSON.stringify(existing.document) !== JSON.stringify(document);
   const versions = existing?.versions ?? [];
+  let firstSeq = existing?.firstVersionSeq ?? 1;
   if (versionCreated) {
     versions.push({ document: structuredClone(document), stage: stage || null, createdAt: now });
+  }
+  while (versions.length > MAX_BROWSER_VERSIONS) {
+    versions.shift();
+    firstSeq += 1;
   }
   repository.documents[document.id] = {
     document: structuredClone(document),
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
     versions,
+    firstVersionSeq: firstSeq,
   };
   writeBrowserRepository(repository);
   return {
     documentId: document.id,
-    versionSeq: versions.length,
+    versionSeq: firstSeq + versions.length - 1,
     created: !existing,
     versionCreated,
     savedAt: now,
@@ -268,8 +310,16 @@ export async function loadDocument(id: string): Promise<ODoc> {
   return structuredClone(record.document);
 }
 
-export async function listDocuments(limit = 30): Promise<DocumentSummary[]> {
-  if (isDesktopRuntime()) return invoke<DocumentSummary[]>("list_documents", { limit });
+/** Runs the pack-driven rule engine against the in-memory document (desktop only). */
+export async function lintDocumentNow(document: ODoc): Promise<LintReport> {
+  if (!isDesktopRuntime()) {
+    throw browserError("lint_unavailable", "规则校验仅在桌面应用中可用。");
+  }
+  return invoke<LintReport>("lint_document_now", { document });
+}
+
+/** Lists recently updated documents (newest first). */
+export async function listDocuments(limit = 30): Promise<DocumentSummary[]> {  if (isDesktopRuntime()) return invoke<DocumentSummary[]>("list_documents", { limit });
   return Object.entries(readBrowserRepository().documents)
     .map(([id, record]) => ({
       id,
@@ -318,9 +368,10 @@ export async function listDocumentVersions(documentId: string): Promise<Document
   }
   const record = readBrowserRepository().documents[documentId];
   if (!record) throw browserError("document_not_found", "没有找到指定的公文。");
+  const firstSeq = record.firstVersionSeq ?? 1;
   return record.versions
     .map((version, index) => ({
-      seq: index + 1,
+      seq: firstSeq + index,
       odocRevision: version.document.revision,
       stage: version.stage,
       createdAt: version.createdAt,
@@ -333,8 +384,9 @@ export async function loadDocumentVersion(documentId: string, seq: number): Prom
     return invoke<ODoc>("load_document_version", { documentId, seq });
   }
   const record = readBrowserRepository().documents[documentId];
-  const version = record?.versions[seq - 1];
-  if (!record || !version) throw browserError("version_not_found", "没有找到指定的历史版本。");
+  if (!record) throw browserError("version_not_found", "没有找到指定的历史版本。");
+  const version = record.versions[seq - (record.firstVersionSeq ?? 1)];
+  if (!version) throw browserError("version_not_found", "没有找到指定的历史版本。");
   return structuredClone(version.document);
 }
 
@@ -344,8 +396,9 @@ export async function restoreDocumentVersion(documentId: string, seq: number): P
   }
   const repository = readBrowserRepository();
   const record = repository.documents[documentId];
-  const version = record?.versions[seq - 1];
-  if (!record || !version) throw browserError("version_not_found", "没有找到指定的历史版本。");
+  if (!record) throw browserError("version_not_found", "没有找到指定的历史版本。");
+  const version = record.versions[seq - (record.firstVersionSeq ?? 1)];
+  if (!version) throw browserError("version_not_found", "没有找到指定的历史版本。");
   const restored = structuredClone(version.document);
   restored.id = record.document.id;
   restored.revision = record.document.revision + 1;
@@ -493,6 +546,33 @@ export async function kbSyncOnce(documentId?: string): Promise<KbIndexState> {
   return invoke<KbIndexState>("kb_sync_once", { documentId });
 }
 
+export interface CreatedKbNote {
+  path: string;
+  title: string;
+}
+
+/** Creates the managed local Markdown vault (or repairs missing folders) and returns its path. */
+export async function kbCreateLocalVault(path?: string): Promise<string> {
+  requireDesktopKbRuntime();
+  return invoke<string>("kb_create_local_vault", { path: path?.trim() || null });
+}
+
+/** Writes one Markdown note into the configured knowledge base. */
+export async function kbCreateNote(input: {
+  documentId?: string | null;
+  title: string;
+  content: string;
+  docType?: string | null;
+}): Promise<CreatedKbNote> {
+  requireDesktopKbRuntime();
+  return invoke<CreatedKbNote>("kb_create_note", {
+    documentId: input.documentId ?? null,
+    title: input.title,
+    content: input.content,
+    docType: input.docType ?? null,
+  });
+}
+
 export async function archiveDocumentToKb(
   documentId: string,
   path: string,
@@ -505,6 +585,7 @@ export async function archiveDocumentToKb(
 export interface UpdateCheckResult {
   available: boolean;
   version: string | null;
+  currentVersion: string;
   installed: boolean;
 }
 
@@ -635,7 +716,18 @@ function readBrowserRepository(): BrowserRepository {
 }
 
 function writeBrowserRepository(repository: BrowserRepository): void {
-  localStorage.setItem(BROWSER_REPOSITORY_KEY, JSON.stringify(repository));
+  try {
+    localStorage.setItem(BROWSER_REPOSITORY_KEY, JSON.stringify(repository));
+  } catch (error) {
+    // The quota is shared by every origin key; a long document plus its snapshots can fill it.
+    if (error instanceof DOMException && (error.name === "QuotaExceededError" || error.name === "NS_ERROR_DOM_QUOTA_REACHED")) {
+      throw browserError(
+        "storage_full",
+        "浏览器本地存储已满，请先在「最近文档」删除不再需要的公文，或改用桌面版保存。",
+      );
+    }
+    throw error;
+  }
 }
 
 function readBrowserProviders(): ProviderProfile[] {
@@ -706,6 +798,7 @@ function normalizeBrowserKbConfig(input: KbConfig): KbConfig {
     && typeof config.syncEnabled === "boolean"
     && (config.providerKind === "fns" || config.providerKind === "local_vault" || config.providerKind === "mcp")
     && typeof config.mcpUrl === "string"
+    // eslint-disable-next-line no-control-regex -- rejecting control characters is the point
     && !/[\u0000-\u001f\u007f]/.test(`${config.baseUrl}${config.vault}${config.localPath}${config.mcpUrl}`);
   if (!commonValid) throw browserError("invalid_input", "知识库配置无效。");
   if (!config.enabled) return config;
@@ -819,6 +912,6 @@ function requireDesktopKbRuntime(): void {
   }
 }
 
-function browserError(code: string, message: string): { code: string; message: string } {
-  return { code, message };
+function browserError(code: string, message: string): IpcError {
+  return new IpcError(code, message);
 }

@@ -1,0 +1,26 @@
+id: "report-situation"
+name: "情况报告"
+doc_type: report
+scenario: "向上级报告某一事项、突发事件或阶段情况，不请求批准"
+description: "适用于事故、汛情、舆情、专项工作等情况的报告"
+required:
+  main_recipients: true
+blocks:
+  - type: paragraph
+    role: overview
+    guidance: "概述事项发生的时间、地点、经过和当前状态"
+  - type: heading
+    level: l1
+    title: "基本情况"
+    role: situation
+  - type: heading
+    level: l1
+    title: "处置情况"
+    role: actions
+  - type: heading
+    level: l1
+    title: "下一步工作"
+    role: next_steps
+  - type: paragraph
+    role: closing
+    content: "特此报告。"

@@ -1,0 +1,20 @@
+id: "letter-thanks"
+name: "感谢函"
+doc_type: letter
+scenario: "对支持、协助或接待单位表达正式感谢"
+description: "适用于感谢支持、协助完成任务、接待来访等"
+required:
+  main_recipients: true
+blocks:
+  - type: paragraph
+    role: background
+    guidance: "说明致谢事由和具体支持事项"
+  - type: paragraph
+    role: thanks
+    guidance: "具体写明对方提供的帮助和成效，避免空泛"
+  - type: paragraph
+    role: outlook
+    guidance: "表达继续合作或欢迎交流的意愿"
+  - type: paragraph
+    role: closing
+    content: "此致\n敬礼！"

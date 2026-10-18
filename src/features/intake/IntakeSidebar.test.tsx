@@ -42,6 +42,7 @@ function renderSidebar(overrides: Partial<React.ComponentProps<typeof IntakeSide
     providerId: "ollama",
     onProviderChange: vi.fn(),
     onStartDraft: vi.fn(),
+    onOpenWizard: vi.fn(),
     drafting: false,
     draftStage: null,
     draftText: "",

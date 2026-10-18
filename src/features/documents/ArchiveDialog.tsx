@@ -1,6 +1,6 @@
 import { Archive, Check, LoaderCircle, X } from "lucide-react";
 import { useModal } from "../../hooks/useModal";
-import { FormEvent, useEffect, useState } from "react";
+import { type FormEvent, useEffect, useState } from "react";
 import type { ArchiveResult } from "../../lib/ipc";
 
 interface ArchiveDialogProps {

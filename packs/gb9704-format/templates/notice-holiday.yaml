@@ -1,0 +1,24 @@
+id: "notice-holiday"
+name: "节假日安排通知"
+doc_type: notice
+scenario: "公布放假调休安排，并部署值班、安全和应急工作"
+description: "适用于法定节假日、重大活动期间的放假和值守安排"
+required:
+  main_recipients: true
+blocks:
+  - type: paragraph
+    role: schedule
+    guidance: "写明放假时间、调休上班时间和适用范围"
+  - type: heading
+    level: l1
+    title: "工作要求"
+    role: requirements
+  - type: paragraph
+    role: duty
+    guidance: "明确值班值守、领导带班、信息报送和应急处置要求"
+  - type: paragraph
+    role: safety
+    guidance: "写明安全检查、公车管理、廉洁纪律等注意事项"
+  - type: paragraph
+    role: closing
+    content: "特此通知。"

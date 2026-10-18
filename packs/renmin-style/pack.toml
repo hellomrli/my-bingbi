@@ -26,6 +26,14 @@ stage = "facts"
 inject = ["references/fact-extraction.md"]
 
 [[bindings]]
+stage = "draft"
+inject = [
+  "references/drafting-patterns.md",
+  "references/sentence-bank.md",
+]
+retrieval = true
+
+[[bindings]]
 stage = "deai"
 inject = ["references/humanizer.md"]
 

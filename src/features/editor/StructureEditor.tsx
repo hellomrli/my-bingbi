@@ -1,7 +1,8 @@
-import { AlignLeft, Heading1, Plus, Trash2 } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { AlignLeft, Heading1, Plus, Sparkles, Trash2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import type { Block, HeadingLevel } from "../../lib/odoc";
 import { useWorkbenchStore } from "../../store/workbench";
+import { BlockRewriteDialog } from "./BlockRewriteDialog";
 
 const headingLabels: Record<HeadingLevel, string> = {
   l1: "一级 · 一、",
@@ -10,10 +11,21 @@ const headingLabels: Record<HeadingLevel, string> = {
   l4: "四级 · （1）",
 };
 
-function EditableBlock({ block, index }: { block: Block; index: number }) {
+function EditableBlock({
+  block,
+  index,
+  modelReady,
+  onRewrite,
+}: {
+  block: Block;
+  index: number;
+  modelReady: boolean;
+  onRewrite: (block: { id: string; content: string }) => void;
+}) {
   const selectedNodeId = useWorkbenchStore((state) => state.selectedNodeId);
   const selectNode = useWorkbenchStore((state) => state.selectNode);
-  const updateBlock = useWorkbenchStore((state) => state.updateBlock);
+  const updateBlockText = useWorkbenchStore((state) => state.updateBlockText);
+  const updateHeadingLevel = useWorkbenchStore((state) => state.updateHeadingLevel);
   const removeBlock = useWorkbenchStore((state) => state.removeBlock);
   const unverifiedTokens = useWorkbenchStore((state) => state.unverifiedTokens);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -47,7 +59,7 @@ function EditableBlock({ block, index }: { block: Block; index: number }) {
           <select
             aria-label="标题层级"
             value={block.level}
-            onChange={(event) => updateBlock(block.id, { level: event.target.value as HeadingLevel })}
+            onChange={(event) => updateHeadingLevel(block.id, event.target.value as HeadingLevel)}
           >
             {Object.entries(headingLabels).map(([value, label]) => (
               <option key={value} value={value}>
@@ -63,7 +75,7 @@ function EditableBlock({ block, index }: { block: Block; index: number }) {
         ref={textareaRef}
         rows={Math.max(2, Math.ceil(block.content.length / 34))}
         value={block.content}
-        onChange={(event) => updateBlock(block.id, { content: event.target.value })}
+        onChange={(event) => updateBlockText(block.id, event.target.value)}
         placeholder={block.type === "heading" ? "输入标题，不含层次序号" : "输入正文内容"}
       />
       {unverified.length > 0 && (
@@ -71,6 +83,19 @@ function EditableBlock({ block, index }: { block: Block; index: number }) {
           <span aria-hidden="true">⚠</span> 待核实：{unverified.join("、")}
         </span>
       )}
+      <button
+        className="icon-button small rewrite-action"
+        type="button"
+        onClick={(event) => {
+          event.stopPropagation();
+          onRewrite(block);
+        }}
+        disabled={!modelReady}
+        title={modelReady ? "用模型改写本段，应用前可预览" : "选择并启用模型服务后可改写"}
+        aria-label={`AI 改写第 ${index + 1} 段`}
+      >
+        <Sparkles size={14} />
+      </button>
       <button
         className="icon-button small danger-action"
         type="button"
@@ -87,12 +112,37 @@ function EditableBlock({ block, index }: { block: Block; index: number }) {
   );
 }
 
-export function StructureEditor() {
+interface StructureEditorProps {
+  providerId?: string;
+  providerName?: string;
+  modelReady?: boolean;
+}
+
+export function StructureEditor({
+  providerId = "",
+  providerName = "",
+  modelReady = false,
+}: StructureEditorProps) {
   const document = useWorkbenchStore((state) => state.document);
   const updateTitle = useWorkbenchStore((state) => state.updateTitle);
+  const updateBlockText = useWorkbenchStore((state) => state.updateBlockText);
   const addBlock = useWorkbenchStore((state) => state.addBlock);
+  const selectNode = useWorkbenchStore((state) => state.selectNode);
   const unverifiedTokens = useWorkbenchStore((state) => state.unverifiedTokens);
   const titleTokens = unverifiedTokens[document.body.title.id] ?? [];
+  const [rewriteTarget, setRewriteTarget] = useState<{ id: string; content: string } | null>(null);
+  const headings = document.body.blocks.filter(
+    (block): block is Extract<Block, { type: "heading" }> => block.type === "heading",
+  );
+
+  function jumpToBlock(blockId: string) {
+    selectNode(blockId);
+    requestAnimationFrame(() => {
+      window.document
+        .querySelector<HTMLElement>(`[data-node-id="${blockId}"]`)
+        ?.scrollIntoView({ block: "center", behavior: "smooth" });
+    });
+  }
 
   return (
     <div className="structure-editor" data-node-id={document.body.id}>
@@ -110,9 +160,29 @@ export function StructureEditor() {
           </span>
         )}
       </label>
+      {headings.length > 0 && (
+        <details className="editor-outline">
+          <summary>文档大纲 · {headings.length} 个标题</summary>
+          <ol>
+            {headings.map((heading) => (
+              <li className={`outline-level-${heading.level}`} key={heading.id}>
+                <button type="button" onClick={() => jumpToBlock(heading.id)}>
+                  {heading.content.trim() || "（未命名标题）"}
+                </button>
+              </li>
+            ))}
+          </ol>
+        </details>
+      )}
       <div className="block-list">
         {document.body.blocks.map((block, index) => (
-          <EditableBlock block={block} index={index} key={block.id} />
+          <EditableBlock
+            block={block}
+            index={index}
+            key={block.id}
+            modelReady={modelReady}
+            onRewrite={(target) => setRewriteTarget({ id: target.id, content: target.content })}
+          />
         ))}
       </div>
       <div className="add-block-actions">
@@ -127,6 +197,16 @@ export function StructureEditor() {
           <Plus size={13} />
         </button>
       </div>
+      <BlockRewriteDialog
+        open={rewriteTarget !== null}
+        blockId={rewriteTarget?.id ?? ""}
+        original={rewriteTarget?.content ?? ""}
+        document={document}
+        providerId={providerId}
+        providerName={providerName}
+        onApply={(blockId, text) => updateBlockText(blockId, text)}
+        onClose={() => setRewriteTarget(null)}
+      />
     </div>
   );
 }

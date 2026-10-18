@@ -1,5 +1,6 @@
 import { BookOpen, Check, ChevronRight, Database, FileText, ScanSearch, Sparkles } from "lucide-react";
 import { useEffect, useState } from "react";
+import { useModal } from "../../hooks/useModal";
 import { ipcErrorMessage, listProviderProfiles } from "../../lib/ipc";
 import type { ProviderProfile } from "../../lib/llm";
 
@@ -9,6 +10,8 @@ interface WelcomeGuideProps {
   onOpenSettings: () => void;
   /** Called when the user picks a provider in step two; wires the choice into the workbench. */
   onSelectProvider?: (providerId: string) => void;
+  /** Dismisses the guide for this session without marking first-run setup as finished. */
+  onClose?: () => void;
 }
 
 const capabilityHighlights = [
@@ -18,19 +21,19 @@ const capabilityHighlights = [
   { icon: Database, title: "知识库", detail: "对接你的 Obsidian 库，检索增强" },
 ];
 
-export function WelcomeGuide({ open, onComplete, onOpenSettings, onSelectProvider }: WelcomeGuideProps) {
+export function WelcomeGuide({ open, onComplete, onOpenSettings, onSelectProvider, onClose }: WelcomeGuideProps) {
   const [step, setStep] = useState(0);
   const [providers, setProviders] = useState<ProviderProfile[]>([]);
   const [providerBusy, setProviderBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedProvider, setSelectedProvider] = useState<string | null>(null);
+  const sectionRef = useModal<HTMLElement>(open, () => onClose?.());
 
   useEffect(() => {
     if (!open) return;
     setStep(0);
     setError(null);
     setSelectedProvider(null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   useEffect(() => {
@@ -57,8 +60,8 @@ export function WelcomeGuide({ open, onComplete, onOpenSettings, onSelectProvide
   const canProceed = step !== 1 || enabledProviders.length > 0;
 
   return (
-    <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && undefined}>
-      <section className="modal welcome-guide" role="dialog" aria-modal="true" aria-labelledby="welcome-guide-title">
+    <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose?.()}>
+      <section ref={sectionRef} tabIndex={-1} className="modal welcome-guide" role="dialog" aria-modal="true" aria-labelledby="welcome-guide-title">
         <div className="welcome-guide-steps" aria-hidden="true">
           {[0, 1, 2].map((index) => (
             <span className={index <= step ? "is-done" : ""} key={index} />

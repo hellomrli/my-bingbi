@@ -1,10 +1,11 @@
-import { BookOpen, Check, Database, FilePlus2, FileUp, LoaderCircle, Play, Search, ShieldAlert, Sparkles, X } from "lucide-react";
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { BookOpen, Check, Database, FilePlus2, FileUp, LoaderCircle, Play, Search, ShieldAlert, Sparkles, WandSparkles, X } from "lucide-react";
+import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { documentTypeLabels, securityLabels } from "../../lib/document";
 import { extractDocxText, extractReferenceText, ipcErrorMessage, kbGet, kbSearch } from "../../lib/ipc";
 import type { KbHit, KbNote } from "../../lib/kb";
 import type { ProviderProfile } from "../../lib/llm";
 import type { DocumentType, SecurityLevel } from "../../lib/odoc";
+import type { TemplateSummary } from "../../lib/pack";
 import type { TypeDecision } from "../../lib/generated/engine";
 import type { DraftStageId } from "../../lib/engine";
 import { useWorkbenchStore } from "../../store/workbench";
@@ -31,6 +32,7 @@ function fileExtension(name: string): string {
 
 function safeReferenceLabel(value: string): string {
   return value
+    // eslint-disable-next-line no-control-regex -- the point is to strip control characters
     .replace(/[\u0000-\u001f\u007f]/g, " ")
     .replaceAll("【", "［")
     .replaceAll("】", "］")
@@ -107,7 +109,12 @@ interface IntakeSidebarProps {
   providers: ProviderProfile[];
   providerId: string;
   onProviderChange: (value: string) => void;
+  /** Scenario templates from the knowledge pack, for the current document type. */
+  templates?: TemplateSummary[];
+  templateId?: string;
+  onTemplateChange?: (value: string) => void;
   onStartDraft: () => void;
+  onOpenWizard: () => void;
   drafting: boolean;
   draftStage: DraftStageId | null;
   draftText: string;
@@ -130,7 +137,11 @@ export function IntakeSidebar({
   providers,
   providerId,
   onProviderChange,
+  templates = [],
+  templateId = "",
+  onTemplateChange,
   onStartDraft,
+  onOpenWizard,
   drafting,
   draftStage,
   draftText,
@@ -150,9 +161,12 @@ export function IntakeSidebar({
   const updateSigner = useWorkbenchStore((state) => state.updateSigner);
   const updateDate = useWorkbenchStore((state) => state.updateDate);
   const localOnly = document.meta.securityLevel === "secret" || document.meta.securityLevel === "confidential";
+  const typeTemplates = templates.filter((template) => template.docType === document.meta.docType);
+  const selectedTemplate = typeTemplates.find((template) => template.id === templateId) ?? null;
   const selectedProvider = providers.find((provider) => provider.id === providerId);
   const providerBlocked = Boolean(selectedProvider && localOnly && !selectedProvider.isLocal);
   const [sourceQuery, setSourceQuery] = useState("");
+  const [fieldsOpen, setFieldsOpen] = useState(true);
   const [sourceHits, setSourceHits] = useState<KbHit[]>([]);
   const [sourceBusy, setSourceBusy] = useState(false);
   const [sourceError, setSourceError] = useState<string | null>(null);
@@ -334,11 +348,15 @@ export function IntakeSidebar({
 
   return (
     <aside className="left-rail" aria-label="公文要素与素材">
-      <section className="panel-section intake-section">
-        <div className="panel-heading">
+      <details
+        className="panel-section intake-section"
+        open={fieldsOpen}
+        onToggle={(event) => setFieldsOpen(event.currentTarget.open)}
+      >
+        <summary className="panel-heading">
           <BookOpen size={14} />
           <span>公文要素</span>
-        </div>
+        </summary>
         <div className="form-fields">
           <label className="field">
             <span>文种</span>
@@ -409,7 +427,7 @@ export function IntakeSidebar({
             </select>
           </label>
         </div>
-      </section>
+      </details>
 
       <section className="panel-section draft-section">
         <div className="panel-heading">
@@ -418,6 +436,24 @@ export function IntakeSidebar({
           <span className="panel-count">{desktopRuntime ? "桌面内核" : "浏览器预览"}</span>
         </div>
         <div className="draft-form">
+          {typeTemplates.length > 0 && (
+            <label className="field">
+              <span>写作模板</span>
+              <select
+                value={templateId}
+                onChange={(event) => onTemplateChange?.(event.target.value)}
+                disabled={drafting}
+              >
+                <option value="">标准模板</option>
+                {typeTemplates.map((template) => (
+                  <option value={template.id} key={template.id}>
+                    {template.name}
+                  </option>
+                ))}
+              </select>
+              {selectedTemplate?.scenario && <small>{selectedTemplate.scenario}</small>}
+            </label>
+          )}
           <label className="field material-field">
             <span>写作意图与基础材料 <em>不必先写正文</em></span>
             <textarea
@@ -551,6 +587,16 @@ export function IntakeSidebar({
             {drafting ? "正在起草" : typeDecision ? "重新起草" : "开始起草"}
           </button>
           <button
+            className="command-button wizard-inline-button"
+            type="button"
+            onClick={onOpenWizard}
+            disabled={drafting}
+            title="一步一步填写文种、事由、事实与时限，再交给模型起草"
+          >
+            <WandSparkles size={15} />
+            不知道怎么写？用向导模式
+          </button>
+          <button
             className="command-button imitate-start-button"
             type="button"
             onClick={onStartImitate}
@@ -573,58 +619,60 @@ export function IntakeSidebar({
         </div>
       </section>
 
-      <section className="panel-section source-section">
-        <div className="panel-heading">
-          <Database size={14} />
-          <span>知识库引用</span>
-          <span className="panel-count">{kbEnabled ? `${sourceHits.length} 项` : "未启用"}</span>
-        </div>
-        <form className="source-search" onSubmit={searchSources}>
-          <Search size={14} />
-          <input
-            aria-label="搜索素材"
-            placeholder={kbEnabled ? "搜索可引用的历史公文/政策文件" : "请先在设置中启用知识库"}
-            value={sourceQuery}
-            onChange={(event) => setSourceQuery(event.target.value)}
-            disabled={!kbEnabled || sourceBusy}
-          />
-          <button
-            className="icon-button tiny"
-            type="submit"
-            disabled={!kbEnabled || !sourceQuery.trim() || sourceBusy}
-            title="搜索素材"
-            aria-label="搜索素材"
-          >
-            {sourceBusy ? <LoaderCircle size={13} className="is-spinning" /> : <Search size={13} />}
-          </button>
-        </form>
-        {sourceError && <div className="source-message is-error" role="alert">{sourceError}</div>}
-        {kbEnabled && selectedNote && (
-          <article className="source-note">
-            <div>
-              <strong>{selectedNote.title}</strong>
-              <span>{selectedNote.path}</span>
-            </div>
-            <p>{selectedNote.content}</p>
-            <button className="command-button" type="button" onClick={addSourceToMaterial} disabled={drafting || referenceBusy}>
-              <FilePlus2 size={14} />
-              引用到起草材料
+      {kbEnabled && (
+        <section className="panel-section source-section">
+          <div className="panel-heading">
+            <Database size={14} />
+            <span>知识库引用</span>
+            <span className="panel-count">{sourceHits.length} 项</span>
+          </div>
+          <form className="source-search" onSubmit={searchSources}>
+            <Search size={14} />
+            <input
+              aria-label="搜索素材"
+              placeholder="搜索可引用的历史公文/政策文件"
+              value={sourceQuery}
+              onChange={(event) => setSourceQuery(event.target.value)}
+              disabled={sourceBusy}
+            />
+            <button
+              className="icon-button tiny"
+              type="submit"
+              disabled={!sourceQuery.trim() || sourceBusy}
+              title="搜索素材"
+              aria-label="搜索素材"
+            >
+              {sourceBusy ? <LoaderCircle size={13} className="is-spinning" /> : <Search size={13} />}
             </button>
-          </article>
-        )}
-        <div className="source-list">
-          {kbEnabled && sourceHits.map((hit) => (
-            <button className="source-hit" type="button" onClick={() => void openSource(hit.path)} key={`${hit.vault}:${hit.path}`} title={hit.path}>
-              <strong>{hit.title}</strong>
-              <span>{hit.path}</span>
-              {hit.snippet && <span className="source-snippet">{hit.snippet}</span>}
-            </button>
-          ))}
-          {kbEnabled && hasSearched && !sourceBusy && sourceHits.length === 0 && !sourceError && (
-            <span className="source-message">没有匹配素材</span>
+          </form>
+          {sourceError && <div className="source-message is-error" role="alert">{sourceError}</div>}
+          {selectedNote && (
+            <article className="source-note">
+              <div>
+                <strong>{selectedNote.title}</strong>
+                <span>{selectedNote.path}</span>
+              </div>
+              <p>{selectedNote.content}</p>
+              <button className="command-button" type="button" onClick={addSourceToMaterial} disabled={drafting || referenceBusy}>
+                <FilePlus2 size={14} />
+                引用到起草材料
+              </button>
+            </article>
           )}
-        </div>
-      </section>
+          <div className="source-list">
+            {sourceHits.map((hit) => (
+              <button className="source-hit" type="button" onClick={() => void openSource(hit.path)} key={`${hit.vault}:${hit.path}`} title={hit.path}>
+                <strong>{hit.title}</strong>
+                <span>{hit.path}</span>
+                {hit.snippet && <span className="source-snippet">{hit.snippet}</span>}
+              </button>
+            ))}
+            {hasSearched && !sourceBusy && sourceHits.length === 0 && !sourceError && (
+              <span className="source-message">没有匹配素材</span>
+            )}
+          </div>
+        </section>
+      )}
     </aside>
   );
 }

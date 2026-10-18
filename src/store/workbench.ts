@@ -3,10 +3,10 @@ import { persist } from "zustand/middleware";
 import { createDemoDocument } from "../lib/document";
 import { createId } from "../lib/id";
 import type {
-  Block,
   DocumentType,
   Fact,
   Header,
+  HeadingLevel,
   ODoc,
   OfficialDate,
   SecurityLevel,
@@ -47,7 +47,10 @@ interface WorkbenchState {
   updateRecipient: (value: string) => void;
   updateSigner: (authority: string) => void;
   updateDate: (value: string) => void;
-  updateBlock: (id: string, patch: Partial<Block>) => void;
+  /** Replaces the text of a heading/paragraph/quote; list and table blocks are left untouched. */
+  updateBlockText: (id: string, content: string) => void;
+  /** Changes a heading level; a no-op for non-heading blocks. */
+  updateHeadingLevel: (id: string, level: HeadingLevel) => void;
   addBlock: (kind: "paragraph" | "heading") => void;
   removeBlock: (id: string) => void;
   addFact: (input: Pick<Fact, "kind" | "value" | "unit" | "source">) => void;
@@ -155,15 +158,32 @@ export const useWorkbenchStore = create<WorkbenchState>()(
           }),
           dirty: true,
         })),
-      updateBlock: (id, patch) =>
-        set((state) => ({
-          document: changed(state.document, (document) => {
-            const index = document.body.blocks.findIndex((block) => block.id === id);
-            if (index < 0) return;
-            document.body.blocks[index] = { ...document.body.blocks[index], ...patch } as Block;
-          }),
-          dirty: true,
-        })),
+      updateBlockText: (id, content) =>
+        set((state) => {
+          const block = state.document.body.blocks.find((candidate) => candidate.id === id);
+          if (!block || (block.type !== "heading" && block.type !== "paragraph" && block.type !== "quote")) return {};
+          return {
+            document: changed(state.document, (document) => {
+              const target = document.body.blocks.find((candidate) => candidate.id === id);
+              if (target && (target.type === "heading" || target.type === "paragraph" || target.type === "quote")) {
+                target.content = content;
+              }
+            }),
+            dirty: true,
+          };
+        }),
+      updateHeadingLevel: (id, level) =>
+        set((state) => {
+          const block = state.document.body.blocks.find((candidate) => candidate.id === id);
+          if (block?.type !== "heading") return {};
+          return {
+            document: changed(state.document, (document) => {
+              const target = document.body.blocks.find((candidate) => candidate.id === id);
+              if (target?.type === "heading") target.level = level;
+            }),
+            dirty: true,
+          };
+        }),
       addBlock: (kind) =>
         set((state) => {
           const id = createId("block");

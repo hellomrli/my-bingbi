@@ -8,7 +8,7 @@ use futures_util::future::try_join_all;
 use odoc_kb::{KbError, KbHit, KbProvider, KbQuery, SearchMode, hybrid_search_with_semantic};
 use odoc_lint::{FactCheckReport, LintReport, fact_check_document, lint_document};
 use odoc_llm::{ChatMessage, ChatRequest, ChatResponse, ChatRole, LlmProvider};
-use odoc_model::{Block, DocumentType, Fact, ODoc};
+use odoc_model::{Block, DocumentType, Fact, HeadingLevel, ODoc};
 use odoc_pack::{DocumentTemplate, PackRegistry, StageId, TemplateBlock};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
@@ -348,6 +348,7 @@ struct RunContext {
     model_text: String,
     style_profile: Option<StyleProfile>,
     confirmed_doc_type: Option<DocumentType>,
+    template_id: Option<String>,
     document: ODoc,
     type_decision: Option<TypeDecision>,
     facts: FactExtraction,
@@ -406,6 +407,7 @@ impl<'a, J: DraftJournal, P: LlmProvider + ?Sized> DraftEngine<'a, J, P> {
             model_text: input.model_text.clone().unwrap_or_default(),
             style_profile: None,
             confirmed_doc_type: input.confirmed_doc_type,
+            template_id: input.template_id.clone(),
             document: input.initial_document.unwrap_or_else(ODoc::empty),
             type_decision: None,
             facts: FactExtraction {
@@ -729,13 +731,15 @@ impl<'a, J: DraftJournal, P: LlmProvider + ?Sized> DraftEngine<'a, J, P> {
         stage: &StageConfig,
         context: &mut RunContext,
     ) -> Result<StageOutput, EngineError> {
-        context.pack_context.extend(load_injections(
-            self.packs,
-            stage,
-            context.document.meta.doc_type,
-        )?);
         let doc_type = context.document.meta.doc_type;
-        apply_template(&mut context.document, self.packs, doc_type)?;
+        // The outline is structural: injecting every declared template into the prompt context
+        // would balloon later requests, so only the selected template is read here.
+        apply_template(
+            &mut context.document,
+            self.packs,
+            doc_type,
+            context.template_id.as_deref(),
+        )?;
         json_output::<ODoc>(stage.id, &context.document, None)
     }
 
@@ -1018,6 +1022,16 @@ fn validate_input(input: &DraftInput) -> Result<(), EngineError> {
     {
         return Err(EngineError::InvalidInput);
     }
+    if let Some(template_id) = input.template_id.as_deref() {
+        let valid = !template_id.is_empty()
+            && template_id.len() <= 64
+            && template_id
+                .bytes()
+                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-');
+        if !valid {
+            return Err(EngineError::InvalidInput);
+        }
+    }
     if input.initial_document.as_ref().is_some_and(|document| {
         document.id.trim().is_empty()
             || document.schema_version.trim().is_empty()
@@ -1130,6 +1144,7 @@ fn stage_input_json(stage_id: StageId, context: &RunContext) -> Result<String, E
         "material": context.material,
         "modelText": context.model_text,
         "styleProfile": context.style_profile,
+        "templateId": context.template_id,
         "document": context.document,
         "facts": context.facts,
         "packContext": context.pack_context,
@@ -1169,6 +1184,11 @@ fn snapshot_context(snapshot: &str) -> Result<RunContext, EngineError> {
         model_text,
         style_profile,
         confirmed_doc_type: None,
+        template_id: value
+            .get("templateId")
+            .and_then(serde_json::Value::as_str)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned),
         document,
         type_decision: None,
         facts,
@@ -1199,8 +1219,9 @@ fn apply_template(
     document: &mut ODoc,
     packs: &PackRegistry,
     doc_type: DocumentType,
+    template_id: Option<&str>,
 ) -> Result<(), EngineError> {
-    if doc_type == DocumentType::Other {
+    if doc_type == DocumentType::Other && template_id.is_none() {
         document.body.blocks = vec![Block::paragraph(String::new())];
         document.body.note = None;
         return Ok(());
@@ -1211,26 +1232,89 @@ fn apply_template(
     let resources = pack
         .resources_for_stage(StageId::Outline, Some(doc_type))
         .map_err(|_| EngineError::PackResource)?;
-    let resource = resources.first().ok_or(EngineError::PackResource)?;
+    let resource = match template_id {
+        Some(id) => {
+            let path = format!("templates/{id}.yaml");
+            resources
+                .iter()
+                .find(|resource| resource.relative_path == path)
+                .ok_or(EngineError::PackResource)?
+        }
+        None => resources.first().ok_or(EngineError::PackResource)?,
+    };
     let template: DocumentTemplate = pack
         .read_template(&resource.relative_path)
         .map_err(|_| EngineError::PackResource)?;
+    if template.doc_type != doc_type {
+        return Err(EngineError::PackResource);
+    }
     document.body.blocks = template.blocks.into_iter().map(template_block).collect();
-    document.body.note = template.required.closing;
+    document.body.note = None;
+    // Fixed closings ("妥否，请批示。") belong in the body, not in the 附注 slot; fill the
+    // template's closing paragraph when it left one empty, otherwise append it.
+    if let Some(closing) = template
+        .required
+        .closing
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        let closing_block = document.body.blocks.iter_mut().rev().find(
+            |block| matches!(block, Block::Paragraph { content, .. } if content.trim().is_empty()),
+        );
+        if let Some(Block::Paragraph { content, .. }) = closing_block {
+            closing.clone_into(content);
+        } else {
+            document
+                .body
+                .blocks
+                .push(Block::paragraph(closing.to_owned()));
+        }
+    }
     Ok(())
 }
 
 fn template_block(block: TemplateBlock) -> Block {
     match block {
-        TemplateBlock::Paragraph { .. } => Block::paragraph(String::new()),
+        TemplateBlock::Paragraph { content, .. } => Block::paragraph(content.unwrap_or_default()),
         TemplateBlock::Heading { level, title, .. } => Block::heading(level, title),
     }
 }
 
+/// Applies model output to the document body.
+///
+/// A compliant draft contains the body headings (`一、`, `（一）`, `1.`), so the output is parsed
+/// back into real `ODoc` blocks: storing the whole text in one paragraph would silently discard the
+/// template structure the outline stage just built. Plain-text output keeps the old filling
+/// behavior as a fallback.
 fn apply_draft_text(document: &mut ODoc, content: String, replace: bool) {
-    let target = document.body.blocks.iter_mut().find(
-        |block| matches!(block, Block::Paragraph { content, .. } if replace || content.is_empty()),
-    );
+    let blocks = parse_draft_blocks(&content);
+    if blocks
+        .iter()
+        .any(|block| matches!(block, Block::Heading { .. }))
+    {
+        document.body.blocks = blocks;
+        return;
+    }
+    if replace {
+        let paragraphs = blocks
+            .into_iter()
+            .filter_map(|block| match block {
+                Block::Paragraph { content, .. } => Some(content),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        replace_paragraphs(document, paragraphs);
+        return;
+    }
+    fill_first_paragraph(document, content);
+}
+
+fn fill_first_paragraph(document: &mut ODoc, content: String) {
+    let target = document
+        .body
+        .blocks
+        .iter_mut()
+        .find(|block| matches!(block, Block::Paragraph { content, .. } if content.is_empty()));
     if let Some(Block::Paragraph {
         content: target, ..
     }) = target
@@ -1239,6 +1323,112 @@ fn apply_draft_text(document: &mut ODoc, content: String, replace: bool) {
     } else {
         document.body.blocks.push(Block::paragraph(content));
     }
+}
+
+/// Replaces paragraph text in place so headings and fixed closings survive a rewrite pass.
+fn replace_paragraphs(document: &mut ODoc, mut paragraphs: Vec<String>) {
+    let mut next = paragraphs.drain(..);
+    for block in &mut document.body.blocks {
+        if let Block::Paragraph { content, .. } = block
+            && let Some(replacement) = next.next()
+        {
+            *content = replacement;
+        }
+    }
+    let remaining = next.collect::<Vec<_>>();
+    for extra in remaining {
+        document.body.blocks.push(Block::paragraph(extra));
+    }
+}
+
+/// Parses a generated body into `ODoc` blocks. Paragraphs are separated by blank lines; heading
+/// numbering is removed because the layout engine renders `一、`/`（一）` from the heading level.
+fn parse_draft_blocks(content: &str) -> Vec<Block> {
+    let mut blocks = Vec::new();
+    let mut paragraph = String::new();
+    let flush_paragraph = |blocks: &mut Vec<Block>, paragraph: &mut String| {
+        let text = paragraph.trim();
+        if !text.is_empty() {
+            blocks.push(Block::paragraph(text.to_owned()));
+        }
+        paragraph.clear();
+    };
+    for raw in content.lines() {
+        let line = raw.trim();
+        if line.is_empty() {
+            flush_paragraph(&mut blocks, &mut paragraph);
+            continue;
+        }
+        if let Some((level, title)) = draft_heading(line) {
+            flush_paragraph(&mut blocks, &mut paragraph);
+            if !title.is_empty() {
+                blocks.push(Block::heading(level, title));
+            }
+            continue;
+        }
+        paragraph.push_str(line);
+    }
+    flush_paragraph(&mut blocks, &mut paragraph);
+    blocks
+}
+
+fn draft_heading(line: &str) -> Option<(HeadingLevel, String)> {
+    let trimmed = line.trim();
+    if let Some(hash_count) = trimmed.starts_with('#').then(|| {
+        trimmed
+            .chars()
+            .take_while(|character| *character == '#')
+            .count()
+    }) {
+        let level = match hash_count {
+            0 | 1 => HeadingLevel::L1,
+            2 => HeadingLevel::L2,
+            3 => HeadingLevel::L3,
+            _ => HeadingLevel::L4,
+        };
+        return Some((level, trimmed[hash_count..].trim().to_owned()));
+    }
+    if let Some(rest) = trimmed.strip_prefix('（')
+        && let Some((number, title)) = rest.split_once('）')
+        && is_chinese_number(number)
+    {
+        return Some((HeadingLevel::L2, title.trim().to_owned()));
+    }
+    if let Some(rest) = trimmed.strip_prefix('(')
+        && let Some((number, title)) = rest.split_once(')')
+        && !number.is_empty()
+        && number.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return Some((HeadingLevel::L4, title.trim().to_owned()));
+    }
+    if let Some((number, title)) = trimmed.split_once('、')
+        && is_chinese_number(number)
+    {
+        return Some((HeadingLevel::L1, title.trim().to_owned()));
+    }
+    for separator in ['.', '．'] {
+        if let Some((number, title)) = trimmed.split_once(separator)
+            && !number.is_empty()
+            && number.len() <= 3
+            && number.bytes().all(|byte| byte.is_ascii_digit())
+            && !title
+                .trim_start()
+                .chars()
+                .next()
+                .is_some_and(|character| character.is_ascii_digit())
+        {
+            return Some((HeadingLevel::L3, title.trim().to_owned()));
+        }
+    }
+    None
+}
+
+fn is_chinese_number(value: &str) -> bool {
+    !value.is_empty()
+        && value.chars().count() <= 4
+        && value
+            .chars()
+            .all(|character| "一二三四五六七八九十百零〇".contains(character))
 }
 
 fn to_model_fact(input: &FactInput) -> Fact {
@@ -1613,6 +1803,7 @@ mod tests {
                     model_text: None,
                     initial_document: None,
                     confirmed_doc_type: None,
+                    template_id: None,
                 },
                 Some(sender),
             )
@@ -1676,6 +1867,7 @@ mod tests {
                     model_text: None,
                     initial_document: None,
                     confirmed_doc_type: None,
+                    template_id: None,
                 },
                 None,
             )
@@ -1744,6 +1936,7 @@ mod tests {
                     model_text: None,
                     initial_document: None,
                     confirmed_doc_type: None,
+                    template_id: None,
                 },
                 Some(sender),
             )
@@ -1776,6 +1969,7 @@ mod tests {
                     model_text: None,
                     initial_document: None,
                     confirmed_doc_type: Some(DocumentType::Request),
+                    template_id: None,
                 },
                 Some(sender),
             )
@@ -1798,6 +1992,7 @@ mod tests {
                     model_text: None,
                     initial_document: Some(document),
                     confirmed_doc_type: Some(DocumentType::Request),
+                    template_id: None,
                 },
                 None,
             )
@@ -1903,6 +2098,7 @@ mod tests {
                     model_text: None,
                     initial_document: None,
                     confirmed_doc_type: None,
+                    template_id: None,
                 },
                 None,
             )
@@ -1969,6 +2165,7 @@ mod tests {
                     ),
                     initial_document: None,
                     confirmed_doc_type: None,
+                    template_id: None,
                 },
                 None,
             )
@@ -2015,6 +2212,7 @@ mod tests {
                     model_text: None,
                     initial_document: None,
                     confirmed_doc_type: Some(DocumentType::Request),
+                    template_id: None,
                 },
                 None,
             )
@@ -2030,6 +2228,7 @@ mod tests {
                     model_text: Some("范文".to_owned()),
                     initial_document: None,
                     confirmed_doc_type: Some(DocumentType::Request),
+                    template_id: None,
                 },
                 None,
             )
@@ -2053,6 +2252,7 @@ mod tests {
                     model_text: None,
                     initial_document: None,
                     confirmed_doc_type: Some(DocumentType::Report),
+                    template_id: None,
                 },
                 None,
             )
@@ -2157,6 +2357,7 @@ mod tests {
                     model_text: None,
                     initial_document: None,
                     confirmed_doc_type: None,
+                    template_id: None,
                 },
                 None,
             )
@@ -2177,6 +2378,92 @@ mod tests {
                 .iter()
                 .any(|stage| stage.stage_id == StageId::Correct)
         );
+    }
+
+    #[test]
+    fn parses_numbered_draft_output_into_blocks() {
+        let blocks = parse_draft_blocks(
+            "一、总体要求\n\n（一）指导思想\n\n坚持问题导向，逐项明确责任。\n\n1. 主要目标\n\n到 2026 年底完成整改。\n\n1.5 倍不是标题。",
+        );
+
+        assert!(matches!(
+            &blocks[0],
+            Block::Heading { level: HeadingLevel::L1, content, .. } if content == "总体要求"
+        ));
+        assert!(matches!(
+            &blocks[1],
+            Block::Heading { level: HeadingLevel::L2, content, .. } if content == "指导思想"
+        ));
+        assert!(matches!(
+            &blocks[2],
+            Block::Paragraph { content, .. } if content == "坚持问题导向，逐项明确责任。"
+        ));
+        assert!(matches!(
+            &blocks[3],
+            Block::Heading { level: HeadingLevel::L3, content, .. } if content == "主要目标"
+        ));
+        assert!(matches!(
+            &blocks[4],
+            Block::Paragraph { content, .. } if content == "到 2026 年底完成整改。"
+        ));
+        assert!(matches!(
+            &blocks[5],
+            Block::Paragraph { content, .. } if content == "1.5 倍不是标题。"
+        ));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn applies_the_selected_template_variant() {
+        let provider = FakeProvider::default();
+        let pack_registry = packs();
+        let engine = DraftEngine::new(pipeline(), &pack_registry, &provider, &NoopJournal)
+            .expect("engine should construct");
+        let outcome = engine
+            .run(
+                DraftInput {
+                    material: "召开防汛工作会议，部署隐患排查。".to_owned(),
+                    model_text: None,
+                    initial_document: None,
+                    confirmed_doc_type: Some(DocumentType::Notice),
+                    template_id: Some("notice-meeting".to_owned()),
+                },
+                None,
+            )
+            .await
+            .expect("pipeline should complete");
+
+        let headings = outcome
+            .document
+            .body
+            .blocks
+            .iter()
+            .filter_map(|block| match block {
+                Block::Heading { content, .. } => Some(content.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(headings, ["会议安排", "参会人员", "会议内容"]);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn rejects_an_unknown_template_id() {
+        let provider = FakeProvider::default();
+        let pack_registry = packs();
+        let engine = DraftEngine::new(pipeline(), &pack_registry, &provider, &NoopJournal)
+            .expect("engine should construct");
+        let result = engine
+            .run(
+                DraftInput {
+                    material: "召开会议。".to_owned(),
+                    model_text: None,
+                    initial_document: None,
+                    confirmed_doc_type: Some(DocumentType::Notice),
+                    template_id: Some("does-not-exist".to_owned()),
+                },
+                None,
+            )
+            .await;
+        assert!(matches!(result, Err(EngineError::PackResource)));
     }
 
     #[test]
@@ -2204,7 +2491,11 @@ mod tests {
         let link = directory.path().join("link.yaml");
         #[cfg(unix)]
         std::os::unix::fs::symlink(&target, &link).expect("create symlink");
-        #[cfg(unix)]
+        #[cfg(windows)]
+        if std::os::windows::fs::symlink_file(&target, &link).is_err() {
+            eprintln!("skipping symlink test: this account cannot create symbolic links");
+            return;
+        }
         assert!(matches!(
             PipelineDefinition::load(link),
             Err(EngineError::PipelineResource)

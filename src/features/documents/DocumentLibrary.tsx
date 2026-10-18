@@ -1,4 +1,5 @@
-import { FileText, History, Receipt, RefreshCw, Trash2, X } from "lucide-react";
+import { FileText, History, Receipt, RefreshCw, Search, Trash2, X } from "lucide-react";
+import { useState } from "react";
 import { useModal } from "../../hooks/useModal";
 import { documentTypeLabels } from "../../lib/document";
 import type { DocumentSummary } from "../../lib/store";
@@ -38,7 +39,16 @@ export function DocumentLibrary({
   onDelete,
 }: DocumentLibraryProps) {
   const sectionRef = useModal<HTMLElement>(open, onClose);
+  const [query, setQuery] = useState("");
   if (!open) return null;
+
+  const needle = query.trim().toLowerCase();
+  const visible = needle
+    ? documents.filter((item) => {
+        const haystack = [item.title, documentTypeLabels[item.docType], item.docType].join(" ").toLowerCase();
+        return haystack.includes(needle);
+      })
+    : documents;
 
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
@@ -46,7 +56,7 @@ export function DocumentLibrary({
         <header className="modal-header">
           <div>
             <h2 id="document-library-title">最近文档</h2>
-            <span>{documents.length} 份</span>
+            <span>{visible.length === documents.length ? `${documents.length} 份` : `${visible.length} / ${documents.length} 份`}</span>
           </div>
           <div className="modal-header-actions">
             <button className="icon-button" type="button" onClick={onRefresh} title="刷新" aria-label="刷新最近文档">
@@ -57,6 +67,15 @@ export function DocumentLibrary({
             </button>
           </div>
         </header>
+        <div className="library-search">
+          <Search size={14} aria-hidden="true" />
+          <input
+            aria-label="搜索文档"
+            placeholder="按标题或文种搜索"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+        </div>
         <div className="document-list">
           {documents.length === 0 && !loading && (
             <div className="empty-state modal-empty">
@@ -64,7 +83,13 @@ export function DocumentLibrary({
               <span>还没有保存的公文</span>
             </div>
           )}
-          {documents.map((item) => (
+          {documents.length > 0 && visible.length === 0 && (
+            <div className="empty-state modal-empty">
+              <Search size={22} />
+              <span>没有匹配的文档</span>
+            </div>
+          )}
+          {visible.map((item) => (
             <div className={item.id === currentDocumentId ? "document-row is-current" : "document-row"} key={item.id}>
               <FileText size={17} />
               <button className="document-open" type="button" onClick={() => onOpen(item.id)}>

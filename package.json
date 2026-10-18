@@ -1,7 +1,7 @@
 {
   "name": "my-bingbi",
   "private": true,
-  "version": "0.1.6",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,7 +10,14 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "typecheck": "tsc -b",
+    "check": "npm run lint && npm run typecheck && npm test",
     "tauri": "tauri"
+  },
+  "engines": {
+    "node": ">=20.19"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.8.0",
@@ -20,16 +27,22 @@
     "zustand": "^5.0.2"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.8.0",
+    "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.62.1",
+    "@tauri-apps/cli": "^2.8.0",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.1.0",
+    "@types/node": "^24.0.0",
     "@types/react": "^19.0.3",
     "@types/react-dom": "^19.0.2",
-    "@types/node": "^24.0.0",
     "@vitejs/plugin-react": "^5.0.0",
+    "eslint": "^10.13.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.7",
+    "globals": "^17.13.0",
     "jsdom": "^25.0.1",
     "typescript": "~5.7.2",
+    "typescript-eslint": "^8.71.2",
     "vite": "^7.0.0",
     "vitest": "^4.0.0"
   }

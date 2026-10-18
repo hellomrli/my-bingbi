@@ -82,3 +82,31 @@ for (const viewport of viewports) {
     });
   });
 }
+
+test.describe("dialog keyboard behavior", () => {
+  test("Escape closes the documents dialog", async ({ page }) => {
+    await page.goto("/");
+    await page.getByRole("button", { name: "最近文档" }).click();
+    const dialog = page.getByRole("dialog", { name: "最近文档" });
+    await expect(dialog).toBeVisible();
+
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+  });
+
+  test("Tab stays inside the settings dialog and Escape closes it", async ({ page }) => {
+    await page.goto("/");
+    await page.getByRole("button", { name: "设置" }).click();
+    const dialog = page.getByRole("dialog", { name: "设置" });
+    await expect(dialog).toBeVisible();
+
+    for (let index = 0; index < 30; index += 1) {
+      await page.keyboard.press("Tab");
+      const focusInside = await dialog.evaluate((element) => element.contains(document.activeElement));
+      expect(focusInside, `第 ${index + 1} 次 Tab 后焦点跑出了对话框`).toBe(true);
+    }
+
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+  });
+});

@@ -3,15 +3,17 @@ import {
   Database,
   Eye,
   EyeOff,
+  FolderPlus,
   KeyRound,
   LoaderCircle,
+  NotebookPen,
   Radio,
   RefreshCw,
   SearchCheck,
   Trash2,
   Unplug,
 } from "lucide-react";
-import { FormEvent, ReactNode, useEffect, useState } from "react";
+import { type FormEvent, type ReactNode, useEffect, useState } from "react";
 import type { KbConfig, KbProviderKind } from "../../lib/kb";
 import {
   defaultKbConfig,
@@ -23,6 +25,8 @@ import {
   hasKbMcpToken,
   ipcErrorMessage,
   kbClearIndex,
+  kbCreateLocalVault,
+  kbCreateNote,
   kbIndexState,
   kbRebuildIndex,
   kbSearch,
@@ -97,6 +101,11 @@ export function KnowledgeBaseSettings({ desktop }: KnowledgeBaseSettingsProps) {
   const [message, setMessage] = useState<string | null>(null);
   const [indexState, setIndexState] = useState<KbIndexState | null>(null);
   const [indexProgress, setIndexProgress] = useState<KbIndexProgress | null>(null);
+  const [creatingVault, setCreatingVault] = useState(false);
+  const [noteTitle, setNoteTitle] = useState("");
+  const [noteContent, setNoteContent] = useState("");
+  const [noteBusy, setNoteBusy] = useState(false);
+  const [indexAfterNote, setIndexAfterNote] = useState(true);
   const [credentials, setCredentials] = useState<Record<CredentialKind, CredentialState>>({
     fns: emptyCredential(),
     fnsWs: emptyCredential(),
@@ -263,6 +272,53 @@ export function KnowledgeBaseSettings({ desktop }: KnowledgeBaseSettingsProps) {
     }
   }
 
+  async function createLocalVault() {
+    if (creatingVault) return;
+    setCreatingVault(true);
+    setMessage(null);
+    try {
+      const path = await kbCreateLocalVault(config.localPath.trim() || undefined);
+      const saved = await saveKbConfig({
+        ...config,
+        enabled: true,
+        providerKind: "local_vault",
+        localPath: path,
+        vault: config.vault.trim() || "本地资料库",
+      });
+      setConfig(saved);
+      setIndexState(await kbIndexState(saved.vault));
+      setMessage("本地知识库已就绪；可在下方新建资料，或把 Markdown 放进该目录后重建索引");
+    } catch (error) {
+      setMessage(ipcErrorMessage(error));
+    } finally {
+      setCreatingVault(false);
+    }
+  }
+
+  async function saveNote() {
+    if (!noteTitle.trim() || !noteContent.trim() || noteBusy) return;
+    setNoteBusy(true);
+    setMessage(null);
+    try {
+      const created = await kbCreateNote({ title: noteTitle, content: noteContent });
+      setNoteTitle("");
+      setNoteContent("");
+      if (indexAfterNote && config.indexEnabled) {
+        setIndexProgress({ status: "running", processed: 0, total: 0, path: null, message: null });
+        const state = await kbRebuildIndex(undefined, setIndexProgress);
+        setIndexState(state);
+        setMessage(`已保存《${created.title}》，索引收录 ${state.noteCount} 篇素材`);
+      } else {
+        setMessage(`已保存《${created.title}》到 ${created.path}`);
+      }
+    } catch (error) {
+      setMessage(ipcErrorMessage(error));
+    } finally {
+      setNoteBusy(false);
+      setIndexProgress(null);
+    }
+  }
+
   function updateCredential(kind: CredentialKind, patch: Partial<CredentialState>) {
     setCredentials((current) => ({
       ...current,
@@ -333,6 +389,14 @@ export function KnowledgeBaseSettings({ desktop }: KnowledgeBaseSettingsProps) {
 
   return (
     <form className="settings-form knowledge-form" onSubmit={submit}>
+      <section className="kb-intro">
+        <Database size={16} />
+        <div>
+          <b>可选组件</b>
+          <span>未启用时左侧不显示引用检索，也不影响起草。启用后原始笔记仍留在你的 Vault / FNS，本项目只在本机建立索引。</span>
+        </div>
+      </section>
+
       <label className="toggle-row">
         <span>
           <b>启用知识库</b>
@@ -407,6 +471,21 @@ export function KnowledgeBaseSettings({ desktop }: KnowledgeBaseSettingsProps) {
         )}
       </div>
 
+      {config.providerKind === "local_vault" && (
+        <div className="kb-vault-actions">
+          <button
+            className="command-button"
+            type="button"
+            onClick={() => void createLocalVault()}
+            disabled={!desktop || busy || creatingVault}
+          >
+            {creatingVault ? <LoaderCircle className="spin" size={14} /> : <FolderPlus size={14} />}
+            {config.localPath.trim() ? "初始化 / 修复目录" : "创建本地知识库"}
+          </button>
+          <small>默认建在应用配置目录；目录已存在时只补齐子目录和说明，不覆盖笔记。</small>
+        </div>
+      )}
+
       {config.providerKind === "fns" && (
         <div className="credential-stack">
           {credentialEditor("fns", "REST token", "输入带 REST 权限的 token")}
@@ -444,6 +523,51 @@ export function KnowledgeBaseSettings({ desktop }: KnowledgeBaseSettingsProps) {
           />
         </label>
       </div>
+
+      {config.providerKind === "local_vault" && (
+        <section className="kb-note-panel" aria-label="新建知识资料">
+          <header>
+            <span><NotebookPen size={14} /> 新建资料</span>
+            <small>保存为 Markdown，进入「收件箱 /」</small>
+          </header>
+          <input
+            aria-label="资料标题"
+            value={noteTitle}
+            onChange={(event) => setNoteTitle(event.target.value)}
+            placeholder="资料标题，例如：2026 年防汛工作要点"
+            maxLength={120}
+            disabled={!desktop || noteBusy || !config.enabled}
+          />
+          <textarea
+            aria-label="资料内容"
+            rows={5}
+            value={noteContent}
+            onChange={(event) => setNoteContent(event.target.value)}
+            placeholder="粘贴政策原文、会议纪要、历史公文或写作素材。保存后可在左侧检索并引用。"
+            disabled={!desktop || noteBusy || !config.enabled}
+          />
+          <div className="kb-note-actions">
+            <label className="kb-inline-check">
+              <input
+                type="checkbox"
+                checked={indexAfterNote}
+                onChange={(event) => setIndexAfterNote(event.target.checked)}
+                disabled={!desktop || noteBusy || !config.indexEnabled}
+              />
+              保存后重建索引
+            </label>
+            <button
+              className="command-button primary"
+              type="button"
+              onClick={() => void saveNote()}
+              disabled={!desktop || noteBusy || !config.enabled || !noteTitle.trim() || !noteContent.trim()}
+            >
+              {noteBusy ? <LoaderCircle className="spin" size={14} /> : <NotebookPen size={14} />}
+              保存到知识库
+            </button>
+          </div>
+        </section>
+      )}
 
       <section className="index-panel" aria-label="本地索引状态">
         <header>

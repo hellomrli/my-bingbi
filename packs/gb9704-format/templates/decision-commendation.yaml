@@ -1,0 +1,20 @@
+id: "decision-commendation"
+name: "表彰决定"
+doc_type: decision
+scenario: "表彰先进集体、个人或专项工作成效"
+description: "适用于通报表彰、记功嘉奖等决定"
+required:
+  main_recipients: true
+blocks:
+  - type: paragraph
+    role: background
+    guidance: "说明表彰背景、评选依据和总体情况"
+  - type: paragraph
+    role: decision
+    guidance: "逐项写明表彰对象和称号"
+  - type: paragraph
+    role: call
+    guidance: "提出学习号召和下一步要求"
+  - type: paragraph
+    role: closing
+    content: "特此决定。"

@@ -198,6 +198,9 @@ pub struct DraftInput {
     pub model_text: Option<String>,
     pub initial_document: Option<ODoc>,
     pub confirmed_doc_type: Option<DocumentType>,
+    /// Knowledge-pack template variant (e.g. `notice-meeting`); empty means the per-type default.
+    #[serde(default)]
+    pub template_id: Option<String>,
 }
 
 /// One suggested text correction: replace `original` with `corrected` where it appears.

@@ -648,7 +648,8 @@ mod tests {
             store
                 .list_crash_events(100)
                 .expect("cleared events should load")
-                .is_empty()
+                .is_empty(),
+            "clearing the crash log leaves no events behind"
         );
     }
 

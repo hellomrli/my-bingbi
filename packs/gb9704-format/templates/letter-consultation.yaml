@@ -1,0 +1,22 @@
+id: "letter-consultation"
+name: "商洽函"
+doc_type: letter
+scenario: "不相隶属机关之间商洽工作、请求支持或征求意见"
+description: "适用于横向协调、资料调取、联合开展工作的商洽"
+required:
+  main_recipients: true
+  closing: "请予支持为盼。"
+blocks:
+  - type: paragraph
+    role: purpose
+    guidance: "说明发函缘由和商洽事项"
+  - type: heading
+    level: l1
+    title: "商洽事项"
+    role: request
+  - type: paragraph
+    role: reply
+    guidance: "写明回复时限、联系人和所需材料"
+  - type: paragraph
+    role: closing
+    guidance: "语气平等克制"

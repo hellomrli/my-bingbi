@@ -1,0 +1,20 @@
+id: "notice-appointment"
+name: "任免通知"
+doc_type: notice
+scenario: "公布干部任免、机构调整或人员分工"
+description: "适用于经研究决定的任免、聘任和解聘事项"
+required:
+  main_recipients: true
+blocks:
+  - type: paragraph
+    role: basis
+    guidance: "写明任免决定的依据和程序"
+  - type: paragraph
+    role: decision
+    guidance: "逐项写明任免人员、原职务和新职务"
+  - type: paragraph
+    role: handover
+    guidance: "明确交接时限、工作衔接和纪律要求"
+  - type: paragraph
+    role: closing
+    content: "特此通知。"

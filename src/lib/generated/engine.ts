@@ -38,7 +38,11 @@ export type DraftInput = { material: string,
  * The reference text an imitate pipeline copies the writing style from. Must be present
  * for `PipelineKind::Imitate` and absent for any other kind.
  */
-modelText: string | null, initialDocument: ODoc | null, confirmedDocType: DocumentType | null, };
+modelText: string | null, initialDocument: ODoc | null, confirmedDocType: DocumentType | null, 
+/**
+ * Knowledge-pack template variant (e.g. `notice-meeting`); empty means the per-type default.
+ */
+templateId: string | null, };
 
 export type DraftOutcome = { sessionId: string, document: ODoc, typeDecision: TypeDecision, facts: FactExtraction, stages: Array<StageSummary>, lintReport: LintReport | null, factCheckReport: FactCheckReport | null, score: Score | null, revisionIterations: number, };
 

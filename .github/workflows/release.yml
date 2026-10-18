@@ -85,25 +85,21 @@ jobs:
         shell: bash
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PUBLIC_KEY: ${{ secrets.TAURI_SIGNING_PUBLIC_KEY }}
         run: |
           if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
             echo "::error::TAURI_SIGNING_PRIVATE_KEY secret missing. Generate one with 'tauri signer generate' and configure it in repository secrets before tagging a release."
             exit 1
           fi
-          if [ -z "$TAURI_SIGNING_PUBLIC_KEY" ]; then
-            echo "::error::TAURI_SIGNING_PUBLIC_KEY secret missing. It is the public half of the signing key and gets embedded into the updater configuration."
-            exit 1
-          fi
+          # The public half is committed in src-tauri/tauri.conf.json and must be the pair of
+          # this private key. Rotating the key means updating that public key in the same commit.
 
       - name: Build desktop bundle with signed update artifacts
         shell: bash
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          TAURI_SIGNING_PUBLIC_KEY: ${{ secrets.TAURI_SIGNING_PUBLIC_KEY }}
         run: |
-          CONFIG=$(printf '{"bundle":{"createUpdaterArtifacts":true},"plugins":{"updater":{"pubkey":"%s"}}}' "$TAURI_SIGNING_PUBLIC_KEY")
+          CONFIG='{"bundle":{"createUpdaterArtifacts":true}}'
           npm run tauri -- build --bundles ${{ matrix.bundle }} --ci --config "$CONFIG"
 
       - name: Upload installer and update artifacts
@@ -148,6 +144,8 @@ jobs:
           LINUX_SIG=$(tr -d '\n' < release-assets/appimage/*.AppImage.sig)
           WINDOWS_EXE=$(basename release-assets/nsis/*.exe)
           WINDOWS_SIG=$(tr -d '\n' < release-assets/nsis/*.exe.sig)
+          test -n "$LINUX_SIG"
+          test -n "$WINDOWS_SIG"
           jq -n \
             --arg version "${GITHUB_REF_NAME#v}" \
             --arg pub_date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
@@ -160,5 +158,6 @@ jobs:
                 "linux-x86_64": {url: $linux_url, signature: $linux_sig},
                 "windows-x86_64": {url: $windows_url, signature: $windows_sig}
               }}' > latest.json
+          jq -e '.version and (.platforms["linux-x86_64"].signature | length > 0) and (.platforms["windows-x86_64"].signature | length > 0)' latest.json > /dev/null
           gh release upload "${GITHUB_REF_NAME}" latest.json \
             --repo "${GITHUB_REPOSITORY}" --clobber
