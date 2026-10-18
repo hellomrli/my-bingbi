@@ -1,4 +1,4 @@
-import { BookOpen, Check, Database, FilePlus2, FileUp, LoaderCircle, Play, Search, ShieldAlert, Sparkles, WandSparkles, X } from "lucide-react";
+import { BookOpen, Check, Database, FilePlus2, FileUp, LoaderCircle, Play, Search, ShieldAlert, Sparkles, X } from "lucide-react";
 import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { documentTypeLabels, securityLabels } from "../../lib/document";
 import { extractDocxText, extractReferenceText, ipcErrorMessage, kbGet, kbSearch } from "../../lib/ipc";
@@ -114,7 +114,6 @@ interface IntakeSidebarProps {
   templateId?: string;
   onTemplateChange?: (value: string) => void;
   onStartDraft: () => void;
-  onOpenWizard: () => void;
   drafting: boolean;
   draftStage: DraftStageId | null;
   draftText: string;
@@ -141,7 +140,6 @@ export function IntakeSidebar({
   templateId = "",
   onTemplateChange,
   onStartDraft,
-  onOpenWizard,
   drafting,
   draftStage,
   draftText,
@@ -166,7 +164,7 @@ export function IntakeSidebar({
   const selectedProvider = providers.find((provider) => provider.id === providerId);
   const providerBlocked = Boolean(selectedProvider && localOnly && !selectedProvider.isLocal);
   const [sourceQuery, setSourceQuery] = useState("");
-  const [fieldsOpen, setFieldsOpen] = useState(true);
+  const [fieldsOpen, setFieldsOpen] = useState(false);
   const [sourceHits, setSourceHits] = useState<KbHit[]>([]);
   const [sourceBusy, setSourceBusy] = useState(false);
   const [sourceError, setSourceError] = useState<string | null>(null);
@@ -355,19 +353,9 @@ export function IntakeSidebar({
       >
         <summary className="panel-heading">
           <BookOpen size={14} />
-          <span>公文要素</span>
+          <span>公文要素（可选）</span>
         </summary>
         <div className="form-fields">
-          <label className="field">
-            <span>文种</span>
-            <select value={document.meta.docType} onChange={(event) => updateDocumentType(event.target.value as DocumentType)}>
-              {Object.entries(documentTypeLabels).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </select>
-          </label>
           <label className="field">
             <span>发文机关标志</span>
             <input
@@ -436,40 +424,34 @@ export function IntakeSidebar({
           <span className="panel-count">{desktopRuntime ? "桌面内核" : "浏览器预览"}</span>
         </div>
         <div className="draft-form">
-          {typeTemplates.length > 0 && (
-            <label className="field">
-              <span>写作模板</span>
-              <select
-                value={templateId}
-                onChange={(event) => onTemplateChange?.(event.target.value)}
-                disabled={drafting}
-              >
-                <option value="">标准模板</option>
-                {typeTemplates.map((template) => (
-                  <option value={template.id} key={template.id}>
-                    {template.name}
-                  </option>
-                ))}
-              </select>
-              {selectedTemplate?.scenario && <small>{selectedTemplate.scenario}</small>}
-            </label>
-          )}
+          <label className="field draft-type-field">
+            <span>文种</span>
+            <select
+              value={document.meta.docType}
+              onChange={(event) => updateDocumentType(event.target.value as DocumentType)}
+              disabled={drafting}
+            >
+              {Object.entries(documentTypeLabels).map(([value, label]) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
+            </select>
+          </label>
           <label className="field material-field">
-            <span>写作意图与基础材料 <em>不必先写正文</em></span>
+            <span>想写什么 <em>大致说一下就行</em></span>
             <textarea
               value={material}
               onChange={(event) => changeMaterial(event.target.value)}
-              placeholder="写下想解决什么问题、准备做什么、对象和时限即可；也可以只上传/引用文件，让模型先提取事实再起草。"
+              placeholder="例如：给各乡镇发一个防汛检查通知，下周开始检查，重点看值班和物资；具体时间地点我来定。"
               rows={6}
               disabled={drafting}
             />
             <small>{material.length.toLocaleString("zh-CN")} 字符 · {materialByteLength(material).toLocaleString("zh-CN")} 字节 / 2 MiB</small>
           </label>
           <div className="material-reference-actions">
-            <span>可一次选择多个参考文件；它们会进入完整起草流程：事实提取、检索、起草、校验和事实回查。</span>
+            <span>补充素材可选；上传后会自动进入起草材料。</span>
             <label className={"command-button reference-upload-button" + (drafting || referenceBusy ? " is-disabled" : "")}>
               <FileUp size={14} />
-              上传参考文件
+              上传补充素材
               <input
                 className="visually-hidden"
                 type="file"
@@ -515,28 +497,6 @@ export function IntakeSidebar({
               {referenceStatus.message}
             </div>
           )}
-          <label className="field model-text-field">
-            <span>范文（可选，仿写模式）</span>
-            <textarea
-              value={modelText}
-              onChange={(event) => onModelTextChange(event.target.value)}
-              placeholder="粘贴一篇本单位同类公文。起草前模型会先提炼它的笔法：结构、句式、用词与惯用表述。"
-              rows={4}
-              disabled={drafting}
-            />
-            <small>{modelText.trim() ? "提供范文时将按仿写流程起草" : "留空则使用普通起草流程"}</small>
-          </label>
-          <label className="field">
-            <span>模型服务</span>
-            <select value={providerId} onChange={(event) => onProviderChange(event.target.value)} disabled={drafting || providers.length === 0}>
-              {providers.length === 0 && <option value="">暂无可用服务</option>}
-              {providers.map((provider) => (
-                <option key={provider.id} value={provider.id} disabled={localOnly && !provider.isLocal}>
-                  {provider.displayName}{provider.isLocal ? " · 本地" : " · 云端"}{!provider.enabled ? " · 已停用" : ""}
-                </option>
-              ))}
-            </select>
-          </label>
           {localOnly && (
             <div className="draft-security-note">
               <ShieldAlert size={13} /> 秘密及以上文档仅允许本地模型
@@ -576,46 +536,85 @@ export function IntakeSidebar({
               {draftText && <pre className="draft-token-output">{draftText}</pre>}
             </div>
           )}
+          <div className={selectedProvider?.enabled ? "draft-run-meta" : "draft-run-meta is-alert"}>
+            {selectedProvider?.enabled
+              ? `将使用 ${selectedProvider.displayName} 生成`
+              : "未配置可用模型服务，请在「更多选项」中选择"}
+          </div>
           <button
             className="command-button primary draft-start-button"
             type="button"
             onClick={onStartDraft}
             disabled={drafting || referenceBusy || !material.trim() || !providerId || providerBlocked || !selectedProvider?.enabled}
-            title={referenceBusy ? "正在读取参考文件，请稍候" : !material.trim() ? "请填写写作意图，或上传/引用至少一份参考文件" : providerBlocked ? "当前密级禁止使用云端模型" : undefined}
+            title={referenceBusy ? "正在读取补充素材，请稍候" : !material.trim() ? "请先写一下想生成什么内容" : providerBlocked ? "当前密级禁止使用云端模型" : undefined}
           >
             {drafting ? <LoaderCircle size={15} className="is-spinning" /> : <Play size={15} />}
-            {drafting ? "正在起草" : typeDecision ? "重新起草" : "开始起草"}
+            {drafting ? "正在生成" : "生成文章"}
           </button>
-          <button
-            className="command-button wizard-inline-button"
-            type="button"
-            onClick={onOpenWizard}
-            disabled={drafting}
-            title="一步一步填写文种、事由、事实与时限，再交给模型起草"
-          >
-            <WandSparkles size={15} />
-            不知道怎么写？用向导模式
-          </button>
-          <button
-            className="command-button imitate-start-button"
-            type="button"
-            onClick={onStartImitate}
-            disabled={drafting || referenceBusy || !material.trim() || !modelText.trim() || !providerId || providerBlocked || !selectedProvider?.enabled}
-            title={referenceBusy ? "正在读取参考文件，请稍候" : !material.trim() ? "请填写写作意图，或上传/引用至少一份参考文件" : !modelText.trim() ? "请先粘贴范文" : providerBlocked ? "当前密级禁止使用云端模型" : undefined}
-          >
-            {drafting ? <LoaderCircle size={15} className="is-spinning" /> : <FilePlus2 size={15} />}
-            仿写起草
-          </button>
-          <button
-            className="command-button polish-start-button"
-            type="button"
-            onClick={onStartPolish}
-            disabled={drafting || referenceBusy || !material.trim() || !providerId || providerBlocked || !selectedProvider?.enabled}
-            title={referenceBusy ? "正在读取参考文件，请稍候" : providerBlocked ? "当前密级禁止使用云端模型" : "润色已有正文；只提供意图或参考文件时请使用开始起草"}
-          >
-            {drafting ? <LoaderCircle size={15} className="is-spinning" /> : <Sparkles size={15} />}
-            润色改写
-          </button>
+          <details className="draft-advanced">
+            <summary>更多选项（模型、模板、仿写 / 润色）</summary>
+            <label className="field">
+              <span>模型服务</span>
+              <select value={providerId} onChange={(event) => onProviderChange(event.target.value)} disabled={drafting || providers.length === 0}>
+                {providers.length === 0 && <option value="">暂无可用服务</option>}
+                {providers.map((provider) => (
+                  <option key={provider.id} value={provider.id} disabled={localOnly && !provider.isLocal}>
+                    {provider.displayName}{provider.isLocal ? " · 本地" : " · 云端"}{!provider.enabled ? " · 已停用" : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {typeTemplates.length > 0 && (
+              <label className="field">
+                <span>写作模板</span>
+                <select
+                  value={templateId}
+                  onChange={(event) => onTemplateChange?.(event.target.value)}
+                  disabled={drafting}
+                >
+                  <option value="">标准模板</option>
+                  {typeTemplates.map((template) => (
+                    <option value={template.id} key={template.id}>
+                      {template.name}
+                    </option>
+                  ))}
+                </select>
+                {selectedTemplate?.scenario && <small>{selectedTemplate.scenario}</small>}
+              </label>
+            )}
+            <label className="field model-text-field">
+              <span>范文（可选，仿写）</span>
+              <textarea
+                value={modelText}
+                onChange={(event) => onModelTextChange(event.target.value)}
+                placeholder="粘贴一篇同类公文，生成时会模仿它的笔法。"
+                rows={4}
+                disabled={drafting}
+              />
+            </label>
+            <div className="draft-advanced-actions">
+              <button
+                className="command-button imitate-start-button"
+                type="button"
+                onClick={onStartImitate}
+                disabled={drafting || referenceBusy || !material.trim() || !modelText.trim() || !providerId || providerBlocked || !selectedProvider?.enabled}
+                title={!modelText.trim() ? "请先粘贴范文" : undefined}
+              >
+                {drafting ? <LoaderCircle size={15} className="is-spinning" /> : <FilePlus2 size={15} />}
+                仿写
+              </button>
+              <button
+                className="command-button polish-start-button"
+                type="button"
+                onClick={onStartPolish}
+                disabled={drafting || referenceBusy || !material.trim() || !providerId || providerBlocked || !selectedProvider?.enabled}
+                title="润色已有正文"
+              >
+                {drafting ? <LoaderCircle size={15} className="is-spinning" /> : <Sparkles size={15} />}
+                润色
+              </button>
+            </div>
+          </details>
         </div>
       </section>
 

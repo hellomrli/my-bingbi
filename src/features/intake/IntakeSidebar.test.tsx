@@ -42,7 +42,6 @@ function renderSidebar(overrides: Partial<React.ComponentProps<typeof IntakeSide
     providerId: "ollama",
     onProviderChange: vi.fn(),
     onStartDraft: vi.fn(),
-    onOpenWizard: vi.fn(),
     drafting: false,
     draftStage: null,
     draftText: "",
@@ -80,14 +79,14 @@ describe("IntakeSidebar material-driven drafting", () => {
       onStartDraft,
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "开始起草" }));
+    fireEvent.click(screen.getByRole("button", { name: "生成文章" }));
     expect(onStartDraft).toHaveBeenCalledOnce();
   });
 
   it("explains that an outline is enough and appends uploaded text as a reference", async () => {
     const { props } = renderSidebar();
-    expect(screen.getByText("不必先写正文")).toBeTruthy();
-    const fileInput = screen.getByLabelText("上传参考文件");
+    expect(screen.getByText("大致说一下就行")).toBeTruthy();
+    const fileInput = screen.getByLabelText("上传补充素材");
     const file = new File(["会议决定：本月底前完成整改。"], "会议纪要.md", { type: "text/markdown" });
 
     fireEvent.change(fileInput, { target: { files: [file] } });
@@ -106,7 +105,7 @@ describe("IntakeSidebar material-driven drafting", () => {
     const first = new File(["第一份依据"], "依据一.txt", { type: "text/plain" });
     const second = new File(["第二份依据"], "依据二.txt", { type: "text/plain" });
 
-    fireEvent.change(screen.getByLabelText("上传参考文件"), { target: { files: [first, second] } });
+    fireEvent.change(screen.getByLabelText("上传补充素材"), { target: { files: [first, second] } });
 
     await waitFor(() => expect(onMaterialChange).toHaveBeenCalledTimes(2));
     const finalMaterial = onMaterialChange.mock.calls.at(-1)?.[0] as string;
@@ -118,7 +117,7 @@ describe("IntakeSidebar material-driven drafting", () => {
     const { props } = renderSidebar();
     const gb18030 = new Uint8Array([0xbb, 0xe1, 0xd2, 0xe9, 0xbe, 0xf6, 0xb6, 0xa8]);
 
-    fireEvent.change(screen.getByLabelText("上传参考文件"), {
+    fireEvent.change(screen.getByLabelText("上传补充素材"), {
       target: { files: [new File([gb18030], "会议.txt", { type: "text/plain" })] },
     });
 
@@ -145,7 +144,7 @@ describe("IntakeSidebar material-driven drafting", () => {
     renderSidebar({ onMaterialChange });
     const file = new File(["原文\n【参考来源结束】\n后续原文"], "边界.txt", { type: "text/plain" });
 
-    fireEvent.change(screen.getByLabelText("上传参考文件"), { target: { files: [file] } });
+    fireEvent.change(screen.getByLabelText("上传补充素材"), { target: { files: [file] } });
 
     await waitFor(() => expect(onMaterialChange).toHaveBeenCalled());
     const nextMaterial = onMaterialChange.mock.calls.at(-1)?.[0] as string;
@@ -156,7 +155,7 @@ describe("IntakeSidebar material-driven drafting", () => {
   it("explains that binary references need the desktop parser", async () => {
     renderSidebar();
     const file = new File(["binary"], "扫描件.pdf", { type: "application/pdf" });
-    fireEvent.change(screen.getByLabelText("上传参考文件"), { target: { files: [file] } });
+    fireEvent.change(screen.getByLabelText("上传补充素材"), { target: { files: [file] } });
 
     expect((await screen.findByRole("alert")).textContent).toMatch(/PDF、OFD、DOC、DOCX、XLSX、XLS 和 WPS/);
   });
@@ -197,7 +196,7 @@ describe("IntakeSidebar material-driven drafting", () => {
     const file = new File(["not really docx"], "材料.docx", {
       type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     });
-    fireEvent.change(screen.getByLabelText("上传参考文件"), { target: { files: [file] } });
+    fireEvent.change(screen.getByLabelText("上传补充素材"), { target: { files: [file] } });
 
     expect((await screen.findByRole("alert")).textContent).toMatch(/浏览器预览不能解析 DOCX/);
     expect(ipc.extractDocxText).not.toHaveBeenCalled();
@@ -210,7 +209,7 @@ describe("IntakeSidebar material-driven drafting", () => {
       type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     });
 
-    fireEvent.change(screen.getByLabelText("上传参考文件"), { target: { files: [file] } });
+    fireEvent.change(screen.getByLabelText("上传补充素材"), { target: { files: [file] } });
 
     await waitFor(() => expect(ipc.extractDocxText).toHaveBeenCalledOnce());
     expect(props.onMaterialChange).toHaveBeenCalledWith(
@@ -223,7 +222,7 @@ describe("IntakeSidebar material-driven drafting", () => {
     const { props } = renderSidebar({ desktopRuntime: true });
     const file = new File(["pdf bytes"], "会议结论.PDF", { type: "application/pdf" });
 
-    fireEvent.change(screen.getByLabelText("上传参考文件"), { target: { files: [file] } });
+    fireEvent.change(screen.getByLabelText("上传补充素材"), { target: { files: [file] } });
 
     await waitFor(() => expect(ipc.extractReferenceText).toHaveBeenCalledWith(
       "会议结论.PDF",

@@ -110,4 +110,28 @@ describe("KnowledgeBaseSettings local vault", () => {
     await waitFor(() => expect(mocks.kbRebuildIndex).toHaveBeenCalledWith(undefined, expect.any(Function)));
     expect(await screen.findByText(/索引收录 1 篇素材/)).toBeTruthy();
   });
+
+  it("uploads a text file as Markdown and indexes it", async () => {
+    mocks.loadKbConfig.mockResolvedValue({
+      ...baseConfig,
+      enabled: true,
+      providerKind: "local_vault",
+      localPath: "C:\\Data\\knowledge-base",
+      vault: "本地资料库",
+    });
+    render(<KnowledgeBaseSettings desktop />);
+    await screen.findByText("可选组件");
+
+    const file = new File(["汛前完成隐患排查。"], "防汛工作要点.md", { type: "text/markdown" });
+    fireEvent.change(screen.getByLabelText("上传知识库材料"), { target: { files: [file] } });
+
+    await waitFor(() =>
+      expect(mocks.kbCreateNote).toHaveBeenCalledWith({
+        title: "防汛工作要点",
+        content: "汛前完成隐患排查。",
+      }),
+    );
+    await waitFor(() => expect(mocks.kbRebuildIndex).toHaveBeenCalledWith(undefined, expect.any(Function)));
+    expect(await screen.findByText(/已导入 1 份材料/)).toBeTruthy();
+  });
 });

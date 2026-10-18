@@ -498,6 +498,46 @@ textarea::placeholder {
   width: 100%;
 }
 
+.draft-run-meta {
+  color: var(--ink-3);
+  font-size: var(--fs-micro);
+  text-align: center;
+}
+
+.draft-run-meta.is-alert {
+  color: var(--danger);
+}
+
+.draft-type-field {
+  max-width: 220px;
+}
+
+.draft-advanced {
+  padding-top: 8px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.draft-advanced > summary {
+  color: var(--ink-3);
+  font-size: var(--fs-xs);
+  cursor: pointer;
+  list-style-position: inside;
+}
+
+.draft-advanced[open] > summary {
+  margin-bottom: 8px;
+}
+
+.draft-advanced-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.draft-advanced-actions .command-button {
+  width: auto;
+  flex: 1;
+}
+
 .imitate-start-button,
 .polish-start-button {
   width: 100%;
@@ -2851,6 +2891,48 @@ textarea::placeholder {
   gap: 10px;
 }
 
+.kb-upload-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.kb-upload-row > span {
+  color: var(--ink-3);
+  font-size: var(--fs-micro);
+  line-height: 1.5;
+}
+
+.kb-upload-button {
+  cursor: pointer;
+}
+
+.kb-upload-progress {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-2);
+  font-size: var(--fs-micro);
+}
+
+.kb-upload-errors {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  padding-left: 18px;
+  color: var(--danger);
+  font-size: var(--fs-micro);
+  line-height: 1.6;
+}
+
+.kb-manual-divider {
+  padding-top: 8px;
+  border-top: 1px solid var(--line-soft);
+  color: var(--ink-3);
+  font-size: var(--fs-micro);
+}
+
 .kb-inline-check {
   display: flex;
   flex: 0 0 auto;
@@ -3843,6 +3925,180 @@ textarea::placeholder {
   border-top: 1px solid var(--line-soft);
   color: var(--ink-3);
   font-size: var(--fs-micro);
+}
+
+/* ---------- 向导生成进度与生成日志 ---------- */
+.wizard-generating-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--accent);
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+
+.wizard-progress {
+  width: 100%;
+  height: 8px;
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--r-pill);
+  accent-color: var(--accent);
+}
+
+.wizard-progress-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--ink-3);
+  font-size: var(--fs-xs);
+}
+
+.wizard-stage-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.wizard-stage-list li {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 7px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-sm);
+  color: var(--ink-3);
+  font-size: var(--fs-micro);
+}
+
+.wizard-stage-list li.is-done {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.wizard-stage-list li.is-current {
+  border-color: var(--accent);
+  color: var(--ink);
+}
+
+.wizard-generation-error {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid var(--danger-line);
+  border-radius: var(--r-md);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.wizard-generation-error p {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+}
+
+.wizard-provider-hint {
+  display: grid;
+  gap: 6px;
+}
+
+.wizard-provider-hint .wizard-step-hint {
+  margin: 0;
+}
+
+.generation-log {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+}
+
+.generation-log > header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.generation-log > header > span {
+  color: var(--ink);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+}
+
+.generation-log > header > small {
+  color: var(--ink-3);
+  font-size: var(--fs-micro);
+}
+
+.generation-log-actions {
+  display: flex;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.generation-log-list {
+  display: grid;
+  max-height: 220px;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+
+.generation-log-row {
+  display: grid;
+  grid-template-columns: 112px 52px 64px minmax(0, 1fr) auto;
+  gap: 6px;
+  padding: 3px 2px;
+  border-bottom: 1px solid var(--line-soft);
+  color: var(--ink-3);
+  font-size: var(--fs-micro);
+}
+
+.generation-log-provider {
+  overflow: hidden;
+  font-family: var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.generation-log-row.is-error .generation-log-message {
+  color: var(--danger);
+}
+
+.generation-log-time,
+.generation-log-stage {
+  font-family: var(--font-mono);
+}
+
+.generation-log-message {
+  overflow-wrap: anywhere;
+  color: var(--ink-2);
+}
+
+.generation-log-row code {
+  color: var(--ink-3);
+  font-size: 10px;
+}
+
+@media (max-width: 720px) {
+  .generation-log-row {
+    grid-template-columns: 90px minmax(0, 1fr);
+  }
+
+  .generation-log-stage,
+  .generation-log-provider,
+  .generation-log-row code {
+    display: none;
+  }
 }
 
 /* ---------- Cline Pass ---------- */

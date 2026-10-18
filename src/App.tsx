@@ -785,7 +785,6 @@ function App() {
 
   function handleWizardFinish(input: WizardDraft) {
     const materialText = composeWizardMaterial(input);
-    setWizardOpen(false);
     setMaterial(materialText);
     setTemplateId(input.templateId);
     updateDocumentType(input.docType);
@@ -918,7 +917,6 @@ function App() {
           templateId={templateId}
           onTemplateChange={setTemplateId}
           onStartDraft={() => beginDraft()}
-          onOpenWizard={() => setWizardOpen(true)}
           drafting={draftPipeline.drafting}
           draftStage={draftPipeline.stage}
           draftText={draftPipeline.text}
@@ -1039,6 +1037,17 @@ function App() {
         initialDocType={document.meta.docType}
         templates={templates}
         canDraft={wizardCanDraft}
+        desktop={desktopRuntime}
+        providerName={selectedProvider?.displayName ?? providerId}
+        drafting={draftPipeline.drafting}
+        stage={draftPipeline.stage}
+        completedStages={draftPipeline.completedStages}
+        generationError={draftPipeline.error}
+        onConfigureProvider={() => {
+          setSettingsTab("providers");
+          setSettingsOpen(true);
+        }}
+        onComplete={() => setNotice("已生成，可在正文中继续修改")}
         onClose={() => setWizardOpen(false)}
         onFinish={handleWizardFinish}
       />

@@ -97,7 +97,7 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "向导模式" }));
 
     expect(screen.getByRole("dialog", { name: "向导模式" })).toBeTruthy();
-    expect(screen.getByText(/第 1 \/ 6 步/)).toBeTruthy();
+    expect(screen.getByText(/第 1 \/ 3 步/)).toBeTruthy();
   });
 
   it("opens the command palette with Ctrl+K and runs a searched action", async () => {
@@ -116,16 +116,15 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "向导模式" }));
     const dialog = screen.getByRole("dialog", { name: "向导模式" });
 
-    fireEvent.click(within(dialog).getByRole("button", { name: /下一步/ }));
     fireEvent.change(within(dialog).getByLabelText(/发文事由/), { target: { value: "开展汛前检查" } });
     fireEvent.change(within(dialog).getByLabelText(/主送机关/), { target: { value: "×××单位" } });
-    // subject → facts → constraints → materials → review
-    for (let step = 0; step < 4; step += 1) {
+    // brief → details → review
+    for (let step = 0; step < 2; step += 1) {
       fireEvent.click(within(dialog).getByRole("button", { name: /下一步/ }));
     }
     fireEvent.click(within(dialog).getByRole("button", { name: /填入写作材料/ }));
 
-    const material = screen.getByPlaceholderText(/写下想解决什么问题/) as HTMLTextAreaElement;
+    const material = screen.getByPlaceholderText(/给各乡镇发一个防汛检查通知/) as HTMLTextAreaElement;
     expect(material.value).toContain("【文种】请示");
     expect(material.value).toContain("【事由】开展汛前检查");
     expect(await screen.findByText(/向导内容已填入写作区/)).toBeTruthy();

@@ -16,7 +16,7 @@ export interface WizardDraft {
   references: string;
 }
 
-export type WizardStepId = "type" | "subject" | "facts" | "constraints" | "materials" | "review";
+export type WizardStepId = "brief" | "details" | "review";
 
 export interface WizardStep {
   id: WizardStepId;
@@ -25,12 +25,21 @@ export interface WizardStep {
 }
 
 export const WIZARD_STEPS: readonly WizardStep[] = [
-  { id: "type", title: "选择文种", hint: "先定文种，后面的结构、称谓和结尾都跟着它走。" },
-  { id: "subject", title: "事由与主送", hint: "一句话说清为什么发文、发给谁。" },
-  { id: "facts", title: "关键事实", hint: "数字、日期、金额、文号、责任单位，一行一条；没写的事实模型不会替你编。" },
-  { id: "constraints", title: "时限与要求", hint: "完成节点、报送方式、篇幅或口径要求，都可以写在这里。" },
-  { id: "materials", title: "补充材料", hint: "可粘贴政策依据、领导批示或参考段落；知识库引用仍可在左侧单独添加。" },
-  { id: "review", title: "确认并起草", hint: "核对后交给模型起草；不满意可以随时返回修改。" },
+  {
+    id: "brief",
+    title: "写什么",
+    hint: "先定文种、事由和主送机关；其余都可以稍后补充。",
+  },
+  {
+    id: "details",
+    title: "补充信息",
+    hint: "数字、时限、依据和参考材料都可以留空；没写的事实模型不会替你编。",
+  },
+  {
+    id: "review",
+    title: "确认并起草",
+    hint: "核对后直接交给模型起草；生成过程会显示进度。",
+  },
 ];
 
 /** Types whose recipient is mandatory under GB/T 9704 practice and the built-in lint rules. */
@@ -56,7 +65,7 @@ export function recipientRequired(docType: DocumentType): boolean {
 
 /** Returns the first blocking problem for a step, or null when the step may advance. */
 export function validateStep(step: WizardStepId, draft: WizardDraft): string | null {
-  if (step === "subject") {
+  if (step === "brief") {
     if (!draft.subject.trim()) return "请填写发文事由，一句话说明为什么发文。";
     if (recipientRequired(draft.docType) && !draft.recipient.trim()) {
       return `${documentTypeLabels[draft.docType]}必须填写主送机关。`;
@@ -67,7 +76,7 @@ export function validateStep(step: WizardStepId, draft: WizardDraft): string | n
 
 /** Whether the wizard collected enough to start a draft. */
 export function isWizardReady(draft: WizardDraft): boolean {
-  return validateStep("subject", draft) === null;
+  return validateStep("brief", draft) === null;
 }
 
 function lines(value: string): string[] {

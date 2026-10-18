@@ -15,6 +15,7 @@ import {
   type DraftStartInput,
 } from "../lib/engine";
 import { errorCode } from "../lib/errors";
+import { appendGenerationLog } from "../lib/generationLog";
 import { ipcErrorMessage, isDesktopRuntime } from "../lib/ipc";
 import type { ProviderProfile } from "../lib/llm";
 import type { DocumentType, ODoc } from "../lib/odoc";
@@ -154,7 +155,15 @@ export function useDraftPipeline({
     const current = useWorkbenchStore.getState().document;
     if (base && current.id === base.id && current.revision === base.revision) return true;
     if (current.id === outcomeDocumentId) {
-      setError("运行期间文档已被修改，结果未自动应用；请重新发起以使用最新内容。");
+      const message = "运行期间文档已被修改，结果未自动应用；请重新发起以使用最新内容。";
+      setError(message);
+      appendGenerationLog({
+        level: "error",
+        event: "blocked",
+        message,
+        providerId,
+        pipeline: kind,
+      });
     }
     return false;
   }
@@ -162,6 +171,14 @@ export function useDraftPipeline({
   function applyOutcome(outcome: DraftOutcome) {
     setSessionId(outcome.sessionId);
     resetTransientState();
+    appendGenerationLog({
+      level: "info",
+      event: "complete",
+      message: "起草完成，结果已写入正文",
+      pipeline: kind,
+      providerId,
+      documentId: outcome.document.id,
+    });
     onDraftOutcome(outcome);
   }
 
@@ -172,6 +189,14 @@ export function useDraftPipeline({
         setStage(event.stageId);
         setFailedStage(null);
         if (event.stageId === "draft" || event.stageId === "deai") setText("");
+        appendGenerationLog({
+          level: "info",
+          event: "stage",
+          stage: event.stageId,
+          message: `开始${draftStageLabels[event.stageId]}阶段`,
+          providerId,
+          pipeline: kind,
+        });
       }
       return;
     }
@@ -192,6 +217,14 @@ export function useDraftPipeline({
         if ((stageId === "draft" || stageId === "deai") && event.output.content) {
           setText(event.output.content);
         }
+        appendGenerationLog({
+          level: "info",
+          event: "stage",
+          stage: stageId,
+          message: `${draftStageLabels[stageId]}阶段完成`,
+          providerId,
+          pipeline: kind,
+        });
       }
       return;
     }
@@ -220,19 +253,77 @@ export function useDraftPipeline({
     if (drafting) return;
     if (!isDesktopRuntime()) {
       setError("模型调用仅在桌面应用中可用。");
+      appendGenerationLog({
+        level: "error",
+        event: "blocked",
+        message: "当前不在桌面运行时，无法调用模型",
+        pipeline: nextKind,
+      });
       return;
     }
     // The wizard composes a brief and starts the run in the same tick, before React has
     // re-rendered the textarea, so it hands the material over explicitly.
     const materialText = options.materialOverride ?? material;
-    if (!materialText.trim() || !providerId) return;
-    if (options.requiresModelText && !modelText.trim()) return;
+    if (!materialText.trim()) {
+      const message = "请先填写写作材料，或从向导生成材料。";
+      setError(message);
+      appendGenerationLog({
+        level: "error",
+        event: "blocked",
+        message,
+        providerId,
+        pipeline: nextKind,
+        documentId: document.id,
+      });
+      return;
+    }
+    if (!providerId) {
+      const message = "请先选择一个可用的模型服务。";
+      setError(message);
+      appendGenerationLog({
+        level: "error",
+        event: "blocked",
+        message,
+        pipeline: nextKind,
+        documentId: document.id,
+      });
+      return;
+    }
+    if (options.requiresModelText && !modelText.trim()) {
+      const message = "请先粘贴要模仿的范文。";
+      setError(message);
+      appendGenerationLog({
+        level: "error",
+        event: "blocked",
+        message,
+        providerId,
+        pipeline: nextKind,
+        documentId: document.id,
+      });
+      return;
+    }
     const rejection = providerRejection();
     if (rejection) {
       setError(rejection);
+      appendGenerationLog({
+        level: "error",
+        event: "blocked",
+        message: rejection,
+        providerId,
+        pipeline: nextKind,
+        documentId: document.id,
+      });
       return;
     }
 
+    appendGenerationLog({
+      level: "info",
+      event: "start",
+      message: `开始${nextKind === "draft" ? "起草" : nextKind === "imitate" ? "仿写" : "润色"}`,
+      providerId,
+      pipeline: nextKind,
+      documentId: document.id,
+    });
     setDrafting(true);
     setKind(nextKind);
     setStage(null);
@@ -269,9 +360,27 @@ export function useDraftPipeline({
     } catch (runError) {
       if (errorCode(runError) === "document_type_confirmation_required") {
         setError(null);
+        appendGenerationLog({
+          level: "info",
+          event: "blocked",
+          message: "需要确认文种后才能继续",
+          providerId,
+          pipeline: nextKind,
+        });
       } else {
-        setError(ipcErrorMessage(runError));
+        const message = ipcErrorMessage(runError);
+        setError(message);
         if (isDraftStage(stageRef.current ?? "")) setFailedStage(stageRef.current);
+        appendGenerationLog({
+          level: "error",
+          event: "error",
+          message,
+          stage: stageRef.current,
+          code: errorCode(runError),
+          providerId,
+          pipeline: nextKind,
+          documentId: document.id,
+        });
       }
     } finally {
       setDrafting(false);

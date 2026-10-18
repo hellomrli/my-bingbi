@@ -12,6 +12,7 @@ import {
   SearchCheck,
   Trash2,
   Unplug,
+  Upload,
 } from "lucide-react";
 import { type FormEvent, type ReactNode, useEffect, useState } from "react";
 import type { KbConfig, KbProviderKind } from "../../lib/kb";
@@ -39,6 +40,13 @@ import {
   type KbIndexProgress,
 } from "../../lib/ipc";
 import type { KbIndexState } from "../../lib/store";
+import {
+  MAX_KB_NOTE_BYTES,
+  extractUploadedFileText,
+  textByteLength,
+  titleFromFileName,
+  uploadAccept,
+} from "../../lib/referenceFiles";
 
 interface KnowledgeBaseSettingsProps {
   desktop: boolean;
@@ -106,6 +114,9 @@ export function KnowledgeBaseSettings({ desktop }: KnowledgeBaseSettingsProps) {
   const [noteContent, setNoteContent] = useState("");
   const [noteBusy, setNoteBusy] = useState(false);
   const [indexAfterNote, setIndexAfterNote] = useState(true);
+  const [uploadBusy, setUploadBusy] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<{ done: number; total: number; name: string } | null>(null);
+  const [uploadErrors, setUploadErrors] = useState<string[]>([]);
   const [credentials, setCredentials] = useState<Record<CredentialKind, CredentialState>>({
     fns: emptyCredential(),
     fnsWs: emptyCredential(),
@@ -319,6 +330,52 @@ export function KnowledgeBaseSettings({ desktop }: KnowledgeBaseSettingsProps) {
     }
   }
 
+  async function uploadMaterials(files: File[]) {
+    if (files.length === 0 || uploadBusy || !config.enabled) return;
+    setUploadBusy(true);
+    setUploadErrors([]);
+    setMessage(null);
+    let created = 0;
+    const errors: string[] = [];
+    try {
+      for (const [index, file] of files.entries()) {
+        setUploadProgress({ done: index, total: files.length, name: file.name });
+        try {
+          const content = await extractUploadedFileText(file, desktop);
+          if (!content) {
+            throw new Error(`${file.name} 中没有可读取的文字`);
+          }
+          if (textByteLength(content) > MAX_KB_NOTE_BYTES) {
+            throw new Error(`${file.name} 解析后超过 4 MiB，请拆分后再上传`);
+          }
+          await kbCreateNote({ title: titleFromFileName(file.name), content });
+          created += 1;
+        } catch (error) {
+          errors.push(`${file.name}：${ipcErrorMessage(error)}`);
+        }
+      }
+      setUploadProgress(null);
+      if (created > 0 && indexAfterNote && config.indexEnabled) {
+        setIndexProgress({ status: "running", processed: 0, total: 0, path: null, message: null });
+        const state = await kbRebuildIndex(undefined, setIndexProgress);
+        setIndexState(state);
+        setMessage(`已导入 ${created} 份材料，索引收录 ${state.noteCount} 篇素材`);
+      } else if (created > 0) {
+        setMessage(`已导入 ${created} 份材料；记得重建索引后才能在引用面板检索`);
+      } else {
+        setMessage("没有导入任何材料");
+      }
+    } catch (error) {
+      errors.push(`索引重建失败：${ipcErrorMessage(error)}`);
+      setMessage("材料已保存，但索引重建失败");
+    } finally {
+      setUploadProgress(null);
+      setUploadErrors(errors);
+      setUploadBusy(false);
+      setIndexProgress(null);
+    }
+  }
+
   function updateCredential(kind: CredentialKind, patch: Partial<CredentialState>) {
     setCredentials((current) => ({
       ...current,
@@ -525,18 +582,53 @@ export function KnowledgeBaseSettings({ desktop }: KnowledgeBaseSettingsProps) {
       </div>
 
       {config.providerKind === "local_vault" && (
-        <section className="kb-note-panel" aria-label="新建知识资料">
+        <section className="kb-note-panel" aria-label="添加知识资料">
           <header>
-            <span><NotebookPen size={14} /> 新建资料</span>
-            <small>保存为 Markdown，进入「收件箱 /」</small>
+            <span><NotebookPen size={14} /> 添加资料</span>
+            <small>上传或手写，保存为 Markdown 进入「收件箱 /」</small>
           </header>
+          <div className="kb-upload-row">
+            <label className="command-button kb-upload-button">
+              {uploadBusy ? <LoaderCircle className="spin" size={14} /> : <Upload size={14} />}
+              {uploadBusy && uploadProgress
+                ? `正在导入 ${uploadProgress.done + 1}/${uploadProgress.total}`
+                : "上传材料"}
+              <input
+                className="visually-hidden"
+                type="file"
+                multiple
+                accept={uploadAccept()}
+                aria-label="上传知识库材料"
+                onChange={(event) => {
+                  const files = Array.from(event.target.files ?? []);
+                  event.target.value = "";
+                  if (files.length > 0) void uploadMaterials(files);
+                }}
+                disabled={!desktop || uploadBusy || !config.enabled}
+              />
+            </label>
+            <span>
+              支持 TXT、Markdown、CSV、JSON、YAML、PDF、OFD、DOC、DOCX、XLSX、XLS、WPS；文本会转换为 Markdown 存入「收件箱 /」。
+            </span>
+          </div>
+          {uploadProgress && (
+            <div className="kb-upload-progress" role="status">
+              <LoaderCircle className="spin" size={13} /> 正在解析：{uploadProgress.name}
+            </div>
+          )}
+          {uploadErrors.length > 0 && (
+            <ul className="kb-upload-errors" aria-label="上传失败的文件">
+              {uploadErrors.map((item) => <li key={item}>{item}</li>)}
+            </ul>
+          )}
+          <div className="kb-manual-divider">或手动填写</div>
           <input
             aria-label="资料标题"
             value={noteTitle}
             onChange={(event) => setNoteTitle(event.target.value)}
             placeholder="资料标题，例如：2026 年防汛工作要点"
             maxLength={120}
-            disabled={!desktop || noteBusy || !config.enabled}
+            disabled={!desktop || noteBusy || uploadBusy || !config.enabled}
           />
           <textarea
             aria-label="资料内容"
@@ -544,7 +636,7 @@ export function KnowledgeBaseSettings({ desktop }: KnowledgeBaseSettingsProps) {
             value={noteContent}
             onChange={(event) => setNoteContent(event.target.value)}
             placeholder="粘贴政策原文、会议纪要、历史公文或写作素材。保存后可在左侧检索并引用。"
-            disabled={!desktop || noteBusy || !config.enabled}
+            disabled={!desktop || noteBusy || uploadBusy || !config.enabled}
           />
           <div className="kb-note-actions">
             <label className="kb-inline-check">
@@ -552,15 +644,15 @@ export function KnowledgeBaseSettings({ desktop }: KnowledgeBaseSettingsProps) {
                 type="checkbox"
                 checked={indexAfterNote}
                 onChange={(event) => setIndexAfterNote(event.target.checked)}
-                disabled={!desktop || noteBusy || !config.indexEnabled}
+                disabled={!desktop || noteBusy || uploadBusy || !config.indexEnabled}
               />
-              保存后重建索引
+              保存 / 上传后重建索引
             </label>
             <button
               className="command-button primary"
               type="button"
               onClick={() => void saveNote()}
-              disabled={!desktop || noteBusy || !config.enabled || !noteTitle.trim() || !noteContent.trim()}
+              disabled={!desktop || noteBusy || uploadBusy || !config.enabled || !noteTitle.trim() || !noteContent.trim()}
             >
               {noteBusy ? <LoaderCircle className="spin" size={14} /> : <NotebookPen size={14} />}
               保存到知识库

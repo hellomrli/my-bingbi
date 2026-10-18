@@ -40,6 +40,7 @@ import { probeGbFonts, type FontProbe } from "../../lib/fonts";
 import type { AppConfig, AppTheme } from "../../lib/store";
 import { CrashDiagnosticsSettings } from "./CrashDiagnosticsSettings";
 import { ClinePassSettings } from "./ClinePassSettings";
+import { GenerationLogSettings } from "./GenerationLogSettings";
 import { KnowledgeBaseSettings } from "./KnowledgeBaseSettings";
 import { PackSettings } from "./PackSettings";
 
@@ -454,6 +455,7 @@ export function SettingsDialog({ open, config, onClose, onSave, onShowGuide, ini
                 desktop={desktop}
                 onEnabledChange={(enabled) => setDraft({ ...draft, crashReportingEnabled: enabled })}
               />
+              <GenerationLogSettings />
               <div className="settings-group">
                 <label>字体映射</label>
                 {fontProbe?.supported && fontProbe.missing.length > 0 && (

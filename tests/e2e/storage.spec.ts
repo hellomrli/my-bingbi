@@ -58,10 +58,10 @@ test("edits, autosaves, lists, and persists application settings", async ({ page
 });
 
 test("uploads and removes individual drafting references", async ({ page }) => {
-  const material = page.getByRole("textbox", { name: /写作意图与基础材料/ });
+  const material = page.getByRole("textbox", { name: /想写什么/ });
   await material.fill("拟部署汛期隐患排查，月底前反馈。 ");
 
-  await page.getByLabel("上传参考文件").setInputFiles([
+  await page.getByLabel("上传补充素材").setInputFiles([
     { name: "会议纪要.md", mimeType: "text/markdown", buffer: Buffer.from("会议决定月底前完成整改。") },
     { name: "数据.csv", mimeType: "text/csv", buffer: Buffer.from("事项,数量\n排水泵,3台") },
   ]);

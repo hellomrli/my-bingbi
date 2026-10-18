@@ -4,13 +4,13 @@ import { composeWizardMaterial, createWizardDraft, isWizardReady, recipientRequi
 describe("draft wizard model", () => {
   it("requires a subject and, for request-like types, a recipient", () => {
     const draft = createWizardDraft("request");
-    expect(validateStep("subject", draft)).toContain("发文事由");
+    expect(validateStep("brief", draft)).toContain("发文事由");
 
     draft.subject = "申请防汛设备经费";
-    expect(validateStep("subject", draft)).toContain("主送机关");
+    expect(validateStep("brief", draft)).toContain("主送机关");
 
     draft.recipient = "×××人民政府";
-    expect(validateStep("subject", draft)).toBeNull();
+    expect(validateStep("brief", draft)).toBeNull();
     expect(isWizardReady(draft)).toBe(true);
   });
 
@@ -18,7 +18,7 @@ describe("draft wizard model", () => {
     const draft = createWizardDraft("minutes");
     draft.subject = "汛前检查部署";
     expect(recipientRequired("minutes")).toBe(false);
-    expect(validateStep("subject", draft)).toBeNull();
+    expect(validateStep("brief", draft)).toBeNull();
   });
 
   it("composes a brief with an explicit no-fabrication instruction", () => {
