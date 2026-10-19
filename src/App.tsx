@@ -688,7 +688,7 @@ function App() {
       ]);
       setProviders(loadedProviders);
       setKbConfig(loadedKbConfig);
-      setProviderId((current) => loadedProviders.some((provider) => provider.id === current)
+      setProviderId((current) => loadedProviders.some((provider) => provider.id === current && provider.enabled)
         ? current
         : loadedProviders.find((provider) => provider.enabled)?.id ?? loadedProviders[0]?.id ?? "");
     } catch (error) {
