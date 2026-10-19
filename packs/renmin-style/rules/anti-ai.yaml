@@ -42,3 +42,12 @@
   detect: parallel_phrases
   min_run: 3
   message: 连续排比可能掩盖信息，请确认每项都有独立事实或任务
+
+- id: meta-commentary
+  name: 写作过程元话语
+  severity: warn
+  type: regex
+  scope: body.blocks
+  pattern: '(下面从|接下来[，、：]|首先[，、：]|其次[，、：]|最后[，、：])'
+  match: forbidden
+  message: 删除“下面从……展开”“首先/其次/最后”等写作过程提示，直接进入公文内容

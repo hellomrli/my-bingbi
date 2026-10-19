@@ -1,9 +1,11 @@
 schema_version = "0.1"
+# 上游基线：Liuxiangjian-ai/official-document-skill @ cbe5f8c（2026-06-12，V1.3）
+# 本包是面向内核提示注入的精简改写，不逐字复制上游长文。
 
 [pack]
 id = "renmin-style"
 name = "务实公文表达包"
-version = "0.1.0"
+version = "0.1.1"
 description = "文种判断、事实提取、反 AI 味规则与质量评分量表"
 license = "MIT"
 source = "https://github.com/Liuxiangjian-ai/official-document-skill"

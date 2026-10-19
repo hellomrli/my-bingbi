@@ -1,9 +1,11 @@
 schema_version = "0.1"
+# 上游基线：KaguraNanaga/official-document-writing-skill @ e76a6f5（2026-01-26，v1.0）
+# 本包是面向内核提示注入的精简改写，不逐字复制上游长文。
 
 [pack]
 id = "gb9704-format"
 name = "GB/T 9704-2012 格式规范包"
-version = "0.1.0"
+version = "0.1.1"
 description = "公文版式参数与首批确定性格式规则"
 license = "MIT"
 source = "https://github.com/KaguraNanaga/official-document-writing-skill"

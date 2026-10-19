@@ -775,6 +775,22 @@ mod tests {
     }
 
     #[test]
+    fn flags_meta_commentary_from_the_skill_pack() {
+        let mut document = ODoc::empty();
+        document.body.title.text = "测试".to_owned();
+        document.body.blocks = vec![Block::paragraph(
+            "下面从三个方面展开：一是提高认识，二是强化担当。".to_owned(),
+        )];
+        let report = lint_document(&document, &packs()).expect("rules should run");
+        assert!(
+            report
+                .findings
+                .iter()
+                .any(|finding| finding.id.starts_with("renmin-style/meta-commentary"))
+        );
+    }
+
+    #[test]
     fn flags_unverified_numbers() {
         let mut document = ODoc::empty();
         document.body.blocks = vec![Block::paragraph("购置15万元设备。".to_owned())];

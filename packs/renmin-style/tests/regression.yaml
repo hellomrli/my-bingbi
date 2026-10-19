@@ -13,3 +13,8 @@
   input: 全面推动各项工作走深走实
   expect:
     lint_rules: [slogan-density, empty-strengthening]
+
+- id: humanizer-meta-and-rule-of-three
+  input: 下面从三个方面展开：一是提高认识，二是强化担当，三是狠抓落实
+  expect:
+    lint_rules: [slogan-density, meta-commentary]
