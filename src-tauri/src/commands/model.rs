@@ -109,7 +109,11 @@ fn connection_test_request() -> ChatRequest {
             content: "只回复 OK".to_owned(),
         }],
         temperature: Some(0.0),
-        max_tokens: Some(8),
+        // This is an OUTPUT cap, not the model's context window: reasoning models can spend
+        // the whole completion budget on hidden thinking and return an empty message, which
+        // Cline's gateway turns into HTTP 500. The probe stays bounded but leaves generous
+        // room above the reasoning peaks observed across Cline Pass models.
+        max_tokens: Some(512),
         json_mode: false,
         security_level: SecurityLevel::Internal,
     }
@@ -124,10 +128,10 @@ mod tests {
     use std::sync::Mutex;
 
     #[test]
-    fn connection_test_is_small_and_non_sensitive() {
+    fn connection_test_is_bounded_and_non_sensitive() {
         let request = connection_test_request();
         assert_eq!(request.security_level, SecurityLevel::Internal);
-        assert_eq!(request.max_tokens, Some(8));
+        assert_eq!(request.max_tokens, Some(512));
         assert_eq!(request.messages.len(), 1);
     }
 

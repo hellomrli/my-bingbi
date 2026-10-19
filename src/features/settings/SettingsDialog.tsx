@@ -645,21 +645,24 @@ export function SettingsDialog({ open, config, onClose, onSave, onShowGuide, ini
                       />
                     </div>
                   </div>
-                  <div className="settings-group">
-                    <label>接口类型</label>
-                    <div className="segmented-control provider-kind-control">
-                      {providerKindOptions.map((option) => (
-                        <button
-                          className={providerDraft.kind === option.value ? "is-active" : ""}
-                          type="button"
-                          onClick={() => setProviderDraft({ ...providerDraft, kind: option.value })}
-                          key={option.value}
-                        >
-                          {option.label}
-                        </button>
-                      ))}
+                  {/* Cline Pass has one fixed protocol and its model list lives in the Cline Pass tab. */}
+                  {providerDraft.id !== "cline-pass" && (
+                    <div className="settings-group">
+                      <label>接口类型</label>
+                      <div className="segmented-control provider-kind-control">
+                        {providerKindOptions.map((option) => (
+                          <button
+                            className={providerDraft.kind === option.value ? "is-active" : ""}
+                            type="button"
+                            onClick={() => setProviderDraft({ ...providerDraft, kind: option.value })}
+                            key={option.value}
+                          >
+                            {option.label}
+                          </button>
+                        ))}
+                      </div>
                     </div>
-                  </div>
+                  )}
                   <div className="settings-group">
                     <label htmlFor="provider-url">服务地址</label>
                     <input
