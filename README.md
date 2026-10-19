@@ -123,7 +123,7 @@ Cline Pass 是一个聚合订阅网关，一个 Key 可以使用 DeepSeek、GLM�
 - Windows 更新包为 NSIS 安装器，Linux 为 AppImage；两者都由发布流水线生成 `.sig` 并写入 `latest.json`。
 - 更新公钥已固化在 `src-tauri/tauri.conf.json`，本地构建也能检查同一条签名通道；私钥只存在仓库 secret `TAURI_SIGNING_PRIVATE_KEY`。
 - 校验失败、网络失败、清单缺少当前平台等错误会给出不同提示，不会把签名失败误报成"已是最新"。
-- **只有发布比当前更高的版本才会提示更新**。当前 v1.0.2 已是最新；下一个更高版本发布后，v1.0.2 及更早版本即可收到。
+- **只有发布比当前更高的版本才会提示更新**。当前 v1.1.0 已是最新；下一个更高版本发布后，v1.1.0 及更早版本即可收到。
 
 ![在线更新提示：显示当前版本与可安装的新版本](docs/assets/update-banner.png)
 
@@ -247,8 +247,8 @@ cargo run -p odoc-engine --example export_engine_bindings
 推送版本 tag 会自动在 GitHub Actions 的原生 runner 上构建 Linux `.deb` 和 Windows NSIS `.exe`，并创建对应的 GitHub Release：
 
 ```bash
-git tag v1.0.2
-git push origin v1.0.2
+git tag v1.1.0
+git push origin v1.1.0
 ```
 
 发布工作流位于 [`.github/workflows/release.yml`](.github/workflows/release.yml)，只匹配 `v*` tag；构建完成前不会创建 Release。
@@ -305,7 +305,7 @@ git push origin v1.0.2
 
 **M0–M4 主线功能已闭环。** 当前已有可运行的 React 工作台、A4 国标版心预览、结构化正文编辑、确定性质检、事实台账与回查标红、最近文档、自动保存、版本快照与 diff、起草/仿写/审核三种流水线、单步重跑、会话成本记录、知识包管理、字体检测、首次运行引导、自定义规则与本地崩溃诊断；桌面版可导出 GB/T 9704 严格 docx（支持机关模板注入）与零依赖 PDF（内置 Typst 引擎）。Rust 侧已建立 Tauri 壳、`odoc-model` AST、`odoc-store` SQLite 持久化、`odoc-llm` 多 Provider、`odoc-kb`（FNS/本地 Vault/MCP + WebSocket 增量订阅）、`odoc-lint` 规则引擎与 `odoc-export` 排版。模型凭据只存系统 Keyring，秘密及以上公文在内核层禁止远程调用。Linux `.deb` 与本机验证、CI 原生 Linux/Windows 壳检查与安装包产物均已就绪。
 
-**M0–M4 里程碑已完成。** v1.0.2 已于 2026-10-19 发布，GitHub Releases 提供 Linux（`.deb` / AppImage）与 Windows（NSIS `.exe`）安装包及 updater 清单；后续版本按 [`.github/workflows/release.yml`](.github/workflows/release.yml) 打 `v*` tag 发布（流程见 [`docs/PLAN.md` §9](docs/PLAN.md)）。可选增强：知识包在线安装与更新。
+**M0–M4 里程碑已完成。** v1.1.0 已于 2026-10-19 发布，GitHub Releases 提供 Linux（`.deb` / AppImage）与 Windows（NSIS `.exe`）安装包及 updater 清单；后续版本按 [`.github/workflows/release.yml`](.github/workflows/release.yml) 打 `v*` tag 发布（流程见 [`docs/PLAN.md` §9](docs/PLAN.md)）。可选增强：知识包在线安装与更新。
 
 ---
 
