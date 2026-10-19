@@ -1607,3 +1607,79 @@
   0% { transform: translateX(-120%); }
   100% { transform: translateX(360%); }
 }
+
+/* —— 参考文件拖拽区 —— */
+.reference-dropzone {
+  display: flex;
+  width: 100%;
+  min-height: 108px;
+  align-items: center;
+  gap: 14px;
+  margin-top: 12px;
+  padding: 16px 18px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  color: var(--ink-2);
+  text-align: left;
+}
+
+.reference-dropzone:hover:not(:disabled),
+.reference-dropzone.is-dragging {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.reference-dropzone-icon {
+  display: inline-flex;
+  width: 42px;
+  height: 42px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--accent-line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  color: var(--accent);
+}
+
+.reference-dropzone-text {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.reference-dropzone-text strong {
+  color: var(--ink);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+.reference-dropzone-text small {
+  color: var(--ink-3);
+  font-size: var(--fs-micro);
+  line-height: 1.6;
+}
+
+.reference-count {
+  flex: none;
+  padding: 3px 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  background: var(--surface);
+  color: var(--ink-3);
+  font-size: var(--fs-micro);
+}
+
+@media (max-width: 760px) {
+  .reference-dropzone {
+    min-height: 96px;
+    padding: 14px;
+  }
+
+  .reference-dropzone-text small {
+    font-size: 10px;
+  }
+}

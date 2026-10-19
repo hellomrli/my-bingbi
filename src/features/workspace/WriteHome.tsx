@@ -11,18 +11,18 @@ import {
   Sparkles,
   X,
 } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { documentTypeLabels } from "../../lib/document";
 import { draftStageLabels, draftStages, type DraftStageId } from "../../lib/engine";
 import type { TypeDecision } from "../../lib/generated/engine";
 import type { ProviderProfile } from "../../lib/llm";
+import { createId } from "../../lib/id";
 import {
-  appendMaterialReference,
   materialByteLength,
   MAX_DRAFT_MATERIAL_BYTES,
-  parseMaterialReferences,
-  removeMaterialReference,
-  type MaterialReference,
+  referenceContentBytes,
+  safeReferenceLabel,
+  type DraftReference,
 } from "../../lib/materialReferences";
 import type { DocumentType } from "../../lib/odoc";
 import { extractUploadedFileText, uploadAccept } from "../../lib/referenceFiles";
@@ -65,6 +65,9 @@ interface WriteHomeProps {
   kbEnabled: boolean;
   currentTitle: string;
   onContinueDocument: () => void;
+  references: DraftReference[];
+  onAddReferences: (references: DraftReference[]) => void;
+  onRemoveReference: (id: string) => void;
 }
 
 export function WriteHome({
@@ -93,53 +96,72 @@ export function WriteHome({
   kbEnabled,
   currentTitle,
   onContinueDocument,
+  references,
+  onAddReferences,
+  onRemoveReference,
 }: WriteHomeProps) {
   const [docType, setDocType] = useState<DocumentType | null>(null);
   const [knowledgeOpen, setKnowledgeOpen] = useState(false);
   const [referenceBusy, setReferenceBusy] = useState(false);
+  const [dragActive, setDragActive] = useState(false);
   const [referenceMessage, setReferenceMessage] = useState<{ text: string; error: boolean } | null>(null);
   const uploadRef = useRef<HTMLInputElement>(null);
   const enabledProviders = providers.filter((provider) => provider.enabled);
   const selectedProvider = providers.find((provider) => provider.id === providerId);
-  const references = useMemo(() => parseMaterialReferences(material), [material]);
   const stageCount = draftStages.length;
   const progress = Math.min(100, Math.round((completedStages.length / stageCount) * 100));
   const busy = starting || drafting;
-  const canStart = desktop && Boolean(selectedProvider?.enabled) && Boolean(material.trim());
   const byteLength = materialByteLength(material);
+  const referenceBytes = referenceContentBytes(references);
+  const totalBytes = byteLength + referenceBytes;
+  const overLimit = totalBytes > MAX_DRAFT_MATERIAL_BYTES;
+  const canStart = desktop && Boolean(selectedProvider?.enabled) && Boolean(material.trim()) && !overLimit;
   const recent = recentDocuments.slice(0, 4);
 
   async function addFiles(files: File[]) {
     if (files.length === 0 || referenceBusy || busy) return;
     setReferenceBusy(true);
     setReferenceMessage(null);
-    let nextMaterial = material;
+    const incoming: DraftReference[] = [];
+    const labels = new Set(references.map((reference) => reference.label));
     let failure: string | null = null;
     try {
       for (const file of files) {
+        const label = safeReferenceLabel(file.name);
+        if (labels.has(label)) {
+          failure = `${label} 已经加入参考材料。`;
+          continue;
+        }
         try {
           const text = await extractUploadedFileText(file, desktop);
-          const result = appendMaterialReference(nextMaterial, "上传文件", file.name, text);
-          if (result.error) {
-            failure = result.error;
+          if (!text.trim()) {
+            failure = `${label} 没有可读取的文字。`;
             continue;
           }
-          nextMaterial = result.material;
-          setReferenceMessage({ text: `已加入参考文件：${file.name}`, error: false });
+          incoming.push({ id: createId("ref"), kind: "上传文件", label, content: text });
+          labels.add(label);
         } catch (uploadError) {
           failure = uploadError instanceof Error ? uploadError.message : "参考文件读取失败";
         }
       }
-      if (nextMaterial !== material) onMaterialChange(nextMaterial);
+      const nextBytes = byteLength + referenceBytes + referenceContentBytes(incoming);
+      if (incoming.length > 0 && nextBytes > MAX_DRAFT_MATERIAL_BYTES) {
+        setReferenceMessage({ text: "参考材料与写作要求合计超过 2 MiB，请减少文件或摘取关键段落。", error: true });
+        return;
+      }
+      if (incoming.length > 0) {
+        onAddReferences(incoming);
+        setReferenceMessage({ text: `已加入 ${incoming.length} 份参考材料（正文不会粘贴文件内容）`, error: false });
+      }
       if (failure) setReferenceMessage({ text: failure, error: true });
     } finally {
       setReferenceBusy(false);
     }
   }
 
-  function removeReference(reference: MaterialReference) {
+  function removeReference(reference: DraftReference) {
     if (busy) return;
-    onMaterialChange(removeMaterialReference(material, reference));
+    onRemoveReference(reference.id);
     setReferenceMessage({ text: `已移除：${reference.label}`, error: false });
   }
 
@@ -214,10 +236,49 @@ export function WriteHome({
             ))}
           </div>
 
+          <input
+            ref={uploadRef}
+            className="visually-hidden"
+            type="file"
+            multiple
+            accept={uploadAccept()}
+            onChange={(event) => {
+              const files = Array.from(event.target.files ?? []);
+              event.target.value = "";
+              void addFiles(files);
+            }}
+            disabled={busy || referenceBusy}
+          />
+          <button
+            className={dragActive ? "reference-dropzone is-dragging" : "reference-dropzone"}
+            type="button"
+            onClick={() => uploadRef.current?.click()}
+            onDragOver={(event) => {
+              event.preventDefault();
+              if (!busy && !referenceBusy) setDragActive(true);
+            }}
+            onDragLeave={() => setDragActive(false)}
+            onDrop={(event) => {
+              event.preventDefault();
+              setDragActive(false);
+              void addFiles(Array.from(event.dataTransfer.files));
+            }}
+            disabled={busy || referenceBusy}
+            aria-label="添加参考文件"
+          >
+            <span className="reference-dropzone-icon">
+              {referenceBusy ? <LoaderCircle size={22} className="is-spinning" /> : <FileUp size={22} />}
+            </span>
+            <span className="reference-dropzone-text">
+              <strong>{referenceBusy ? "正在读取参考材料…" : "拖拽参考文件到这里"}</strong>
+              <small>或点击选择；支持 TXT / MD / CSV / JSON / PDF / OFD / DOC / DOCX / XLSX / XLS / WPS</small>
+            </span>
+            <span className="reference-count">{references.length > 0 ? `${references.length} 份` : "可选"}</span>
+          </button>
           {references.length > 0 && (
-            <div className="composer-references" aria-label="已加入的参考文件">
+            <div className="composer-references" aria-label="已加入的参考材料">
               {references.map((reference) => (
-                <span className="reference-chip" key={`${reference.kind}:${reference.label}`}>
+                <span className="reference-chip" key={reference.id}>
                   <FileText size={12} />
                   <span title={reference.label}>{reference.label}</span>
                   <button
@@ -236,29 +297,6 @@ export function WriteHome({
 
           <div className="composer-footer">
             <div className="composer-tools">
-              <input
-                ref={uploadRef}
-                className="visually-hidden"
-                type="file"
-                multiple
-                accept={uploadAccept()}
-                onChange={(event) => {
-                  const files = Array.from(event.target.files ?? []);
-                  event.target.value = "";
-                  void addFiles(files);
-                }}
-                disabled={busy || referenceBusy}
-              />
-              <button
-                className="composer-tool"
-                type="button"
-                onClick={() => uploadRef.current?.click()}
-                disabled={busy || referenceBusy}
-                title="添加参考文件（可选）"
-              >
-                {referenceBusy ? <LoaderCircle size={14} className="is-spinning" /> : <FileUp size={14} />}
-                参考文件
-              </button>
               {kbEnabled && (
                 <button
                   className="composer-tool"
@@ -307,9 +345,18 @@ export function WriteHome({
             </button>
           </div>
           <div className="composer-footnote">
-            <span>{byteLength.toLocaleString("zh-CN")} / {MAX_DRAFT_MATERIAL_BYTES.toLocaleString("zh-CN")} 字节</span>
+            <span>
+              正文 {byteLength.toLocaleString("zh-CN")} 字节
+              {references.length > 0 && ` · 参考 ${references.length} 份`}
+              {" "}· 合计 {totalBytes.toLocaleString("zh-CN")} / {MAX_DRAFT_MATERIAL_BYTES.toLocaleString("zh-CN")} 字节
+            </span>
             <span>Ctrl / ⌘ + Enter 开始</span>
           </div>
+          {overLimit && (
+            <div className="composer-message is-error" role="alert">
+              正文与参考材料合计超过 2 MiB，请减少文件或摘取关键段落。
+            </div>
+          )}
         </section>
 
         {referenceMessage && (
@@ -369,13 +416,12 @@ export function WriteHome({
           documentId={documentId}
           onClose={() => setKnowledgeOpen(false)}
           onInsert={(label, content) => {
-            const result = appendMaterialReference(material, "知识库", label, content);
-            if (result.error) {
-              setReferenceMessage({ text: result.error, error: true });
+            if (references.some((reference) => reference.label === label)) {
+              setReferenceMessage({ text: "这份知识库资料已经加入参考材料。", error: true });
               return;
             }
-            onMaterialChange(result.material);
-            setReferenceMessage({ text: `已引用知识库资料：${label}`, error: false });
+            onAddReferences([{ id: createId("ref"), kind: "知识库", label, content }]);
+            setReferenceMessage({ text: `已加入知识库参考：${label}（正文不会粘贴内容）`, error: false });
           }}
         />
 

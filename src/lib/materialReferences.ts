@@ -77,3 +77,29 @@ export function removeMaterialReference(material: string, reference: MaterialRef
   const after = material.slice(reference.end).trimStart();
   return before && after ? `${before}\n\n${after}` : before || after;
 }
+
+/** A reference kept in composer state; its content is supplied to the draft, not shown inline. */
+export interface DraftReference {
+  id: string;
+  kind: "知识库" | "上传文件";
+  label: string;
+  content: string;
+}
+
+/** Builds the hidden material sent to the kernel: user brief followed by quoted sources. */
+export function composeMaterialWithReferences(
+  material: string,
+  references: readonly DraftReference[],
+): ReferenceAppendResult {
+  let next = material.trim();
+  for (const reference of references) {
+    const result = appendMaterialReference(next, reference.kind, reference.label, reference.content);
+    if (result.error) return result;
+    next = result.material;
+  }
+  return { material: next, error: null };
+}
+
+export function referenceContentBytes(references: readonly DraftReference[]): number {
+  return references.reduce((total, reference) => total + materialByteLength(reference.content), 0);
+}

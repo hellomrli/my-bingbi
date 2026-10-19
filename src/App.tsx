@@ -51,6 +51,7 @@ import type { ProviderProfile } from "./lib/llm";
 import type { KbConfig } from "./lib/kb";
 import type { DocumentType, ODoc } from "./lib/odoc";
 import { lintDocument, unverifiedTokenMap } from "./lib/lint";
+import { composeMaterialWithReferences, type DraftReference } from "./lib/materialReferences";
 import { selectFindings, type RevisionedReport } from "./lib/report";
 import type { AppConfig, DocumentSummary } from "./lib/store";
 import { useWorkbenchStore } from "./store/workbench";
@@ -138,6 +139,7 @@ function App() {
   const [providers, setProviders] = useState<ProviderProfile[]>([]);
   const [providerId, setProviderId] = useState("");
   const [material, setMaterial] = useState("");
+  const [references, setReferences] = useState<DraftReference[]>([]);
   const [startingDraft, setStartingDraft] = useState(false);
   const [engineLintReport, setEngineLintReport] = useState<RevisionedReport<LintReport> | null>(null);
   const [engineFactCheckReport, setEngineFactCheckReport] = useState<RevisionedReport<FactCheckReport> | null>(null);
@@ -367,6 +369,7 @@ function App() {
       setSavedVersion(null);
       setView("structure");
       setMaterial("");
+      setReferences([]);
       setComposing(true);
       setQualityOpen(false);
       setNotice("已新建空白文档，从写作台开始吧");
@@ -387,6 +390,7 @@ function App() {
       setSavedVersion(result.saved.versionSeq);
       setView("structure");
       setComposing(false);
+      setReferences([]);
       setNotice("DOCX 已导入，复杂版式请在编辑视图中复核");
       void refreshDocuments();
     } catch (error) {
@@ -413,6 +417,7 @@ function App() {
       setSavedVersion(summary?.versionCount ?? null);
       setLibraryOpen(false);
       setComposing(false);
+      setReferences([]);
       setNotice("公文已打开");
     } catch (error) {
       setNotice(ipcErrorMessage(error));
@@ -434,6 +439,7 @@ function App() {
         setSavedVersion(null);
         setView("structure");
         setMaterial("");
+        setReferences([]);
         setComposing(true);
       }
       await refreshDocuments();
@@ -513,6 +519,7 @@ function App() {
     setComposing(false);
     setView("preview");
     setQualityOpen(false);
+    setReferences([]);
     setUnverifiedTokens(unverifiedTokenMap(outcome.factCheckReport?.findings ?? []));
     setEngineLintReport(
       outcome.lintReport
@@ -561,18 +568,46 @@ function App() {
     onRerunOutcome: applyRerunOutcome,
   });
 
+  function handleAddReferences(next: DraftReference[]) {
+    setReferences((current) => {
+      const merged = [...current];
+      for (const reference of next) {
+        if (!merged.some((existing) => existing.label === reference.label)) {
+          merged.push(reference);
+        }
+      }
+      return merged;
+    });
+  }
+
+  function handleRemoveReference(id: string) {
+    setReferences((current) => current.filter((reference) => reference.id !== id));
+  }
+
   function beginDraft(
     confirmedDocType: DocumentType | null = null,
     materialOverride?: string,
     templateIdOverride?: string | null,
   ) {
-    void draftPipeline.startDraft(confirmedDocType, materialOverride, templateIdOverride);
+    const composed = materialOverride
+      ? { material: materialOverride, error: null }
+      : composeMaterialWithReferences(material, references);
+    if (composed.error) {
+      setNotice(composed.error);
+      return;
+    }
+    void draftPipeline.startDraft(confirmedDocType, composed.material, templateIdOverride);
   }
 
   async function handleStartWriting(docType: DocumentType | null) {
     if (draftPipeline.drafting || startingDraft) return;
     if (!material.trim()) {
       setNotice("先写一下想生成什么，再开始");
+      return;
+    }
+    const composed = composeMaterialWithReferences(material, references);
+    if (composed.error) {
+      setNotice(composed.error);
       return;
     }
     // Flip this before the first await: creating the document and saving it can take a
@@ -588,7 +623,7 @@ function App() {
         setEngineFactCheckReport(null);
         setSavedVersion(null);
       }
-      await draftPipeline.startDraft(docType, material);
+      await draftPipeline.startDraft(docType, composed.material);
     } catch (error) {
       setNotice(ipcErrorMessage(error));
     } finally {
@@ -946,6 +981,9 @@ function App() {
             recentDocuments={documents}
             documentId={document.id}
             kbEnabled={desktopRuntime && kbConfig.enabled}
+            references={references}
+            onAddReferences={handleAddReferences}
+            onRemoveReference={handleRemoveReference}
             currentTitle={document.body.title.text}
             onContinueDocument={() => setComposing(false)}
           />
