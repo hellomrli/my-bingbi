@@ -141,6 +141,25 @@ describe("useDraftPipeline", () => {
     });
 
     expect(callbacks.onDraftOutcome).toHaveBeenCalledTimes(1);
+    expect(result.current.error).toBeNull();
+  });
+
+  it("does not clobber edits made while the draft is running", async () => {
+    const document = useWorkbenchStore.getState().document;
+    const outcome = outcomeFor(document, 5);
+    mockedStartDraft.mockImplementation(async () => {
+      useWorkbenchStore.getState().updateTitle("运行期间用户改过的标题");
+      return outcome;
+    });
+    const { result, callbacks } = renderPipeline();
+
+    await act(async () => {
+      await result.current.startDraft(null);
+    });
+
+    expect(callbacks.onDraftOutcome).not.toHaveBeenCalled();
+    expect(result.current.error).toContain("运行期间文档已被修改");
+    expect(useWorkbenchStore.getState().document.body.title.text).toBe("运行期间用户改过的标题");
   });
 
   it("runs with the material the wizard composed, before the textarea re-renders", async () => {

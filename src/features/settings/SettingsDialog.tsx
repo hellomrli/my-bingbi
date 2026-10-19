@@ -526,7 +526,7 @@ export function SettingsDialog({ open, config, onClose, onSave, onShowGuide, ini
                 <label>关于与更新</label>
                 <div className="update-row">
                   <span className="settings-hint">
-                    当前 v{updateResult?.currentVersion ?? __APP_VERSION__}。更新包由发布签名验证，仅在桌面版可用。
+                    当前 v{updateResult?.currentVersion ?? (typeof __APP_VERSION__ === "string" ? __APP_VERSION__ : "dev")}。更新包由发布签名验证，仅在桌面版可用。
                   </span>
                   <button
                     className="command-button"

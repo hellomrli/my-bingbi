@@ -30,11 +30,26 @@ function EditableBlock({
   const unverifiedTokens = useWorkbenchStore((state) => state.unverifiedTokens);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const isTextBlock = block.type === "paragraph" || block.type === "heading" || block.type === "quote";
+  const textContent = isTextBlock ? block.content : "";
   const unverified = unverifiedTokens[block.id] ?? [];
 
   useEffect(() => {
     if (selectedNodeId === block.id) textareaRef.current?.focus();
   }, [block.id, selectedNodeId]);
+
+  // The document view hides resize handles, so the textarea grows with its content instead.
+  useEffect(() => {
+    if (!isTextBlock) return;
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    const resize = () => {
+      textarea.style.height = "auto";
+      if (textarea.scrollHeight > 0) textarea.style.height = `${textarea.scrollHeight}px`;
+    };
+    resize();
+    window.addEventListener("resize", resize);
+    return () => window.removeEventListener("resize", resize);
+  }, [isTextBlock, textContent]);
 
   if (!isTextBlock) {
     return (
@@ -49,7 +64,11 @@ function EditableBlock({
 
   return (
     <article
-      className={selectedNodeId === block.id ? "editor-block is-selected" : "editor-block"}
+      className={[
+        "editor-block",
+        selectedNodeId === block.id ? "is-selected" : "",
+        block.type === "heading" ? "is-heading" : "",
+      ].filter(Boolean).join(" ")}
       data-node-id={block.id}
       onClick={() => selectNode(block.id)}
     >
@@ -73,7 +92,7 @@ function EditableBlock({
       </div>
       <textarea
         ref={textareaRef}
-        rows={Math.max(2, Math.ceil(block.content.length / 34))}
+        rows={1}
         value={block.content}
         onChange={(event) => updateBlockText(block.id, event.target.value)}
         placeholder={block.type === "heading" ? "输入标题，不含层次序号" : "输入正文内容"}
@@ -83,31 +102,33 @@ function EditableBlock({
           <span aria-hidden="true">⚠</span> 待核实：{unverified.join("、")}
         </span>
       )}
-      <button
-        className="icon-button small rewrite-action"
-        type="button"
-        onClick={(event) => {
-          event.stopPropagation();
-          onRewrite(block);
-        }}
-        disabled={!modelReady}
-        title={modelReady ? "用模型改写本段，应用前可预览" : "选择并启用模型服务后可改写"}
-        aria-label={`AI 改写第 ${index + 1} 段`}
-      >
-        <Sparkles size={14} />
-      </button>
-      <button
-        className="icon-button small danger-action"
-        type="button"
-        onClick={(event) => {
-          event.stopPropagation();
-          removeBlock(block.id);
-        }}
-        title="删除块"
-        aria-label="删除块"
-      >
-        <Trash2 size={14} />
-      </button>
+      <div className="block-actions">
+        <button
+          className="icon-button small rewrite-action"
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            onRewrite(block);
+          }}
+          disabled={!modelReady}
+          title={modelReady ? "用模型改写本段，应用前可预览" : "选择并启用模型服务后可改写"}
+          aria-label={`AI 改写第 ${index + 1} 段`}
+        >
+          <Sparkles size={14} />
+        </button>
+        <button
+          className="icon-button small danger-action"
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            removeBlock(block.id);
+          }}
+          title="删除块"
+          aria-label="删除块"
+        >
+          <Trash2 size={14} />
+        </button>
+      </div>
     </article>
   );
 }
@@ -116,12 +137,15 @@ interface StructureEditorProps {
   providerId?: string;
   providerName?: string;
   modelReady?: boolean;
+  /** The redesigned workspace edits the title in the app header instead. */
+  showTitle?: boolean;
 }
 
 export function StructureEditor({
   providerId = "",
   providerName = "",
   modelReady = false,
+  showTitle = true,
 }: StructureEditorProps) {
   const document = useWorkbenchStore((state) => state.document);
   const updateTitle = useWorkbenchStore((state) => state.updateTitle);
@@ -146,20 +170,22 @@ export function StructureEditor({
 
   return (
     <div className="structure-editor" data-node-id={document.body.id}>
-      <label className="title-editor" data-node-id={document.body.title.id}>
-        <span>公文标题</span>
-        <textarea
-          rows={2}
-          value={document.body.title.text}
-          onChange={(event) => updateTitle(event.target.value)}
-          placeholder="输入公文标题"
-        />
-        {titleTokens.length > 0 && (
-          <span className="fact-unverified-badge" title="标题中的数字/日期/文号未在已核实事实台账中找到">
-            <span aria-hidden="true">⚠</span> 待核实：{titleTokens.join("、")}
-          </span>
-        )}
-      </label>
+      {showTitle && (
+        <label className="title-editor" data-node-id={document.body.title.id}>
+          <span>公文标题</span>
+          <textarea
+            rows={2}
+            value={document.body.title.text}
+            onChange={(event) => updateTitle(event.target.value)}
+            placeholder="输入公文标题"
+          />
+          {titleTokens.length > 0 && (
+            <span className="fact-unverified-badge" title="标题中的数字/日期/文号未在已核实事实台账中找到">
+              <span aria-hidden="true">⚠</span> 待核实：{titleTokens.join("、")}
+            </span>
+          )}
+        </label>
+      )}
       {headings.length > 0 && (
         <details className="editor-outline">
           <summary>文档大纲 · {headings.length} 个标题</summary>

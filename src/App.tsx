@@ -1,24 +1,22 @@
-import { Code2, FileJson2, LayoutTemplate, LockKeyhole, Save, ShieldAlert } from "lucide-react";
+import { LayoutTemplate, LockKeyhole, PenLine, ShieldAlert } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArchiveDialog } from "./features/documents/ArchiveDialog";
 import { DocumentLibrary } from "./features/documents/DocumentLibrary";
 import { VersionHistoryDialog } from "./features/documents/VersionHistoryDialog";
 import { StructureEditor } from "./features/editor/StructureEditor";
-import { IntakeSidebar } from "./features/intake/IntakeSidebar";
-import { LintPanel } from "./features/lint-panel/LintPanel";
 import { WelcomeGuide } from "./features/onboarding/WelcomeGuide";
 import { DocumentPreview } from "./features/preview/DocumentPreview";
 import { ReviewReportDialog } from "./features/review/ReviewReportDialog";
 import { SessionHistoryDialog } from "./features/documents/SessionHistoryDialog";
 import { SettingsDialog } from "./features/settings/SettingsDialog";
-import { DraftWizard } from "./features/wizard/DraftWizard";
-import { composeWizardMaterial, type WizardDraft } from "./features/wizard/wizardModel";
+import { AppHeader } from "./features/workspace/AppHeader";
+import { DocumentInfoDialog } from "./features/workspace/DocumentInfoDialog";
+import { QualityDrawer } from "./features/workspace/QualityDrawer";
+import { WriteHome } from "./features/workspace/WriteHome";
 import { CommandPalette, type CommandAction } from "./features/workbench/CommandPalette";
-import { Toolbar } from "./features/workbench/Toolbar";
 import { UpdateBanner } from "./features/workbench/UpdateBanner";
 import { useDraftPipeline } from "./hooks/useDraftPipeline";
-import { countChineseCharacters, documentTypeLabels } from "./lib/document";
-import type { DraftStageId } from "./lib/engine";
+import { countChineseCharacters } from "./lib/document";
 import { isReviewStage, startReview, type ReviewStageId } from "./lib/review";
 import {
   backendVersion,
@@ -38,7 +36,6 @@ import {
   listDocuments,
   loadKbConfig,
   listProviderProfiles,
-  listTemplates,
   lintDocumentNow,
   loadAppConfig,
   loadDocument,
@@ -52,8 +49,7 @@ import type { DraftOutcome, RerunOutcome, ReviewEvent, ReviewOutcome } from "./l
 import type { FactCheckReport, LintReport } from "./lib/generated/lint";
 import type { ProviderProfile } from "./lib/llm";
 import type { KbConfig } from "./lib/kb";
-import type { DocumentType } from "./lib/odoc";
-import type { TemplateSummary } from "./lib/pack";
+import type { DocumentType, ODoc } from "./lib/odoc";
 import { lintDocument, unverifiedTokenMap } from "./lib/lint";
 import { selectFindings, type RevisionedReport } from "./lib/report";
 import type { AppConfig, DocumentSummary } from "./lib/store";
@@ -79,6 +75,29 @@ function downloadBytes(filename: string, bytes: Uint8Array, mimeType: string) {
   URL.revokeObjectURL(url);
 }
 
+/** True when starting a new draft can safely reuse the current document instead of replacing it. */
+function isBlankDocument(document: ODoc): boolean {
+  const hasHeader = Boolean(
+    document.header?.issuingAuthorityMark?.trim()
+    || document.header?.documentNumber
+    || document.header?.signer,
+  );
+  const hasBody = document.body.blocks.some((block) => {
+    if (block.type === "heading" || block.type === "paragraph" || block.type === "quote") {
+      return block.content.trim().length > 0;
+    }
+    if (block.type === "list") return block.items.some((item) => item.content.trim().length > 0);
+    return false;
+  });
+  return !document.body.title.text.trim()
+    && !hasHeader
+    && !hasBody
+    && document.body.mainRecipients.length === 0
+    && !document.body.signer
+    && !document.body.date
+    && document.facts.facts.length === 0;
+}
+
 function App() {
   const document = useWorkbenchStore((state) => state.document);
   const view = useWorkbenchStore((state) => state.view);
@@ -90,7 +109,9 @@ function App() {
   const setView = useWorkbenchStore((state) => state.setView);
   const setTheme = useWorkbenchStore((state) => state.setTheme);
   const markSaved = useWorkbenchStore((state) => state.markSaved);
-  const updateDocumentType = useWorkbenchStore((state) => state.updateDocumentType);
+  const updateTitle = useWorkbenchStore((state) => state.updateTitle);
+  const showGrid = useWorkbenchStore((state) => state.showGrid);
+  const toggleGrid = useWorkbenchStore((state) => state.toggleGrid);
   const importInputRef = useRef<HTMLInputElement>(null);
   const [runtime, setRuntime] = useState("正在连接内核");
   const [notice, setNotice] = useState<string | null>(null);
@@ -101,7 +122,9 @@ function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<"general" | "providers" | "clinepass" | "knowledge" | "packs">("general");
   const [guideOpen, setGuideOpen] = useState(false);
-  const [wizardOpen, setWizardOpen] = useState(false);
+  const [composing, setComposing] = useState(true);
+  const [qualityOpen, setQualityOpen] = useState(false);
+  const [infoOpen, setInfoOpen] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
   const [availableUpdate, setAvailableUpdate] = useState<UpdateCheckResult | null>(null);
   const [installingUpdate, setInstallingUpdate] = useState(false);
@@ -115,23 +138,17 @@ function App() {
   const [providers, setProviders] = useState<ProviderProfile[]>([]);
   const [providerId, setProviderId] = useState("");
   const [material, setMaterial] = useState("");
-  const [modelText, setModelText] = useState("");
-  const [templates, setTemplates] = useState<TemplateSummary[]>([]);
-  const [templateId, setTemplateId] = useState("");
   const [engineLintReport, setEngineLintReport] = useState<RevisionedReport<LintReport> | null>(null);
   const [engineFactCheckReport, setEngineFactCheckReport] = useState<RevisionedReport<FactCheckReport> | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [reviewing, setReviewing] = useState(false);
   const [reviewStage, setReviewStage] = useState<ReviewStageId | null>(null);
   const [completedReviewStages, setCompletedReviewStages] = useState<ReviewStageId[]>([]);
-  const [failedReviewStage, setFailedReviewStage] = useState<ReviewStageId | null>(null);
   const [reviewOutcome, setReviewOutcome] = useState<ReviewOutcome | null>(null);
   const [reviewError, setReviewError] = useState<string | null>(null);
   // Tracks the stage a failed review died on: the state value read inside the catch block would
   // still be whatever it was when the run started.
   const reviewStageRef = useRef<ReviewStageId | null>(null);
-  // `review` is a toolbar mode of its own; the draft hook only reports draft/imitate/polish.
-  const [reviewMode, setReviewMode] = useState(false);
   const selectNode = useWorkbenchStore((state) => state.selectNode);
   const findings = useMemo(() => lintDocument(document), [document]);
   const displayedFindings = useMemo(
@@ -171,28 +188,6 @@ function App() {
     }, 250);
     return () => window.clearTimeout(timeout);
   }, [desktopRuntime, document, engineLintReport]);
-
-  // Desktop: template variants come from the knowledge pack; browser preview has none, so the
-  // template pickers stay hidden there.
-  useEffect(() => {
-    if (!desktopRuntime) return;
-    let active = true;
-    listTemplates()
-      .then((loaded) => {
-        if (active) setTemplates(loaded);
-      })
-      .catch((error) => setNotice(ipcErrorMessage(error)));
-    return () => {
-      active = false;
-    };
-  }, [desktopRuntime]);
-
-  // A scenario template belongs to one document type; switching type drops an incompatible choice.
-  useEffect(() => {
-    if (!templateId) return;
-    const selected = templates.find((template) => template.id === templateId);
-    if (selected && selected.docType !== document.meta.docType) setTemplateId("");
-  }, [document.meta.docType, templateId, templates]);
 
   // Desktop: check the signed release channel once per start when auto-update is enabled. A
   // failure stays silent; the settings page still offers a manual check with an explicit error.
@@ -259,7 +254,7 @@ function App() {
         if (current.id === loaded.id) return;
         setDocument(loaded, Date.now());
         setSavedVersion(null);
-        setNotice("已恢复上次打开的公文");
+        setNotice("已恢复上次打开的公文，可继续编辑");
       })
       .catch(() => {
         // The last document may no longer exist; keep the demo document.
@@ -312,8 +307,8 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (libraryOpen) void refreshDocuments();
-  }, [libraryOpen, refreshDocuments]);
+    if (libraryOpen || composing) void refreshDocuments();
+  }, [libraryOpen, composing, refreshDocuments]);
 
   const persistDocument = useCallback(
     async (stage: "user_save" | "autosave", quiet = false) => {
@@ -370,7 +365,10 @@ function App() {
       setEngineFactCheckReport(null);
       setSavedVersion(null);
       setView("structure");
-      setNotice("已创建空白 ODoc");
+      setMaterial("");
+      setComposing(true);
+      setQualityOpen(false);
+      setNotice("已新建空白文档，从写作台开始吧");
     } catch (error) {
       setNotice(ipcErrorMessage(error));
     }
@@ -387,7 +385,8 @@ function App() {
       setEngineFactCheckReport(null);
       setSavedVersion(result.saved.versionSeq);
       setView("structure");
-      setNotice("DOCX 已导入，复杂版式请在结构视图中复核");
+      setComposing(false);
+      setNotice("DOCX 已导入，复杂版式请在编辑视图中复核");
       void refreshDocuments();
     } catch (error) {
       setNotice(ipcErrorMessage(error));
@@ -412,6 +411,7 @@ function App() {
       setEngineFactCheckReport(null);
       setSavedVersion(summary?.versionCount ?? null);
       setLibraryOpen(false);
+      setComposing(false);
       setNotice("公文已打开");
     } catch (error) {
       setNotice(ipcErrorMessage(error));
@@ -432,6 +432,8 @@ function App() {
         setEngineFactCheckReport(null);
         setSavedVersion(null);
         setView("structure");
+        setMaterial("");
+        setComposing(true);
       }
       await refreshDocuments();
       setNotice("公文及版本已删除");
@@ -464,6 +466,7 @@ function App() {
     setEngineFactCheckReport(null);
     setSavedVersion(result.saved.versionSeq);
     setView("structure");
+    setComposing(false);
     setHistoryTarget(null);
     setLibraryOpen(false);
     setNotice(`已恢复为版本 ${result.saved.versionSeq}`);
@@ -506,6 +509,9 @@ function App() {
 
   function applyDraftOutcome(outcome: DraftOutcome) {
     setDocument(outcome.document, Date.now());
+    setComposing(false);
+    setView("preview");
+    setQualityOpen(false);
     setUnverifiedTokens(unverifiedTokenMap(outcome.factCheckReport?.findings ?? []));
     setEngineLintReport(
       outcome.lintReport
@@ -547,8 +553,8 @@ function App() {
     providers,
     providerId,
     material,
-    modelText,
-    templateId,
+    modelText: "",
+    templateId: "",
     saveBeforeDraft,
     onDraftOutcome: applyDraftOutcome,
     onRerunOutcome: applyRerunOutcome,
@@ -559,23 +565,30 @@ function App() {
     materialOverride?: string,
     templateIdOverride?: string | null,
   ) {
-    setReviewMode(false);
     void draftPipeline.startDraft(confirmedDocType, materialOverride, templateIdOverride);
   }
 
-  function beginImitate() {
-    setReviewMode(false);
-    void draftPipeline.startImitate();
-  }
-
-  function beginPolish() {
-    setReviewMode(false);
-    void draftPipeline.startPolish();
-  }
-
-  function beginRerun(stage: DraftStageId) {
-    setReviewMode(false);
-    void draftPipeline.rerun(stage);
+  async function handleStartWriting(docType: DocumentType | null) {
+    if (draftPipeline.drafting) return;
+    if (!material.trim()) {
+      setNotice("先写一下想生成什么，再开始");
+      return;
+    }
+    const current = useWorkbenchStore.getState().document;
+    if (!isBlankDocument(current)) {
+      if (useWorkbenchStore.getState().dirty && !window.confirm("当前修改尚未保存，仍要新建一篇吗？")) return;
+      try {
+        const next = await createEmptyDocument();
+        setDocument(next, null);
+        setEngineLintReport(null);
+        setEngineFactCheckReport(null);
+        setSavedVersion(null);
+      } catch (error) {
+        setNotice(ipcErrorMessage(error));
+        return;
+      }
+    }
+    void draftPipeline.startDraft(docType, material);
   }
 
   function handleReviewEvent(event: ReviewEvent) {
@@ -583,7 +596,6 @@ function App() {
       if (isReviewStage(event.stageId)) {
         reviewStageRef.current = event.stageId;
         setReviewStage(event.stageId);
-        setFailedReviewStage(null);
       }
       return;
     }
@@ -602,7 +614,6 @@ function App() {
     setReviewOutcome(outcome);
     reviewStageRef.current = null;
     setReviewStage(null);
-    setFailedReviewStage(null);
     // The kernel reports on the stored revision, so its findings also drive the lint panel.
     setEngineLintReport({
       documentId: outcome.documentId,
@@ -620,7 +631,6 @@ function App() {
   async function runReview() {
     if (reviewing) return;
     setReviewOpen(true);
-    setReviewMode(true);
     if (!desktopRuntime) {
       setReviewError("公文审核仅在桌面应用中可用。");
       return;
@@ -637,7 +647,6 @@ function App() {
     reviewStageRef.current = null;
     setReviewStage(null);
     setCompletedReviewStages([]);
-    setFailedReviewStage(null);
     try {
       await saveBeforeDraft();
       const snapshot = useWorkbenchStore.getState().document;
@@ -646,7 +655,6 @@ function App() {
       applyReviewOutcome(outcome);
     } catch (error) {
       setReviewError(ipcErrorMessage(error));
-      setFailedReviewStage(reviewStageRef.current);
     } finally {
       setReviewing(false);
     }
@@ -778,30 +786,15 @@ function App() {
         : "尚未保存";
   const cloudAllowed = document.meta.securityLevel === "public" || document.meta.securityLevel === "internal";
   const selectedProvider = providers.find((provider) => provider.id === providerId);
-  const wizardCanDraft = desktopRuntime
-    && Boolean(selectedProvider?.enabled)
-    && (cloudAllowed || selectedProvider?.isLocal === true);
   const canReview = desktopRuntime && Boolean(selectedProvider?.enabled) && !draftPipeline.drafting && !reviewing;
-
-  function handleWizardFinish(input: WizardDraft) {
-    const materialText = composeWizardMaterial(input);
-    setMaterial(materialText);
-    setTemplateId(input.templateId);
-    updateDocumentType(input.docType);
-    if (wizardCanDraft) {
-      beginDraft(input.docType, materialText, input.templateId);
-    } else {
-      setNotice("向导内容已填入写作区；选择可用的模型服务后即可开始起草");
-    }
-  }
 
   const commandActions: CommandAction[] = [
     {
-      id: "wizard",
-      label: "向导模式",
-      hint: "逐步填写要素后起草",
-      keywords: ["wizard", "向导", "起草"],
-      run: () => setWizardOpen(true),
+      id: "home",
+      label: "回到写作台",
+      hint: "只写要办的事，其余交给模型",
+      keywords: ["home", "写作", "起草", "新建"],
+      run: () => setComposing(true),
     },
     { id: "new", label: "新建公文", keywords: ["new", "新建"], run: () => void handleNew() },
     { id: "documents", label: "打开最近文档", keywords: ["document", "文档"], run: () => setLibraryOpen(true) },
@@ -853,47 +846,61 @@ function App() {
     },
     {
       id: "structure",
-      label: "切换到结构编辑",
+      label: "切换到正文编辑",
       disabled: view === "structure",
       run: () => setView("structure"),
+    },
+    {
+      id: "document-info",
+      label: "文档信息（可选）",
+      hint: "发文字号、主送机关、落款等",
+      disabled: composing,
+      run: () => setInfoOpen(true),
     },
   ];
 
   return (
-    <div className="app-shell">
-      <Toolbar
-        findings={displayedFindings}
-        onNew={handleNew}
-        onImport={() => importInputRef.current?.click()}
+    <div className={composing ? "app-shell is-home" : "app-shell"}>
+      <AppHeader
+        composing={composing}
+        title={document.body.title.text}
+        docType={document.meta.docType}
+        dirty={dirty}
+        saving={saving}
+        savedLabel={savedLabel}
+        errorCount={errorCount}
+        canReview={canReview}
+        canArchive={desktopRuntime && kbConfig.enabled}
+        hasVersions={savedVersion !== null && savedVersion > 0}
+        showGrid={showGrid}
+        theme={theme}
+        drafting={draftPipeline.drafting}
+        stage={draftPipeline.stage}
+        completedStages={draftPipeline.completedStages}
+        reviewing={reviewing}
+        reviewStage={reviewStage}
+        completedReviewStages={completedReviewStages}
+        onTitleChange={updateTitle}
+        onHome={() => setComposing(true)}
+        onNew={() => void handleNew()}
         onSave={() => void persistDocument("user_save")}
-        onExport={handleExport}
+        onExport={() => void handleExport()}
+        onImport={() => importInputRef.current?.click()}
         onPrint={() => void handlePrint()}
-        onReview={() => void runReview()}
-        onArchive={() => setArchiveOpen(true)}
+        onOpenDocuments={() => setLibraryOpen(true)}
         onOpenHistory={() => setHistoryTarget({
           id: document.id,
           title: document.body.title.text.trim() || "未命名公文",
         })}
-        onOpenDocuments={() => setLibraryOpen(true)}
+        onOpenInfo={() => setInfoOpen(true)}
         onOpenSettings={() => {
           setSettingsTab("general");
           setSettingsOpen(true);
         }}
-        onOpenWizard={() => setWizardOpen(true)}
-        onThemeChange={handleThemeChange}
-        exportFormat={desktopRuntime ? "docx" : "odoc"}
-        pipeline={reviewMode ? "review" : draftPipeline.kind}
-        activeStage={draftPipeline.drafting ? draftPipeline.stage : null}
-        completedStages={draftPipeline.completedStages}
-        failedStage={draftPipeline.failedStage}
-        activeReviewStage={reviewing ? reviewStage : null}
-        completedReviewStages={completedReviewStages}
-        failedReviewStage={failedReviewStage}
-        canReview={canReview}
-        canArchive={desktopRuntime && kbConfig.enabled}
-        hasVersions={savedVersion !== null && savedVersion > 0}
-        onRerunStage={(stage) => beginRerun(stage)}
-        canRerunStage={desktopRuntime && !draftPipeline.drafting && !reviewing && draftPipeline.sessionId !== null}
+        onReview={() => void runReview()}
+        onArchive={() => setArchiveOpen(true)}
+        onToggleGrid={toggleGrid}
+        onThemeChange={() => void handleThemeChange(theme === "system" ? "light" : theme === "light" ? "dark" : "system")}
       />
       <input
         ref={importInputRef}
@@ -902,80 +909,101 @@ function App() {
         accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         onChange={(event) => void handleImportDocx(event.target.files?.[0] ?? null)}
       />
-      <main className="workspace">
-        <IntakeSidebar
-          material={material}
-          onMaterialChange={setMaterial}
-          modelText={modelText}
-          onModelTextChange={setModelText}
-          onStartImitate={() => beginImitate()}
-          onStartPolish={() => beginPolish()}
-          providers={providers}
-          providerId={providerId}
-          onProviderChange={setProviderId}
-          templates={templates}
-          templateId={templateId}
-          onTemplateChange={setTemplateId}
-          onStartDraft={() => beginDraft()}
-          drafting={draftPipeline.drafting}
-          draftStage={draftPipeline.stage}
-          draftText={draftPipeline.text}
-          draftError={draftPipeline.error}
-          typeDecision={draftPipeline.typeDecision}
-          confirmedDocType={draftPipeline.confirmedDocType}
-          onConfirmedDocTypeChange={draftPipeline.setConfirmedDocType}
-          onConfirmDocType={() => {
-            if (draftPipeline.confirmedDocType) beginDraft(draftPipeline.confirmedDocType);
-          }}
-          desktopRuntime={desktopRuntime}
-          kbEnabled={desktopRuntime && kbConfig.enabled}
-        />
-        <section className="center-workspace" aria-label="公文编辑区">
-          <nav className="view-tabs" aria-label="文档视图">
-            <button className={view === "preview" ? "view-tab is-active" : "view-tab"} type="button" onClick={() => setView("preview")}>
-              <LayoutTemplate size={15} />
-              版式预览
-            </button>
-            <button className={view === "structure" ? "view-tab is-active" : "view-tab"} type="button" onClick={() => setView("structure")}>
-              <Code2 size={15} />
-              结构编辑
-            </button>
-            <div className="view-meta">
-              <span>{documentTypeLabels[document.meta.docType]}</span>
-              <span>修订 {document.revision}</span>
-              {savedVersion !== null && <span>版本 {savedVersion}</span>}
+      <main className={composing ? "app-main is-home" : "app-main"}>
+        {composing ? (
+          <WriteHome
+            material={material}
+            onMaterialChange={setMaterial}
+            providers={providers}
+            providerId={providerId}
+            onProviderChange={setProviderId}
+            desktop={desktopRuntime}
+            drafting={draftPipeline.drafting}
+            stage={draftPipeline.stage}
+            completedStages={draftPipeline.completedStages}
+            draftText={draftPipeline.text}
+            error={draftPipeline.error}
+            typeDecision={draftPipeline.typeDecision}
+            confirmedDocType={draftPipeline.confirmedDocType}
+            onConfirmedDocTypeChange={draftPipeline.setConfirmedDocType}
+            onConfirmDocType={() => {
+              if (draftPipeline.confirmedDocType) beginDraft(draftPipeline.confirmedDocType);
+            }}
+            onStart={(docType) => void handleStartWriting(docType)}
+            onOpenSettings={() => {
+              setSettingsTab("providers");
+              setSettingsOpen(true);
+            }}
+            onOpenDocuments={() => setLibraryOpen(true)}
+            onOpenRecent={(id) => void handleOpenDocument(id)}
+            recentDocuments={documents}
+            documentId={document.id}
+            kbEnabled={desktopRuntime && kbConfig.enabled}
+            currentTitle={document.body.title.text}
+            onContinueDocument={() => setComposing(false)}
+          />
+        ) : (
+          <section className="document-workspace" aria-label="公文编辑区">
+            <div className="document-bar">
+              <div className="view-switch" role="tablist" aria-label="文档视图">
+                <button
+                  className={view === "structure" ? "view-tab is-active" : "view-tab"}
+                  type="button"
+                  role="tab"
+                  aria-selected={view === "structure"}
+                  onClick={() => setView("structure")}
+                >
+                  <PenLine size={14} />
+                  编辑
+                </button>
+                <button
+                  className={view === "preview" ? "view-tab is-active" : "view-tab"}
+                  type="button"
+                  role="tab"
+                  aria-selected={view === "preview"}
+                  onClick={() => setView("preview")}
+                >
+                  <LayoutTemplate size={14} />
+                  版式
+                </button>
+              </div>
+              <div className="document-bar-meta">
+                <span>{countChineseCharacters(document)} 字</span>
+                <button
+                  className={errorCount ? "quality-trigger is-error" : "quality-trigger"}
+                  type="button"
+                  onClick={() => setQualityOpen(true)}
+                >
+                  质检{errorCount ? ` · ${errorCount} 项错误` : ""}
+                </button>
+              </div>
             </div>
-          </nav>
-          <div className="document-canvas">
-            {view === "preview" ? (
-              <DocumentPreview />
-            ) : (
-              <StructureEditor
-                providerId={providerId}
-                providerName={selectedProvider?.displayName ?? ""}
-                modelReady={desktopRuntime
-                  && Boolean(selectedProvider?.enabled)
-                  && (cloudAllowed || selectedProvider?.isLocal === true)}
-              />
-            )}
-          </div>
-        </section>
-        <LintPanel findings={displayedFindings} />
+            <div className="document-canvas">
+              {view === "preview" ? (
+                <DocumentPreview />
+              ) : (
+                <StructureEditor
+                  providerId={providerId}
+                  providerName={selectedProvider?.displayName ?? ""}
+                  modelReady={desktopRuntime
+                    && Boolean(selectedProvider?.enabled)
+                    && (cloudAllowed || selectedProvider?.isLocal === true)}
+                  showTitle={false}
+                />
+              )}
+            </div>
+          </section>
+        )}
       </main>
-      <footer className="statusbar">
-        <span className={cloudAllowed ? "status-item" : "status-item is-alert"}>
-          {cloudAllowed ? <LockKeyhole size={13} /> : <ShieldAlert size={13} />}
-          {cloudAllowed ? "允许配置的云端模型" : "密级限制：仅允许本地模型"}
+      <footer className="app-statusbar">
+        <span className={cloudAllowed ? "status-security" : "status-security is-alert"}>
+          {cloudAllowed ? <LockKeyhole size={12} /> : <ShieldAlert size={12} />}
+          {cloudAllowed ? "云端模型可用" : "仅本地模型"}
         </span>
-        <span className="status-item">
-          <FileJson2 size={13} /> ODoc {document.schemaVersion}
-        </span>
-        <span className="status-item runtime-status">{runtime}</span>
         <span className="status-spacer" />
-        <span className="status-item">{countChineseCharacters(document)} 字</span>
-        <span className={dirty ? "status-item is-unsaved" : "status-item"}>
-          <Save size={13} /> {savedLabel}
-        </span>
+        {!composing && <span>{countChineseCharacters(document)} 字</span>}
+        <span>{selectedProvider?.displayName ?? "未选择模型"}</span>
+        <span className="status-runtime" title={runtime}>{desktopRuntime ? "桌面内核" : "浏览器预览"}</span>
       </footer>
       <DocumentLibrary
         open={libraryOpen}
@@ -1032,25 +1060,6 @@ function App() {
         }}
         onSelectProvider={(providerId) => setProviderId(providerId)}
       />
-      <DraftWizard
-        open={wizardOpen}
-        initialDocType={document.meta.docType}
-        templates={templates}
-        canDraft={wizardCanDraft}
-        desktop={desktopRuntime}
-        providerName={selectedProvider?.displayName ?? providerId}
-        drafting={draftPipeline.drafting}
-        stage={draftPipeline.stage}
-        completedStages={draftPipeline.completedStages}
-        generationError={draftPipeline.error}
-        onConfigureProvider={() => {
-          setSettingsTab("providers");
-          setSettingsOpen(true);
-        }}
-        onComplete={() => setNotice("已生成，可在正文中继续修改")}
-        onClose={() => setWizardOpen(false)}
-        onFinish={handleWizardFinish}
-      />
       <ReviewReportDialog
         open={reviewOpen}
         outcome={reviewOutcome}
@@ -1064,6 +1073,19 @@ function App() {
         onLocate={locateReviewNode}
         onRerun={() => void runReview()}
       />
+      <QualityDrawer
+        open={qualityOpen}
+        findings={displayedFindings}
+        canReview={canReview}
+        reviewing={reviewing}
+        onClose={() => setQualityOpen(false)}
+        onLocate={(finding) => locateReviewNode(finding.nodeId)}
+        onReview={() => {
+          setQualityOpen(false);
+          void runReview();
+        }}
+      />
+      <DocumentInfoDialog open={infoOpen} onClose={() => setInfoOpen(false)} />
       <CommandPalette
         open={commandOpen}
         actions={commandActions}

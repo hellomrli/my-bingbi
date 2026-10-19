@@ -137,7 +137,8 @@ export function useDraftPipeline({
 
   function providerRejection(): string | null {
     const selected = providers.find((provider) => provider.id === providerId);
-    const restricted = isRestricted(document);
+    // Read the store at call time: the composer may have just swapped in a fresh document.
+    const restricted = isRestricted(useWorkbenchStore.getState().document);
     if (!selected?.enabled || (restricted && !selected.isLocal)) {
       return restricted ? "当前密级仅允许本地模型，请先选择本地服务。" : "模型服务不可用，请先在设置中启用服务。";
     }
@@ -341,6 +342,9 @@ export function useDraftPipeline({
     try {
       await saveBeforeDraft();
       const snapshot = useWorkbenchStore.getState().document;
+      // Remember exactly what the pipeline saw: a completed event may only be written back
+      // while the workbench still shows this id/revision.
+      runBaseRef.current = { id: snapshot.id, revision: snapshot.revision };
       const outcome = await start(
         {
           documentId: snapshot.id,
@@ -354,7 +358,7 @@ export function useDraftPipeline({
       );
       // Older runtimes may return the outcome without delivering the final channel event.
       const current = useWorkbenchStore.getState().document;
-      if (shouldApplyDraftOutcome(current.id, current.revision, outcome)) {
+      if (shouldApplyDraftOutcome(current.id, current.revision, outcome) && canWriteBack(current.id)) {
         applyOutcome(outcome);
       }
     } catch (runError) {
@@ -383,6 +387,7 @@ export function useDraftPipeline({
         });
       }
     } finally {
+      runBaseRef.current = null;
       setDrafting(false);
     }
   }

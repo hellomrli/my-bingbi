@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import { useWorkbenchStore } from "./store/workbench";
@@ -59,13 +59,42 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("App", () => {
-  it("renders the workbench with the demo document and security status", async () => {
+describe("App writing desk", () => {
+  it("opens on a single writing input instead of a form", async () => {
     render(<App />);
 
-    expect((await screen.findAllByText("关于申请购置应急排水设备经费的请示")).length).toBeGreaterThan(0);
-    expect(screen.getByText("允许配置的云端模型")).toBeTruthy();
-    expect(screen.getByText("版式预览")).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "今天想写点什么？" })).toBeTruthy();
+    expect(screen.getByLabelText("写作要求")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /开始写作/ })).toBeTruthy();
+    // Optional metadata fields stay out of the main flow.
+    expect(screen.queryByText("发文机关标志")).toBeNull();
+    expect(screen.queryByText("密级")).toBeNull();
+  });
+
+  it("accepts a rough brief and an optional document type", async () => {
+    render(<App />);
+    const material = screen.getByLabelText("写作要求") as HTMLTextAreaElement;
+
+    fireEvent.change(material, {
+      target: { value: "给各乡镇发一个防汛检查通知，下周开始检查，重点看值班和物资。" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "通知" }));
+
+    expect(material.value).toContain("防汛检查");
+    expect(screen.getByRole("button", { name: "通知" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "自动识别" }).getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("continues the current document into the workspace", async () => {
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /继续编辑/ }));
+
+    expect(screen.getByRole("tab", { name: "编辑" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "版式" })).toBeTruthy();
+    const title = screen.getByLabelText("公文标题") as HTMLInputElement;
+    expect(title.value).toBe("关于申请购置应急排水设备经费的请示");
+    expect(screen.getByRole("button", { name: /^质检/ })).toBeTruthy();
   });
 
   it("saves the current document with Ctrl+S", async () => {
@@ -81,53 +110,50 @@ describe("App", () => {
     expect(await screen.findByText("已保存版本 1")).toBeTruthy();
   });
 
-  it("creates a blank document and switches to the structure editor", async () => {
+  it("creates a blank document and returns to the writing desk", async () => {
     render(<App />);
 
-    fireEvent.click(screen.getByRole("button", { name: "新建公文" }));
+    fireEvent.click(await screen.findByRole("button", { name: "更多" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /新建写作/ }));
 
-    expect(await screen.findByText("已创建空白 ODoc")).toBeTruthy();
+    expect(await screen.findByText("已新建空白文档，从写作台开始吧")).toBeTruthy();
     expect(useWorkbenchStore.getState().document.body.title.text).toBe("");
-    expect(useWorkbenchStore.getState().view).toBe("structure");
+    expect(screen.getByLabelText("写作要求")).toBeTruthy();
   });
 
-  it("opens the drafting wizard from the toolbar", async () => {
-    render(<App />);
-
-    fireEvent.click(screen.getByRole("button", { name: "向导模式" }));
-
-    expect(screen.getByRole("dialog", { name: "向导模式" })).toBeTruthy();
-    expect(screen.getByText(/第 1 \/ 3 步/)).toBeTruthy();
-  });
-
-  it("opens the command palette with Ctrl+K and runs a searched action", async () => {
+  it("opens the command palette and runs the settings action", async () => {
     render(<App />);
 
     fireEvent.keyDown(window, { key: "k", ctrlKey: true });
     const search = await screen.findByLabelText("搜索命令");
-    fireEvent.change(search, { target: { value: "向导" } });
+    fireEvent.change(search, { target: { value: "设置" } });
     fireEvent.keyDown(search, { key: "Enter" });
 
-    expect(screen.getByRole("dialog", { name: "向导模式" })).toBeTruthy();
+    expect(await screen.findByRole("dialog", { name: "设置" })).toBeTruthy();
   });
 
-  it("fills the writing material from the wizard when no model is available", async () => {
+  it("keeps optional document fields in a dialog", async () => {
     render(<App />);
-    fireEvent.click(screen.getByRole("button", { name: "向导模式" }));
-    const dialog = screen.getByRole("dialog", { name: "向导模式" });
+    fireEvent.click(await screen.findByRole("button", { name: /继续编辑/ }));
+    fireEvent.click(screen.getByRole("button", { name: "更多" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /文档信息/ }));
 
-    fireEvent.change(within(dialog).getByLabelText(/发文事由/), { target: { value: "开展汛前检查" } });
-    fireEvent.change(within(dialog).getByLabelText(/主送机关/), { target: { value: "×××单位" } });
-    // brief → details → review
-    for (let step = 0; step < 2; step += 1) {
-      fireEvent.click(within(dialog).getByRole("button", { name: /下一步/ }));
-    }
-    fireEvent.click(within(dialog).getByRole("button", { name: /填入写作材料/ }));
+    expect(await screen.findByRole("dialog", { name: "文档信息" })).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("发文字号"), { target: { value: "×政〔2026〕9号" } });
+    expect(useWorkbenchStore.getState().document.header?.documentNumber).toBe("×政〔2026〕9号");
+    fireEvent.click(screen.getByRole("button", { name: "完成" }));
+    expect(screen.queryByRole("dialog", { name: "文档信息" })).toBeNull();
+  });
 
-    const material = screen.getByPlaceholderText(/给各乡镇发一个防汛检查通知/) as HTMLTextAreaElement;
-    expect(material.value).toContain("【文种】请示");
-    expect(material.value).toContain("【事由】开展汛前检查");
-    expect(await screen.findByText(/向导内容已填入写作区/)).toBeTruthy();
-    expect(useWorkbenchStore.getState().document.meta.docType).toBe("request");
+  it("shows quality findings in a drawer", async () => {
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: /继续编辑/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^质检/ }));
+
+    const drawer = await screen.findByRole("dialog", { name: "质检结果" });
+    expect(drawer).toBeTruthy();
+    expect(screen.getByText(/事实台账/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "返回正文" }));
+    expect(screen.queryByRole("dialog", { name: "质检结果" })).toBeNull();
   });
 });
