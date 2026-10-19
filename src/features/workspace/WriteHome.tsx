@@ -45,6 +45,8 @@ interface WriteHomeProps {
   providerId: string;
   onProviderChange: (value: string) => void;
   desktop: boolean;
+  /** True from the click until the pipeline reports its first stage. */
+  starting: boolean;
   drafting: boolean;
   stage: DraftStageId | null;
   completedStages: DraftStageId[];
@@ -72,6 +74,7 @@ export function WriteHome({
   providerId,
   onProviderChange,
   desktop,
+  starting,
   drafting,
   stage,
   completedStages,
@@ -101,12 +104,13 @@ export function WriteHome({
   const references = useMemo(() => parseMaterialReferences(material), [material]);
   const stageCount = Object.keys(draftStageLabels).length;
   const progress = Math.min(100, Math.round((completedStages.length / stageCount) * 100));
+  const busy = starting || drafting;
   const canStart = desktop && Boolean(selectedProvider?.enabled) && Boolean(material.trim());
   const byteLength = materialByteLength(material);
   const recent = recentDocuments.slice(0, 4);
 
   async function addFiles(files: File[]) {
-    if (files.length === 0 || referenceBusy || drafting) return;
+    if (files.length === 0 || referenceBusy || busy) return;
     setReferenceBusy(true);
     setReferenceMessage(null);
     let nextMaterial = material;
@@ -134,7 +138,7 @@ export function WriteHome({
   }
 
   function removeReference(reference: MaterialReference) {
-    if (drafting) return;
+    if (busy) return;
     onMaterialChange(removeMaterialReference(material, reference));
     setReferenceMessage({ text: `已移除：${reference.label}`, error: false });
   }
@@ -148,7 +152,7 @@ export function WriteHome({
           <p>把要写的事说清楚就行。文种、标题和格式会自动处理，不用先填表。</p>
         </header>
 
-        {currentTitle.trim() && (
+        {currentTitle.trim() && !busy && (
           <button className="continue-document" type="button" onClick={onContinueDocument}>
             <FileText size={15} />
             继续编辑《{currentTitle.trim()}》
@@ -156,7 +160,19 @@ export function WriteHome({
           </button>
         )}
 
-        <section className={drafting ? "composer-card is-busy" : "composer-card"} aria-label="写作输入区">
+        <section className={busy ? "composer-card is-busy" : "composer-card"} aria-label="写作输入区">
+          {busy && (
+            <div className="composer-running" role="status" aria-live="polite">
+              <div className="composer-running-head">
+                <LoaderCircle size={15} className="is-spinning" />
+                <strong>{stage ? draftStageLabels[stage] : "正在准备写作…"}</strong>
+                <span>{completedStages.length} / {stageCount}</span>
+              </div>
+              <div className={stage ? "composer-progress-bar" : "composer-progress-bar is-indeterminate"} aria-hidden="true">
+                <span style={stage ? { width: `${Math.max(6, progress)}%` } : undefined} />
+              </div>
+            </div>
+          )}
           <textarea
             className="composer-input"
             aria-label="写作要求"
@@ -164,13 +180,13 @@ export function WriteHome({
             value={material}
             onChange={(event) => onMaterialChange(event.target.value)}
             onKeyDown={(event) => {
-              if ((event.ctrlKey || event.metaKey) && event.key === "Enter" && canStart && !drafting) {
+              if ((event.ctrlKey || event.metaKey) && event.key === "Enter" && canStart && !busy) {
                 event.preventDefault();
                 onStart(docType);
               }
             }}
             rows={7}
-            disabled={drafting}
+            disabled={busy}
           />
 
           <div className="composer-types" role="group" aria-label="文种">
@@ -180,7 +196,7 @@ export function WriteHome({
               type="button"
               aria-pressed={docType === null}
               onClick={() => setDocType(null)}
-              disabled={drafting}
+              disabled={busy}
             >
               自动识别
             </button>
@@ -191,7 +207,7 @@ export function WriteHome({
                 aria-pressed={docType === type.value}
                 key={type.value}
                 onClick={() => setDocType(docType === type.value ? null : type.value)}
-                disabled={drafting}
+                disabled={busy}
               >
                 {type.label}
               </button>
@@ -208,7 +224,7 @@ export function WriteHome({
                     className="reference-remove"
                     type="button"
                     onClick={() => removeReference(reference)}
-                    disabled={drafting}
+                    disabled={busy}
                     aria-label={`移除参考文件 ${reference.label}`}
                   >
                     <X size={12} />
@@ -231,13 +247,13 @@ export function WriteHome({
                   event.target.value = "";
                   void addFiles(files);
                 }}
-                disabled={drafting || referenceBusy}
+                disabled={busy || referenceBusy}
               />
               <button
                 className="composer-tool"
                 type="button"
                 onClick={() => uploadRef.current?.click()}
-                disabled={drafting || referenceBusy}
+                disabled={busy || referenceBusy}
                 title="添加参考文件（可选）"
               >
                 {referenceBusy ? <LoaderCircle size={14} className="is-spinning" /> : <FileUp size={14} />}
@@ -248,7 +264,7 @@ export function WriteHome({
                   className="composer-tool"
                   type="button"
                   onClick={() => setKnowledgeOpen(true)}
-                  disabled={drafting}
+                  disabled={busy}
                   title="从知识库引用（可选）"
                 >
                   <Database size={14} />
@@ -262,7 +278,7 @@ export function WriteHome({
                     aria-label="模型服务"
                     value={selectedProvider?.enabled ? providerId : enabledProviders[0]?.id ?? ""}
                     onChange={(event) => onProviderChange(event.target.value)}
-                    disabled={drafting}
+                    disabled={busy}
                   >
                     {enabledProviders.map((provider) => (
                       <option key={provider.id} value={provider.id}>
@@ -282,12 +298,12 @@ export function WriteHome({
               className="start-writing-button"
               type="button"
               onClick={() => onStart(docType)}
-              disabled={!canStart || drafting}
+              disabled={!canStart || busy}
               title={!desktop ? "浏览器预览不调用模型，请在桌面版生成" : !material.trim() ? "先写一下想生成什么" : !selectedProvider?.enabled ? "请先配置模型服务" : undefined}
             >
-              {drafting ? <LoaderCircle size={16} className="is-spinning" /> : <Sparkles size={15} />}
-              {drafting ? "正在写" : "开始写作"}
-              {!drafting && <ArrowRight size={15} />}
+              {busy ? <LoaderCircle size={16} className="is-spinning" /> : <Sparkles size={15} />}
+              {starting ? "正在准备" : drafting ? "正在写" : "开始写作"}
+              {!busy && <ArrowRight size={15} />}
             </button>
           </div>
           <div className="composer-footnote">
@@ -324,30 +340,27 @@ export function WriteHome({
               aria-label="确认文种"
               value={confirmedDocType ?? typeDecision.value}
               onChange={(event) => onConfirmedDocTypeChange(event.target.value as DocumentType)}
-              disabled={drafting}
+              disabled={busy}
             >
               {Object.entries(documentTypeLabels).map(([value, label]) => (
                 <option key={value} value={value}>{label}</option>
               ))}
             </select>
-            <button className="command-button primary" type="button" onClick={onConfirmDocType} disabled={drafting}>
+            <button className="command-button primary" type="button" onClick={onConfirmDocType} disabled={busy}>
               <Check size={14} /> 确认并继续
             </button>
           </div>
         )}
 
-        {drafting && (
+        {busy && draftText && (
           <div className="composer-progress" role="status" aria-live="polite">
             <div className="composer-progress-head">
               <LoaderCircle size={15} className="is-spinning" />
-              <strong>{stage ? draftStageLabels[stage] : "准备写作"}</strong>
+              <strong>正在写入正文</strong>
               <span>{completedStages.length} / {stageCount}</span>
             </div>
-            <div className="composer-progress-bar" aria-hidden="true">
-              <span style={{ width: `${Math.max(4, progress)}%` }} />
-            </div>
-            {draftText && <pre className="composer-stream">{draftText.slice(-2200)}</pre>}
-            <span className="composer-progress-note">正在写，完成后会自动进入正文。</span>
+            <pre className="composer-stream">{draftText.slice(-2200)}</pre>
+            <span className="composer-progress-note">完成后会自动进入正文。</span>
           </div>
         )}
 
@@ -366,7 +379,7 @@ export function WriteHome({
           }}
         />
 
-        {recent.length > 0 && (
+        {!busy && recent.length > 0 && (
           <section className="recent-section" aria-label="最近文档">
             <div className="recent-heading">
               <span>最近编辑</span>

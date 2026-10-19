@@ -9,7 +9,7 @@ vi.mock("./lib/ipc", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./lib/ipc")>();
   return {
     ...actual,
-    isDesktopRuntime: () => false,
+    isDesktopRuntime: vi.fn(() => false),
     backendVersion: vi.fn(async () => "browser-preview"),
     createEmptyDocument: vi.fn(async () => (await import("./lib/document")).createEmptyDocument()),
     loadAppConfig: vi.fn(async () => ({ ...actual.defaultAppConfig, firstRunCompleted: true })),
@@ -43,7 +43,7 @@ vi.mock("./lib/ipc", async (importOriginal) => {
   };
 });
 
-import { saveDocument } from "./lib/ipc";
+import { createEmptyDocument, isDesktopRuntime, saveDocument } from "./lib/ipc";
 
 const mockedSave = vi.mocked(saveDocument);
 
@@ -51,6 +51,8 @@ beforeEach(() => {
   localStorage.clear();
   useWorkbenchStore.setState(useWorkbenchStore.getInitialState(), true);
   mockedSave.mockClear();
+  vi.mocked(isDesktopRuntime).mockReturnValue(false);
+  vi.mocked(createEmptyDocument).mockImplementation(async () => (await import("./lib/document")).createEmptyDocument());
   vi.spyOn(window, "confirm").mockReturnValue(true);
 });
 
@@ -143,6 +145,27 @@ describe("App writing desk", () => {
     expect(useWorkbenchStore.getState().document.header?.documentNumber).toBe("×政〔2026〕9号");
     fireEvent.click(screen.getByRole("button", { name: "完成" }));
     expect(screen.queryByRole("dialog", { name: "文档信息" })).toBeNull();
+  });
+
+  it("shows a progress bar immediately after clicking start", async () => {
+    vi.mocked(isDesktopRuntime).mockReturnValue(true);
+    // Keep the preflight document creation pending: the click must already be visible.
+    vi.mocked(createEmptyDocument).mockReturnValue(new Promise(() => {}));
+    render(<App />);
+    await screen.findByRole("option", { name: "本地 Ollama" });
+
+    fireEvent.change(screen.getByLabelText("写作要求"), {
+      target: { value: "给各乡镇发一个防汛检查通知" },
+    });
+    const start = screen.getByRole("button", { name: /开始写作/ });
+    await waitFor(() => expect((start as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(start);
+
+    expect(await screen.findByText("正在准备写作…")).toBeTruthy();
+    expect(screen.getByText(/正在写作 · 准备写作/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: /正在准备/ })).toBeTruthy();
+    expect(document.querySelector(".composer-running")).toBeTruthy();
+    expect(document.querySelector(".writing-progress")).toBeTruthy();
   });
 
   it("shows quality findings in a drawer", async () => {

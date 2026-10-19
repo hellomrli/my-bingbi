@@ -37,6 +37,7 @@ interface AppHeaderProps {
   hasVersions: boolean;
   showGrid: boolean;
   theme: AppTheme;
+  starting: boolean;
   drafting: boolean;
   stage: DraftStageId | null;
   completedStages: DraftStageId[];
@@ -101,6 +102,7 @@ export function AppHeader({
   hasVersions,
   showGrid,
   theme,
+  starting,
   drafting,
   stage,
   completedStages,
@@ -152,11 +154,14 @@ export function AppHeader({
   const activeStage = reviewing ? reviewStage : stage;
   const completed = reviewing ? completedReviewStages : completedStages;
   const total = reviewing ? reviewStages.length : draftStages.length;
+  const busy = starting || drafting;
   const stageLabel = activeStage
     ? reviewing
       ? reviewStageLabels[activeStage as ReviewStageId]
       : draftStageLabels[activeStage as DraftStageId]
-    : "准备中";
+    : starting
+      ? "准备写作"
+      : "准备中";
 
   return (
     <>
@@ -251,12 +256,12 @@ export function AppHeader({
         </div>
       </header>
 
-      {(drafting || reviewing) && (
+      {(busy || reviewing) && (
         <div className="writing-progress" role="status" aria-live="polite">
           <LoaderCircle size={14} className="is-spinning" />
           <span>{reviewing ? "正在审核" : "正在写作"} · {stageLabel}</span>
-          <div className="writing-progress-track" aria-hidden="true">
-            <span style={{ width: `${Math.max(4, Math.round((completed.length / total) * 100))}%` }} />
+          <div className={activeStage ? "writing-progress-track" : "writing-progress-track is-indeterminate"} aria-hidden="true">
+            <span style={activeStage ? { width: `${Math.max(4, Math.round((completed.length / total) * 100))}%` } : undefined} />
           </div>
           <small>{completed.length} / {total}</small>
         </div>

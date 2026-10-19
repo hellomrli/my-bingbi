@@ -138,6 +138,7 @@ function App() {
   const [providers, setProviders] = useState<ProviderProfile[]>([]);
   const [providerId, setProviderId] = useState("");
   const [material, setMaterial] = useState("");
+  const [startingDraft, setStartingDraft] = useState(false);
   const [engineLintReport, setEngineLintReport] = useState<RevisionedReport<LintReport> | null>(null);
   const [engineFactCheckReport, setEngineFactCheckReport] = useState<RevisionedReport<FactCheckReport> | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
@@ -569,26 +570,30 @@ function App() {
   }
 
   async function handleStartWriting(docType: DocumentType | null) {
-    if (draftPipeline.drafting) return;
+    if (draftPipeline.drafting || startingDraft) return;
     if (!material.trim()) {
       setNotice("先写一下想生成什么，再开始");
       return;
     }
-    const current = useWorkbenchStore.getState().document;
-    if (!isBlankDocument(current)) {
-      if (useWorkbenchStore.getState().dirty && !window.confirm("当前修改尚未保存，仍要新建一篇吗？")) return;
-      try {
+    // Flip this before the first await: creating the document and saving it can take a
+    // moment, and the user must see that the click registered before the first stage starts.
+    setStartingDraft(true);
+    try {
+      const current = useWorkbenchStore.getState().document;
+      if (!isBlankDocument(current)) {
+        if (useWorkbenchStore.getState().dirty && !window.confirm("当前修改尚未保存，仍要新建一篇吗？")) return;
         const next = await createEmptyDocument();
         setDocument(next, null);
         setEngineLintReport(null);
         setEngineFactCheckReport(null);
         setSavedVersion(null);
-      } catch (error) {
-        setNotice(ipcErrorMessage(error));
-        return;
       }
+      await draftPipeline.startDraft(docType, material);
+    } catch (error) {
+      setNotice(ipcErrorMessage(error));
+    } finally {
+      setStartingDraft(false);
     }
-    void draftPipeline.startDraft(docType, material);
   }
 
   function handleReviewEvent(event: ReviewEvent) {
@@ -874,6 +879,7 @@ function App() {
         hasVersions={savedVersion !== null && savedVersion > 0}
         showGrid={showGrid}
         theme={theme}
+        starting={startingDraft}
         drafting={draftPipeline.drafting}
         stage={draftPipeline.stage}
         completedStages={draftPipeline.completedStages}
@@ -918,6 +924,7 @@ function App() {
             providerId={providerId}
             onProviderChange={setProviderId}
             desktop={desktopRuntime}
+            starting={startingDraft}
             drafting={draftPipeline.drafting}
             stage={draftPipeline.stage}
             completedStages={draftPipeline.completedStages}

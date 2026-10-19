@@ -1557,3 +1557,53 @@
     min-height: 200px;
   }
 }
+
+/* —— 点击「开始写作」后的即时反馈 —— */
+.composer-running {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin: -2px 0 12px;
+  padding: 9px 11px;
+  border: 1px solid var(--accent-line);
+  border-radius: var(--r-md);
+  background: var(--accent-soft);
+}
+
+.composer-running-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--accent);
+  font-size: var(--fs-sm);
+}
+
+.composer-running-head strong {
+  flex: 1;
+}
+
+.composer-running-head span {
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+}
+
+.composer-running .composer-progress-bar {
+  margin: 0;
+  background: var(--accent-line);
+}
+
+.composer-running .composer-progress-bar span {
+  background: var(--accent);
+}
+
+.composer-progress-bar.is-indeterminate span,
+.writing-progress-track.is-indeterminate span {
+  width: 35% !important;
+  animation: indeterminate-bar 1.15s ease-in-out infinite;
+}
+
+@keyframes indeterminate-bar {
+  0% { transform: translateX(-120%); }
+  100% { transform: translateX(360%); }
+}

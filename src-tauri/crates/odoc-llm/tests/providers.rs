@@ -145,6 +145,7 @@ async fn openai_chat_uses_compatible_endpoint_and_keeps_secret_out_of_json() {
     let body = request.split("\r\n\r\n").nth(1).expect("body should exist");
     assert!(!body.contains("top-secret-key"));
     assert!(body.contains("\"model\":\"test-model\""));
+    assert!(body.contains("\"max_tokens\":64"));
     task.await.expect("mock server should finish");
 }
 
@@ -172,6 +173,45 @@ async fn openai_chat_accepts_cline_success_data_envelope() {
     assert_eq!(response.content, "收到");
     assert_eq!(response.finish_reason.as_deref(), Some("stop"));
     assert_eq!(response.usage.expect("usage should exist").total_tokens, 10);
+    task.await.expect("mock server should finish");
+}
+
+#[tokio::test]
+async fn cline_pass_omits_the_completion_cap() {
+    let body = r#"{"success":true,"data":{"choices":[{"message":{"content":"OK"},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":1,"total_tokens":6}}}"#;
+    let (base_url, request_rx, task) = spawn_server(MockResponse {
+        status: "200 OK",
+        content_type: "application/json",
+        chunks: vec![body.as_bytes().to_vec()],
+        initial_delay: Duration::ZERO,
+        chunk_delay: Duration::ZERO,
+    })
+    .await;
+    let client = ProviderClient::new(
+        ProviderProfile::try_from(ProviderProfileInput {
+            id: "cline-pass".to_owned(),
+            kind: ProviderKind::OpenAiCompatible,
+            display_name: "Cline Pass".to_owned(),
+            base_url: format!("{base_url}/api/v1"),
+            model: "cline-pass/deepseek-v4.1-flash".to_owned(),
+            enabled: true,
+        })
+        .expect("profile"),
+        Some("cline-key".to_owned()),
+    )
+    .expect("client should build");
+    let mut request = chat_request(SecurityLevel::Internal);
+    request.max_tokens = Some(512);
+
+    client.chat(request).await.expect("chat should succeed");
+
+    let request =
+        String::from_utf8_lossy(&request_rx.await.expect("request should be captured")).to_string();
+    let body = request.split("\r\n\r\n").nth(1).expect("body should exist");
+    assert!(
+        !body.contains("\"max_tokens\""),
+        "Cline Pass must let the gateway choose the output limit"
+    );
     task.await.expect("mock server should finish");
 }
 

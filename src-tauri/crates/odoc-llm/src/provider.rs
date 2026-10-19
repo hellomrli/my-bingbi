@@ -252,7 +252,18 @@ impl ProviderClient {
         ensure_success(response)
     }
 
+    /// Cline Pass fronts reasoning models whose hidden thinking also counts against
+    /// `max_tokens`; an engine-sized budget can be exhausted before any content is produced.
+    /// Omitting the field lets the gateway apply the model's own completion limit.
+    fn without_completion_cap(&self, mut request: ChatRequest) -> ChatRequest {
+        if self.profile.id == "cline-pass" {
+            request.max_tokens = None;
+        }
+        request
+    }
+
     async fn chat_openai(&self, request: ChatRequest) -> Result<ChatResponse, LlmError> {
+        let request = self.without_completion_cap(request);
         let body = OpenAiRequest::new(&self.profile.model, request, false);
         let response = self.send(&body).await?;
         let response: OpenAiResponse = decode_json(response).await?;
@@ -273,6 +284,7 @@ impl ProviderClient {
         request: ChatRequest,
         sender: Sender<ChatDelta>,
     ) -> Result<(), LlmError> {
+        let request = self.without_completion_cap(request);
         let body = OpenAiRequest::new(&self.profile.model, request, true);
         let response = self.send_streaming(&body).await?;
         let mut stream = response.bytes_stream();
