@@ -757,7 +757,7 @@ impl<'a, J: DraftJournal, P: LlmProvider + ?Sized> DraftEngine<'a, J, P> {
                 reason: "draft content cannot be empty",
             });
         }
-        apply_draft_text(&mut context.document, output.content.clone(), replace);
+        apply_draft_text(&mut context.document, &output.content, replace);
         Ok(output)
     }
 
@@ -1286,8 +1286,18 @@ fn template_block(block: TemplateBlock) -> Block {
 /// back into real `ODoc` blocks: storing the whole text in one paragraph would silently discard the
 /// template structure the outline stage just built. Plain-text output keeps the old filling
 /// behavior as a fallback.
-fn apply_draft_text(document: &mut ODoc, content: String, replace: bool) {
-    let blocks = parse_draft_blocks(&content);
+fn apply_draft_text(document: &mut ODoc, content: &str, replace: bool) {
+    // A fresh draft may start with a `【标题】...` line. Rewrites (deai/correct) must never
+    // replace the title, so only the initial draft is allowed to extract one.
+    let (title, body) = if replace {
+        (None, content)
+    } else {
+        split_draft_title(content)
+    };
+    if let Some(title) = title {
+        document.body.title.text = title;
+    }
+    let blocks = parse_draft_blocks(body);
     if blocks
         .iter()
         .any(|block| matches!(block, Block::Heading { .. }))
@@ -1306,7 +1316,24 @@ fn apply_draft_text(document: &mut ODoc, content: String, replace: bool) {
         replace_paragraphs(document, paragraphs);
         return;
     }
-    fill_first_paragraph(document, content);
+    fill_first_paragraph(document, body.to_owned());
+}
+
+/// Splits the optional `【标题】...` first line from a fresh draft.
+fn split_draft_title(content: &str) -> (Option<String>, &str) {
+    let trimmed = content.trim_start();
+    let line_end = trimmed.find('\n').unwrap_or(trimmed.len());
+    let first = trimmed[..line_end].trim();
+    let title = first
+        .strip_prefix("【标题】")
+        .or_else(|| first.strip_prefix("标题："))
+        .or_else(|| first.strip_prefix("标题:"))
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    match title {
+        Some(title) => (Some(title.to_owned()), trimmed[line_end..].trim_start()),
+        None => (None, content),
+    }
 }
 
 fn fill_first_paragraph(document: &mut ODoc, content: String) {
@@ -2378,6 +2405,22 @@ mod tests {
                 .iter()
                 .any(|stage| stage.stage_id == StageId::Correct)
         );
+    }
+
+    #[test]
+    fn extracts_the_optional_title_line_from_a_fresh_draft() {
+        let mut document = ODoc::empty();
+        apply_draft_text(
+            &mut document,
+            "【标题】关于开展汛前安全检查的通知\n\n一、总体要求\n\n请各乡镇认真组织实施。",
+            false,
+        );
+        assert_eq!(document.body.title.text, "关于开展汛前安全检查的通知");
+        assert!(matches!(
+            document.body.blocks.first(),
+            Some(Block::Heading { content, .. }) if content == "总体要求"
+        ));
+        assert!(!document.to_plain_text().contains("【标题】"));
     }
 
     #[test]
