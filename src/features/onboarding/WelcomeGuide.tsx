@@ -1,4 +1,4 @@
-import { BookOpen, Check, ChevronRight, Database, FileText, ScanSearch, Sparkles } from "lucide-react";
+import { BookOpen, Check, ChevronRight, Database, FileText, PenLine, ScanSearch } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useModal } from "../../hooks/useModal";
 import { ipcErrorMessage, listProviderProfiles } from "../../lib/ipc";
@@ -15,10 +15,10 @@ interface WelcomeGuideProps {
 }
 
 const capabilityHighlights = [
-  { icon: FileText, title: "起草", detail: "填要素出初稿，事实可溯、格式合规" },
-  { icon: Sparkles, title: "仿写", detail: "给一篇范文，学其笔法写同类公文" },
-  { icon: ScanSearch, title: "审核", detail: "体检已有公文，格式与语义双轨检查" },
-  { icon: Database, title: "知识库", detail: "对接你的 Obsidian 库，检索增强" },
+  { icon: FileText, title: "起草", detail: "一句话写清要办的事，自动生成初稿" },
+  { icon: PenLine, title: "编辑", detail: "生成后按段落修改，版式自动合规" },
+  { icon: ScanSearch, title: "质检", detail: "规则硬校验 + 事实回查，风险标红" },
+  { icon: Database, title: "知识库", detail: "对接你的 Obsidian 库，按需引用" },
 ];
 
 export function WelcomeGuide({ open, onComplete, onOpenSettings, onSelectProvider, onClose }: WelcomeGuideProps) {
@@ -126,7 +126,7 @@ export function WelcomeGuide({ open, onComplete, onOpenSettings, onSelectProvide
         {step === 2 && (
           <div className="welcome-guide-body">
             <h2>准备就绪</h2>
-            <p className="welcome-guide-lead">现在可以开始第一份公文了：在左侧写下大致意图，或上传/引用参考材料，点击「开始起草」即可，无需先写正文。</p>
+            <p className="welcome-guide-lead">现在可以开始第一份公文了：在写作台输入框里写清大致意图，参考文件和知识库都可选，点击「开始写作」即可，无需先写正文。</p>
             <div className="welcome-guide-checklist">
               {["文种路由与事实提取自动完成", "生成的数字与日期会回查标红", "一键导出符合 GB/T 9704 的 DOCX"].map((item) => (
                 <div key={item}><Check size={14} />{item}</div>
