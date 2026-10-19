@@ -1,11 +1,15 @@
 schema_version = "0.1"
 # 上游基线：Liuxiangjian-ai/official-document-skill @ cbe5f8c（2026-06-12，V1.3）
+# 追加吸收：larashero3-dotcom/lieflat-gongwen @ e0a5aba（2026-09-05，PolyForm Noncommercial；
+#   仅吸收统计口径与写作原则，文字本地重写）
+# 追加吸收：Rimagination/gongwen-draft @ 559d28a（2026-06-29，上游未附许可证；
+#   仅吸收素材台账与引用核验方法，文字本地重写）
 # 本包是面向内核提示注入的精简改写，不逐字复制上游长文。
 
 [pack]
 id = "renmin-style"
 name = "务实公文表达包"
-version = "0.1.1"
+version = "0.2.0"
 description = "文种判断、事实提取、反 AI 味规则与质量评分量表"
 license = "MIT"
 source = "https://github.com/Liuxiangjian-ai/official-document-skill"
@@ -25,19 +29,26 @@ inject = ["references/document-type-router.md"]
 
 [[bindings]]
 stage = "facts"
-inject = ["references/fact-extraction.md"]
+inject = [
+  "references/fact-extraction.md",
+  "references/citation-policy.md",
+]
 
 [[bindings]]
 stage = "draft"
 inject = [
   "references/drafting-patterns.md",
   "references/sentence-bank.md",
+  "references/quantitative-style.md",
 ]
 retrieval = true
 
 [[bindings]]
 stage = "deai"
-inject = ["references/humanizer.md"]
+inject = [
+  "references/humanizer.md",
+  "references/quantitative-style.md",
+]
 
 [[bindings]]
 stage = "lint"
@@ -45,8 +56,15 @@ rules = ["rules/anti-ai.yaml"]
 
 [[bindings]]
 stage = "review"
-inject = ["references/humanizer.md"]
+inject = [
+  "references/humanizer.md",
+  "references/citation-policy.md",
+  "references/quantitative-style.md",
+]
 
 [[bindings]]
 stage = "score"
-inject = ["checklists/scoring-rubric.md"]
+inject = [
+  "checklists/scoring-rubric.md",
+  "references/quantitative-style.md",
+]

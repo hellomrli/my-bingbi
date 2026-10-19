@@ -1,11 +1,15 @@
 schema_version = "0.1"
 # 上游基线：KaguraNanaga/official-document-writing-skill @ e76a6f5（2026-01-26，v1.0）
+# 追加吸收：Rimagination/gongwen-draft @ 559d28a（2026-06-29，上游未附许可证；
+#   仅吸收标点、易混词与审核方法，文字本地重写）
+# 追加吸收：larashero3-dotcom/lieflat-gongwen @ e0a5aba（2026-09-05，PolyForm Noncommercial；
+#   仅吸收标题和收尾统计口径，文字本地重写）
 # 本包是面向内核提示注入的精简改写，不逐字复制上游长文。
 
 [pack]
 id = "gb9704-format"
 name = "GB/T 9704-2012 格式规范包"
-version = "0.1.1"
+version = "0.2.0"
 description = "公文版式参数与首批确定性格式规则"
 license = "MIT"
 source = "https://github.com/KaguraNanaga/official-document-writing-skill"

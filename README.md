@@ -160,7 +160,7 @@ Cline Pass 是一个聚合订阅网关，一个 Key 可以使用 DeepSeek、GLM�
 
 模板按文种在起草时自动加载；请求携带 `templateId`，内核只加载该模板的标题层级、固定称谓与结语。起草输出会按“一、/（一）/1.”解析回真实的 ODoc 标题与段落，不再把整篇正文塞进第一个段落。
 
-写作方法来自两个 MIT 许可的写作 Skill 项目，已转成知识包参考材料并绑定到对应阶段：`document-type-router.md`（文种判断）、`structure.md` / `language.md`（结构与数字日期标点）、`drafting-patterns.md` / `sentence-bank.md`（章法与句式）、`fact-extraction.md`（事实台账）、`humanizer.md`（降 AI 味）、`scoring-rubric.md`（评分量表）。内容为提炼改写，不是原文照搬。
+写作方法来自多个开源 Skill 项目的提炼改写，已转成知识包参考材料并绑定到对应阶段：`document-type-router.md`（文种判断）、`structure.md` / `language.md`（结构、数字日期与标点）、`drafting-patterns.md` / `sentence-bank.md`（章法与句式）、`quantitative-style.md`（句长、顿号、标题与力度词节奏）、`fact-extraction.md` / `citation-policy.md`（事实台账与引用核验）、`humanizer.md`（降 AI 味）、`scoring-rubric.md`（评分量表）。内容为本地重写，不是原文照搬；来源与许可见各包 `THIRD_PARTY.md`。
 
 ### 改一段，不动全文
 
@@ -311,9 +311,11 @@ git push origin v1.1.6
 
 ## 致谢
 
-公文知识底座参考了两个优秀的开源 Skill 项目，二者互补——前者偏格式规范，后者偏语言质量：
+公文知识底座参考了多个开源 Skill 项目，互补覆盖格式、语言、量化节奏和工程流程：
 
 - [KaguraNanaga/official-document-writing-skill](https://github.com/KaguraNanaga/official-document-writing-skill)（MIT）— GB/T 9704-2012 格式详解、文种模板、质量检查清单
 - [Liuxiangjian-ai/official-document-skill](https://github.com/Liuxiangjian-ai/official-document-skill)（MIT）— 文种决策、人民日报表达规律、降 AI 味与 humanizer 审稿
+- [larashero3-dotcom/lieflat-gongwen](https://github.com/larashero3-dotcom/lieflat-gongwen)（PolyForm Noncommercial 1.0.0）— 真实语料的句长、顿号、标题、力度词与收尾分布；本仓库只吸收统计口径与写作原则并本地重写
+- [Rimagination/gongwen-draft](https://github.com/Rimagination/gongwen-draft)（仓库未附许可证）— 素材台账、来源优先级、引用核验、标点与易混词审核方法；本仓库只吸收方法并本地重写
 
-本项目的工作是把其中**可机器判定**的部分从提示词转化为配置常量与校验规则，其余保留为按需检索的知识包。转换对照见 [`docs/PLAN.md` 附录](docs/PLAN.md)。
+本项目的工作是把其中**可机器判定**的部分从提示词转化为配置常量与校验规则，其余保留为按需检索的知识包。转换对照见 [`docs/PLAN.md` 附录](docs/PLAN.md)。上游非商用/未声明许可的内容若用于商业发行，请先自行评估适用性。

@@ -93,6 +93,33 @@ tests.md    2 KB  5 个回归用例（文种识别/通知可执行性/报告不�
 - **内部评分 rubric** → 变成**质量评分模块**的输出 schema。
 - **tests.md** → 变成**知识包回归测试**的模板，本项目要把它工程化（自动跑、自动判分）。
 
+### 2.2.1 larashero3-dotcom/lieflat-gongwen —— 量化侧
+
+基于真实公文语料的全量统计，把“像不像公文”拆成可测参数：
+
+```
+参数卡.md        文体族判定、六类事务材料的字数/句长/层级/顿号/力度词区间
+标题技法库.md    984 个真实标题的技法浓度梯度、篇名与一级标题的差异
+句子对照库.md    同一意思的短句版与公文版对照，说明并列和句长怎么补/怎么砍
+公文语料/        结构模板、语言 DNA、写作视角与认知框架
+```
+
+**吸收方式**：只取统计口径与写作原则，本地重写为 `quantitative-style.md`，绑定到 draft / deai / review / score；不复制原文和示例。上游为 PolyForm Noncommercial 1.0.0，商业发行需另行评估。
+
+### 2.2.2 Rimagination/gongwen-draft —— 流程侧
+
+面向公文 Agent 的工程化 skill，强调素材台账、来源优先级、引用核验和交付检查：
+
+```
+references/material-workflow.md   已确认事实/用户判断/待核实/建议措辞
+references/policy-research.md     政策检索、官方来源与引用台账
+references/citations.md           社区项目引用规范
+references/punctuation-style.md   全角标点、冒号、引号、层次序数
+references/review-checklist.md    审核清单与易混词
+```
+
+**吸收方式**：只取方法与流程，本地重写为 `citation-policy.md`、`language.md` 的标点/易混词章节和 `quality-checklist.md` 的复核重点；不复制原文。上游仓库未附许可证文件，商业发行需自行确认授权。
+
 ### 2.3 haierkeys/fast-note-sync-service（FNS）—— 你的知识库底座
 
 Go + WebSocket + React 的自建笔记同步服务，配套 Obsidian 插件 `obsidian-fast-note-sync`。**它提供的能力远超预期，直接决定了知识库层的设计**：
@@ -826,7 +853,7 @@ CI 用 GitHub Actions matrix（`windows-latest` + `ubuntu-22.04`）交叉产出�
 | **模型编造文号/政策/数据** | **极高**（事故级） | 事实白名单锁定 + 生成后正则回查 + 未命中标红 + error 级阻断导出 |
 | **公文涉密外泄** | **极高** | 密级检测 → 强制本地 Ollama；密钥走 Keyring；全本地存储；无遥测；操作日志本地留存可审计 |
 | **FNS 服务不可用**（离线/停机） | 中 | `LocalVaultProvider` 兜底直读 vault 目录；本地索引缓存可离线检索 |
-| **知识包版权** | 中 | ref1/ref2 均为 MIT，转换时保留 `source` 与 `license` 字段并在 README 致谢；国标条文属公开标准，注明依据 |
+| **知识包版权** | 中 | 原有 ref1/ref2 为 MIT；新增 lieflat-gongwen 为 PolyForm Noncommercial、gongwen-draft 未附许可证，只吸收统计口径/方法并本地重写，包内 `THIRD_PARTY.md` 保留来源与许可；商业发行前需复核上游许可 |
 | **检索召回质量差** | 中 | 混合召回（关键词+图谱+向量 RRF 融合）而非纯向量；frontmatter 结构化过滤；召回结果在 UI 上可见可手动增删 |
 | **Rust 学习成本 / 开发慢** | 中 | 内核 crate 边界清晰，先用最朴素实现跑通再优化；`odoc-lint`、`odoc-export` 这类纯函数模块单测覆盖高，便于放心重构 |
 | **流水线多次调模型，慢且贵** | 中 | 按 stage 分配便宜/强模型；stage 结果缓存；单步重跑不重跑全流程；UI 显示成本 |
