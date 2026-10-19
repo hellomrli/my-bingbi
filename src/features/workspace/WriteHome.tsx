@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { documentTypeLabels } from "../../lib/document";
-import { draftStageLabels, type DraftStageId } from "../../lib/engine";
+import { draftStageLabels, draftStages, type DraftStageId } from "../../lib/engine";
 import type { TypeDecision } from "../../lib/generated/engine";
 import type { ProviderProfile } from "../../lib/llm";
 import {
@@ -102,7 +102,7 @@ export function WriteHome({
   const enabledProviders = providers.filter((provider) => provider.enabled);
   const selectedProvider = providers.find((provider) => provider.id === providerId);
   const references = useMemo(() => parseMaterialReferences(material), [material]);
-  const stageCount = Object.keys(draftStageLabels).length;
+  const stageCount = draftStages.length;
   const progress = Math.min(100, Math.round((completedStages.length / stageCount) * 100));
   const busy = starting || drafting;
   const canStart = desktop && Boolean(selectedProvider?.enabled) && Boolean(material.trim());
