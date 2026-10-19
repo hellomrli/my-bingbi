@@ -255,10 +255,7 @@ impl ProviderClient {
     async fn chat_openai(&self, request: ChatRequest) -> Result<ChatResponse, LlmError> {
         let body = OpenAiRequest::new(&self.profile.model, request, false);
         let response = self.send(&body).await?;
-        let response: OpenAiResponse = response
-            .json()
-            .await
-            .map_err(|_| LlmError::InvalidResponse)?;
+        let response: OpenAiResponse = decode_json(response).await?;
         let choice = response
             .choices
             .into_iter()
@@ -421,6 +418,7 @@ impl ProviderClient {
             .json()
             .await
             .map_err(|_| LlmError::InvalidResponse)?;
+        let body = unwrap_success_envelope(body);
         let entries = match self.profile.kind {
             ProviderKind::Ollama => body.get("models").and_then(serde_json::Value::as_array),
             ProviderKind::OpenAiCompatible | ProviderKind::Anthropic => {
@@ -529,10 +527,7 @@ impl LlmProvider for ProviderClient {
             .send()
             .await
             .map_err(|error| map_reqwest_error(&error))?;
-        let response: EmbeddingResponse = ensure_success(response)?
-            .json()
-            .await
-            .map_err(|_| LlmError::InvalidResponse)?;
+        let response: EmbeddingResponse = decode_json(ensure_success(response)?).await?;
         let vectors = response
             .data
             .into_iter()
@@ -557,6 +552,29 @@ fn ensure_success(response: Response) -> Result<Response, LlmError> {
         // Drop the body unread: compatible services sometimes echo credentials in diagnostics,
         // and a hostile endpoint could otherwise force an unbounded error-body allocation.
         Err(LlmError::HttpStatus(status.as_u16()))
+    }
+}
+
+/// Decodes a non-streaming JSON response, accepting both a bare payload and the
+/// `{"success": true, "data": ...}` envelope used by Cline's API.
+async fn decode_json<T: serde::de::DeserializeOwned>(response: Response) -> Result<T, LlmError> {
+    let value: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|_| LlmError::InvalidResponse)?;
+    serde_json::from_value(unwrap_success_envelope(value)).map_err(|_| LlmError::InvalidResponse)
+}
+
+/// Cline's gateway wraps successful responses as `{"success": true, "data": <payload>}`.
+/// Unwrap only that exact shape so ordinary payloads that happen to contain a `data` field
+/// (for example `OpenAI`'s `/models` response) are left untouched.
+fn unwrap_success_envelope(value: serde_json::Value) -> serde_json::Value {
+    if value.get("success").and_then(serde_json::Value::as_bool) != Some(true) {
+        return value;
+    }
+    match value.get("data") {
+        Some(data) if !data.is_null() => data.clone(),
+        _ => value,
     }
 }
 

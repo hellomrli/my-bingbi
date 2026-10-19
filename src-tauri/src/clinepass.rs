@@ -297,32 +297,32 @@ fn shipped_context(id: &str) -> Option<u64> {
         .map(|(_, _, context)| *context)
 }
 
-/// Curated fallback for the first paint and for offline gateways, mirroring the dsh plugin's
-/// published catalog.
+/// Curated fallback for the first paint and for offline gateways, mirroring the official
+/// ClinePass catalog. Deprecated models are deliberately omitted so the picker never offers
+/// a model the gateway has already retired.
 const SHIPPED_MODELS: &[(&str, &str, u64)] = &[
+    ("cline-pass/glm-5.3", "GLM-5.3", 1_000_000),
+    ("cline-pass/glm-5.3-flash", "GLM-5.3 Flash", 1_000_000),
+    ("cline-pass/kimi-k3", "Kimi K3", 1_048_576),
+    ("cline-pass/deepseek-v4-pro", "DeepSeek V4 Pro", 1_000_000),
     (
         "cline-pass/deepseek-v4.1-flash",
         "DeepSeek V4.1 Flash",
         1_000_000,
     ),
-    (
-        "cline-pass/deepseek-v4-flash",
-        "DeepSeek V4 Flash",
-        1_000_000,
-    ),
-    ("cline-pass/deepseek-v4-pro", "DeepSeek V4 Pro", 1_000_000),
-    ("cline-pass/glm-5.3", "GLM-5.3", 1_000_000),
-    ("cline-pass/glm-5.3-flash", "GLM-5.3 Flash", 1_000_000),
-    ("cline-pass/glm-5.2", "GLM-5.2", 1_000_000),
-    ("cline-pass/kimi-k3", "Kimi K3", 1_048_576),
-    ("cline-pass/kimi-k2.7-code", "Kimi K2.7 Code", 262_144),
-    ("cline-pass/kimi-k2.6", "Kimi K2.6", 262_144),
+    ("cline-pass/mimo-v2.5", "MiMo-V2.5", 1_048_576),
+    ("cline-pass/mimo-v2.5-pro", "MiMo-V2.5-Pro", 1_048_576),
+    ("cline-pass/mimo-v2.6-flash", "MiMo-V2.6 Flash", 1_048_576),
+    ("cline-pass/mimo-v2.6-pro", "MiMo-V2.6 Pro", 1_048_576),
     ("cline-pass/minimax-m3", "MiniMax-M3", 1_048_576),
+    (
+        "cline-pass/muse-spark-1.3-contributor",
+        "Muse Spark 1.3 Contributor",
+        1_048_576,
+    ),
     ("cline-pass/qwen3.8-max", "Qwen3.8 Max", 1_000_000),
     ("cline-pass/qwen3.7-max", "Qwen3.7 Max", 1_000_000),
     ("cline-pass/qwen3.7-plus", "Qwen3.7 Plus", 1_000_000),
-    ("cline-pass/mimo-v2.5-pro", "MiMo-V2.5-Pro", 1_048_576),
-    ("cline-pass/mimo-v2.5", "MiMo-V2.5", 1_048_576),
 ];
 
 #[cfg(test)]

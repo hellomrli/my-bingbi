@@ -149,6 +149,33 @@ async fn openai_chat_uses_compatible_endpoint_and_keeps_secret_out_of_json() {
 }
 
 #[tokio::test]
+async fn openai_chat_accepts_cline_success_data_envelope() {
+    let body = r#"{"success":true,"data":{"choices":[{"message":{"content":"收到"},"finish_reason":"stop"}],"usage":{"prompt_tokens":8,"completion_tokens":2,"total_tokens":10}}}"#;
+    let (base_url, _request_rx, task) = spawn_server(MockResponse {
+        status: "200 OK",
+        content_type: "application/json",
+        chunks: vec![body.as_bytes().to_vec()],
+        initial_delay: Duration::ZERO,
+        chunk_delay: Duration::ZERO,
+    })
+    .await;
+    let client = ProviderClient::new(
+        profile(ProviderKind::OpenAiCompatible, format!("{base_url}/v1")),
+        Some("cline-key".to_owned()),
+    )
+    .expect("client should build");
+
+    let response = client
+        .chat(chat_request(SecurityLevel::Internal))
+        .await
+        .expect("wrapped chat should succeed");
+    assert_eq!(response.content, "收到");
+    assert_eq!(response.finish_reason.as_deref(), Some("stop"));
+    assert_eq!(response.usage.expect("usage should exist").total_tokens, 10);
+    task.await.expect("mock server should finish");
+}
+
+#[tokio::test]
 async fn openai_stream_handles_fragmented_sse_and_done_marker() {
     let event_one =
         "data: {\"choices\":[{\"delta\":{\"content\":\"你\"},\"finish_reason\":null}]}\n\n";
