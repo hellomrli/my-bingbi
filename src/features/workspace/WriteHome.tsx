@@ -11,8 +11,10 @@ import {
   Sparkles,
   X,
 } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { documentTypeLabels } from "../../lib/document";
+import { ipcErrorMessage, readDroppedReference } from "../../lib/ipc";
 import { draftStageLabels, draftStages, type DraftStageId } from "../../lib/engine";
 import type { TypeDecision } from "../../lib/generated/engine";
 import type { ProviderProfile } from "../../lib/llm";
@@ -117,47 +119,122 @@ export function WriteHome({
   const overLimit = totalBytes > MAX_DRAFT_MATERIAL_BYTES;
   const canStart = desktop && Boolean(selectedProvider?.enabled) && Boolean(material.trim()) && !overLimit;
   const recent = recentDocuments.slice(0, 4);
+  const busyRef = useRef(busy);
+  busyRef.current = busy;
+  const dropHandlerRef = useRef<(paths: string[]) => void>(() => {});
+
+  function commitReferenceTexts(items: Array<{ label: string; content: string }>) {
+    const incoming: DraftReference[] = [];
+    const labels = new Set(references.map((reference) => reference.label));
+    let failure: string | null = null;
+    for (const item of items) {
+      const label = safeReferenceLabel(item.label);
+      if (labels.has(label)) {
+        failure = `${label} 已经加入参考材料。`;
+        continue;
+      }
+      if (!item.content.trim()) {
+        failure = `${label} 没有可读取的文字。`;
+        continue;
+      }
+      incoming.push({ id: createId("ref"), kind: "上传文件", label, content: item.content });
+      labels.add(label);
+    }
+    const nextBytes = byteLength + referenceBytes + referenceContentBytes(incoming);
+    if (incoming.length > 0 && nextBytes > MAX_DRAFT_MATERIAL_BYTES) {
+      setReferenceMessage({ text: "参考材料与写作要求合计超过 2 MiB，请减少文件或摘取关键段落。", error: true });
+      return;
+    }
+    if (incoming.length > 0) {
+      onAddReferences(incoming);
+      setReferenceMessage({ text: `已加入 ${incoming.length} 份参考材料（正文不会粘贴文件内容）`, error: false });
+    }
+    if (failure) setReferenceMessage({ text: failure, error: true });
+  }
 
   async function addFiles(files: File[]) {
     if (files.length === 0 || referenceBusy || busy) return;
     setReferenceBusy(true);
     setReferenceMessage(null);
-    const incoming: DraftReference[] = [];
-    const labels = new Set(references.map((reference) => reference.label));
+    const items: Array<{ label: string; content: string }> = [];
     let failure: string | null = null;
     try {
       for (const file of files) {
-        const label = safeReferenceLabel(file.name);
-        if (labels.has(label)) {
-          failure = `${label} 已经加入参考材料。`;
-          continue;
-        }
         try {
           const text = await extractUploadedFileText(file, desktop);
-          if (!text.trim()) {
-            failure = `${label} 没有可读取的文字。`;
-            continue;
-          }
-          incoming.push({ id: createId("ref"), kind: "上传文件", label, content: text });
-          labels.add(label);
+          items.push({ label: file.name, content: text });
         } catch (uploadError) {
           failure = uploadError instanceof Error ? uploadError.message : "参考文件读取失败";
         }
       }
-      const nextBytes = byteLength + referenceBytes + referenceContentBytes(incoming);
-      if (incoming.length > 0 && nextBytes > MAX_DRAFT_MATERIAL_BYTES) {
-        setReferenceMessage({ text: "参考材料与写作要求合计超过 2 MiB，请减少文件或摘取关键段落。", error: true });
-        return;
-      }
-      if (incoming.length > 0) {
-        onAddReferences(incoming);
-        setReferenceMessage({ text: `已加入 ${incoming.length} 份参考材料（正文不会粘贴文件内容）`, error: false });
-      }
+      commitReferenceTexts(items);
       if (failure) setReferenceMessage({ text: failure, error: true });
     } finally {
       setReferenceBusy(false);
     }
   }
+
+  async function addDroppedPaths(paths: string[]) {
+    if (paths.length === 0 || referenceBusy || busy) return;
+    setReferenceBusy(true);
+    setReferenceMessage(null);
+    const items: Array<{ label: string; content: string }> = [];
+    let failure: string | null = null;
+    try {
+      for (const path of paths) {
+        try {
+          const dropped = await readDroppedReference(path);
+          items.push({ label: dropped.fileName, content: dropped.text });
+        } catch (dropError) {
+          failure = ipcErrorMessage(dropError);
+        }
+      }
+      commitReferenceTexts(items);
+      if (failure) setReferenceMessage({ text: failure, error: true });
+    } finally {
+      setReferenceBusy(false);
+    }
+  }
+
+  dropHandlerRef.current = (paths) => {
+    void addDroppedPaths(paths);
+  };
+
+  // Tauri intercepts OS file drops: the WebView never gets HTML5 File objects. Listen for the
+  // native paths, then read/extract them through the kernel.
+  useEffect(() => {
+    if (!desktop) return;
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    try {
+      getCurrentWebview()
+        .onDragDropEvent((event) => {
+          if (disposed) return;
+          const payload = event.payload;
+          if (payload.type === "enter" || payload.type === "over") {
+            if (!busyRef.current) setDragActive(true);
+          } else if (payload.type === "leave") {
+            setDragActive(false);
+          } else if (payload.type === "drop") {
+            setDragActive(false);
+            dropHandlerRef.current(payload.paths);
+          }
+        })
+        .then((stop) => {
+          if (disposed) stop();
+          else unlisten = stop;
+        })
+        .catch(() => {
+          // Browser preview or a webview without native drop support: keep HTML5 drag/drop.
+        });
+    } catch {
+      // A test/browser runtime may expose __TAURI_INTERNALS__ without a native webview.
+    }
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [desktop]);
 
   function removeReference(reference: DraftReference) {
     if (busy) return;

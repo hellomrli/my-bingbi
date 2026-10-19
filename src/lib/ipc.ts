@@ -275,6 +275,24 @@ export async function extractReferenceText(fileName: string, bytes: Uint8Array):
   return invoke<string>("extract_reference_text", { fileName, bytes: Array.from(bytes) });
 }
 
+export interface DroppedReference {
+  fileName: string;
+  text: string;
+}
+
+/**
+ * Reads a path delivered by Tauri's native file-drop event.
+ *
+ * The WebView cannot open arbitrary native paths, so text/Office extraction happens in the
+ * kernel; only the bounded extracted text crosses back into the composer state.
+ */
+export async function readDroppedReference(path: string): Promise<DroppedReference> {
+  if (!isDesktopRuntime()) {
+    throw browserError("reference_upload_unavailable", "参考文件拖拽仅在桌面应用中可用。");
+  }
+  return invoke<DroppedReference>("read_dropped_reference", { path });
+}
+
 export async function exportPdf(documentId: string): Promise<PdfExportResult> {
   if (!isDesktopRuntime()) {
     throw browserError("export_unavailable", "PDF 导出仅在桌面应用中可用。");

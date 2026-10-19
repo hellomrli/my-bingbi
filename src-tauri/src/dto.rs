@@ -105,3 +105,11 @@ pub(crate) struct UpdateCheckResult {
     pub(crate) current_version: String,
     pub(crate) installed: bool,
 }
+
+/// Extracted text and original file name for a file dropped onto the native window.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DroppedReference {
+    pub(crate) file_name: String,
+    pub(crate) text: String,
+}

@@ -130,6 +130,7 @@ pub fn run() {
             commands::document::import_docx,
             commands::document::extract_docx_text,
             commands::document::extract_reference_text,
+            commands::document::read_dropped_reference,
             commands::export::export_pdf,
             commands::export::export_capabilities,
             commands::export::save_docx_template,

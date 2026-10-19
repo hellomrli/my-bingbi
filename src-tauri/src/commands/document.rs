@@ -1,15 +1,17 @@
 //! Document CRUD, versions, diffing, restore, import, and reference extraction.
 
-use crate::dto::{RestoreVersionResult, VersionDiff};
+use crate::dto::{DroppedReference, RestoreVersionResult, VersionDiff};
 use crate::error::{IpcError, map_import_error, map_reference_error, map_store_error};
 use crate::state::AppState;
 use crate::util::{MAX_DRAFT_MATERIAL_BYTES, lock_documents};
 use odoc_export::{extract_reference_text as parse_reference_text, read_docx};
 use odoc_model::ODoc;
 use odoc_store::{DocumentSummary, DocumentVersionSummary, SaveDocumentResult};
+use std::path::Path;
 use tauri::State;
 
 const MAX_REFERENCE_FILE_BYTES: usize = 64 * 1024 * 1024;
+const TEXT_REFERENCE_EXTENSIONS: &[&str] = &["txt", "md", "markdown", "csv", "json", "yaml", "yml"];
 
 #[tauri::command]
 pub(crate) fn create_empty_document() -> ODoc {
@@ -208,6 +210,94 @@ pub(crate) fn extract_reference_text(
     Ok(text)
 }
 
+/// Reads a file path supplied by a native window drop event and extracts bounded text.
+///
+/// Browsers cannot read arbitrary native paths, so Tauri forwards dropped paths instead of
+/// `File` objects. Text formats are decoded in the kernel (UTF-8/UTF-16/GB18030); Office and
+/// PDF formats use the same bounded extractor as webview uploads.
+#[tauri::command(async)]
+pub(crate) fn read_dropped_reference(path: String) -> Result<DroppedReference, IpcError> {
+    let path = Path::new(&path);
+    let metadata = std::fs::metadata(path).map_err(|_| IpcError {
+        code: "reference_unreadable",
+        message: "无法读取拖入的参考文件，请确认文件仍然存在。",
+    })?;
+    if !metadata.is_file() {
+        return Err(IpcError {
+            code: "reference_invalid",
+            message: "拖入的内容不是文件。",
+        });
+    }
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| {
+            !name.trim().is_empty() && name.len() <= 512 && !name.contains(['\0', '\r', '\n'])
+        })
+        .map(str::to_owned)
+        .ok_or(IpcError {
+            code: "reference_invalid",
+            message: "参考文件名无效。",
+        })?;
+    let extension = file_name
+        .rsplit_once('.')
+        .map_or("", |(_, extension)| extension)
+        .to_ascii_lowercase();
+    let text_extension = TEXT_REFERENCE_EXTENSIONS.contains(&extension.as_str());
+    let binary_extension = matches!(
+        extension.as_str(),
+        "pdf" | "ofd" | "doc" | "docx" | "xlsx" | "xls" | "wps"
+    );
+    if !text_extension && !binary_extension {
+        return Err(IpcError {
+            code: "reference_invalid",
+            message: "暂不支持这种参考文件格式。",
+        });
+    }
+    if metadata.len() == 0 || metadata.len() > MAX_REFERENCE_FILE_BYTES as u64 {
+        return Err(IpcError {
+            code: "reference_too_large",
+            message: "参考文件为空或超过 64 MiB 限制。",
+        });
+    }
+    let bytes = std::fs::read(path).map_err(|_| IpcError {
+        code: "reference_unreadable",
+        message: "无法读取拖入的参考文件，请检查访问权限。",
+    })?;
+    if bytes.is_empty() || bytes.len() > MAX_REFERENCE_FILE_BYTES {
+        return Err(IpcError {
+            code: "reference_too_large",
+            message: "参考文件为空或超过 64 MiB 限制。",
+        });
+    }
+    let text = if text_extension {
+        decode_dropped_text(&bytes)
+    } else {
+        parse_reference_text(&file_name, &bytes).map_err(map_reference_error)?
+    };
+    if text.trim().is_empty() || text.len() > MAX_DRAFT_MATERIAL_BYTES {
+        return Err(IpcError {
+            code: "reference_too_large",
+            message: "参考文件提取后的文字为空或超过起草材料 2 MiB 限制。",
+        });
+    }
+    Ok(DroppedReference { file_name, text })
+}
+
+fn decode_dropped_text(bytes: &[u8]) -> String {
+    if bytes.len() >= 2 && bytes[0] == 0xff && bytes[1] == 0xfe {
+        return encoding_rs::UTF_16LE.decode(&bytes[2..]).0.into_owned();
+    }
+    if bytes.len() >= 2 && bytes[0] == 0xfe && bytes[1] == 0xff {
+        return encoding_rs::UTF_16BE.decode(&bytes[2..]).0.into_owned();
+    }
+    match std::str::from_utf8(bytes) {
+        Ok(text) => text.to_owned(),
+        // Windows-produced TXT/CSV files in Chinese offices are commonly GBK/GB18030.
+        Err(_) => encoding_rs::GB18030.decode(bytes).0.into_owned(),
+    }
+}
+
 /// Beyond this many lines per side the LCS becomes too slow to run synchronously and the
 /// counts degrade to "everything changed" (the text diff itself is unaffected).
 const MAX_DIFF_LCS_LINES: usize = 20_000;
@@ -261,6 +351,23 @@ mod tests {
     #[test]
     fn reports_the_backend_version() {
         assert!(backend_version().starts_with("rust-core "));
+    }
+
+    #[test]
+    fn reads_dropped_text_references_and_rejects_unknown_formats() {
+        let directory = tempfile::tempdir().expect("temp directory");
+        let text_path = directory.path().join("检查材料.txt");
+        std::fs::write(&text_path, "一、值班值守\n二、防汛物资").expect("write text");
+        let dropped = read_dropped_reference(text_path.to_string_lossy().into_owned())
+            .expect("text reference should read");
+        assert_eq!(dropped.file_name, "检查材料.txt");
+        assert!(dropped.text.contains("值班值守"));
+
+        let unsupported = directory.path().join("notes.exe");
+        std::fs::write(&unsupported, b"not a reference").expect("write unsupported");
+        let error = read_dropped_reference(unsupported.to_string_lossy().into_owned())
+            .expect_err("unsupported format should fail");
+        assert_eq!(error.code, "reference_invalid");
     }
 
     #[test]
