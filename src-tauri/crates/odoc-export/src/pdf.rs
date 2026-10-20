@@ -1,4 +1,5 @@
 use super::Gb9704Style;
+use crate::heading_numbering::HeadingNumbering;
 use odoc_model::{Block, ODoc};
 use std::fmt::Write as _;
 
@@ -65,6 +66,7 @@ fn push_header(html: &mut String, document: &ODoc) {
 }
 
 fn push_body(html: &mut String, document: &ODoc) {
+    let mut numbering = HeadingNumbering::default();
     for block in &document.body.blocks {
         if let Block::Heading { content, level, .. } = block {
             let tag = match level {
@@ -75,7 +77,7 @@ fn push_body(html: &mut String, document: &ODoc) {
             html.push('<');
             html.push_str(tag);
             html.push('>');
-            html.push_str(&html_escape(content));
+            html.push_str(&html_escape(&numbering.format(*level, content)));
             html.push_str("</");
             html.push_str(tag);
             html.push('>');

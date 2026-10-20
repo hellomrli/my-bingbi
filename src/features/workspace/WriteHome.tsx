@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { documentTypeLabels } from "../../lib/document";
+import { documentTypeLabels, securityLabels } from "../../lib/document";
 import { ipcErrorMessage, readDroppedReference } from "../../lib/ipc";
 import { draftStageLabels, draftStages, type DraftStageId } from "../../lib/engine";
 import type { TypeDecision } from "../../lib/generated/engine";
@@ -26,7 +26,7 @@ import {
   safeReferenceLabel,
   type DraftReference,
 } from "../../lib/materialReferences";
-import type { DocumentType } from "../../lib/odoc";
+import type { DocumentType, SecurityLevel } from "../../lib/odoc";
 import { extractUploadedFileText, uploadAccept } from "../../lib/referenceFiles";
 import type { DocumentSummary } from "../../lib/store";
 import { KnowledgePickerDialog } from "./KnowledgePickerDialog";
@@ -63,7 +63,9 @@ interface WriteHomeProps {
   onOpenDocuments: () => void;
   onOpenRecent: (id: string) => void;
   recentDocuments: DocumentSummary[];
-  documentId: string;
+  securityLevel: SecurityLevel;
+  onSecurityLevelChange: (level: SecurityLevel) => void;
+  prepareKnowledgeDocument: () => Promise<string>;
   kbEnabled: boolean;
   currentTitle: string;
   onContinueDocument: () => void;
@@ -94,7 +96,9 @@ export function WriteHome({
   onOpenDocuments,
   onOpenRecent,
   recentDocuments,
-  documentId,
+  securityLevel,
+  onSecurityLevelChange,
+  prepareKnowledgeDocument,
   kbEnabled,
   currentTitle,
   onContinueDocument,
@@ -108,8 +112,9 @@ export function WriteHome({
   const [dragActive, setDragActive] = useState(false);
   const [referenceMessage, setReferenceMessage] = useState<{ text: string; error: boolean } | null>(null);
   const uploadRef = useRef<HTMLInputElement>(null);
-  const enabledProviders = providers.filter((provider) => provider.enabled);
-  const selectedProvider = providers.find((provider) => provider.id === providerId);
+  const restricted = securityLevel === "secret" || securityLevel === "confidential";
+  const enabledProviders = providers.filter((provider) => provider.enabled && (!restricted || provider.isLocal));
+  const selectedProvider = enabledProviders.find((provider) => provider.id === providerId);
   const stageCount = draftStages.length;
   const progress = Math.min(100, Math.round((completedStages.length / stageCount) * 100));
   const busy = starting || drafting;
@@ -117,7 +122,8 @@ export function WriteHome({
   const referenceBytes = referenceContentBytes(references);
   const totalBytes = byteLength + referenceBytes;
   const overLimit = totalBytes > MAX_DRAFT_MATERIAL_BYTES;
-  const canStart = desktop && Boolean(selectedProvider?.enabled) && Boolean(material.trim()) && !overLimit;
+  const canStart = desktop && Boolean(selectedProvider?.enabled) && (!restricted || selectedProvider?.isLocal === true)
+    && Boolean(material.trim()) && !overLimit;
   const recent = recentDocuments.slice(0, 4);
   const busyRef = useRef(busy);
   busyRef.current = busy;
@@ -317,6 +323,7 @@ export function WriteHome({
             ref={uploadRef}
             className="visually-hidden"
             type="file"
+            aria-label="上传参考文件"
             multiple
             accept={uploadAccept()}
             onChange={(event) => {
@@ -374,6 +381,19 @@ export function WriteHome({
 
           <div className="composer-footer">
             <div className="composer-tools">
+              <label className="composer-model">
+                <span>密级</span>
+                <select
+                  aria-label="写作密级"
+                  value={securityLevel}
+                  onChange={(event) => onSecurityLevelChange(event.target.value as SecurityLevel)}
+                  disabled={busy}
+                >
+                  {Object.entries(securityLabels).map(([value, label]) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
+                </select>
+              </label>
               {kbEnabled && (
                 <button
                   className="composer-tool"
@@ -448,7 +468,7 @@ export function WriteHome({
         )}
         {desktop && enabledProviders.length === 0 && (
           <div className="composer-message is-error">
-            还没有可用的模型服务。
+            {restricted ? "当前密级仅允许本地模型，请配置并启用本地服务。" : "还没有可用的模型服务。"}
             <button className="inline-link" type="button" onClick={onOpenSettings}>去设置</button>
           </div>
         )}
@@ -490,7 +510,7 @@ export function WriteHome({
 
         <KnowledgePickerDialog
           open={knowledgeOpen}
-          documentId={documentId}
+          prepareDocument={prepareKnowledgeDocument}
           onClose={() => setKnowledgeOpen(false)}
           onInsert={(label, content) => {
             if (references.some((reference) => reference.label === label)) {

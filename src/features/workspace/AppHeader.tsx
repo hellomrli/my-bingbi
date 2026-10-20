@@ -199,8 +199,7 @@ export function AppHeader({
             className="header-export"
             type="button"
             onClick={onExport}
-            disabled={errorCount > 0}
-            title={errorCount > 0 ? `存在 ${errorCount} 项错误，暂不能导出` : "导出 DOCX"}
+            title={errorCount > 0 ? `存在 ${errorCount} 项错误，点击查看并修正` : "导出 DOCX"}
           >
             <Download size={15} />
             导出
@@ -231,7 +230,7 @@ export function AppHeader({
                   disabled={!canReview}
                   onSelect={() => run(onReview)}
                 />
-                <MenuItem icon={Info} label="文档信息" disabled={composing} onSelect={() => run(onOpenInfo)} />
+                <MenuItem icon={Info} label="文档信息" disabled={busy} onSelect={() => run(onOpenInfo)} />
                 <MenuItem
                   icon={History}
                   label="版本历史"

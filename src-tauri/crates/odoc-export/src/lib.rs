@@ -5,6 +5,7 @@
 //! the semantic structure that can be represented by the first `ODoc` schema.
 
 pub mod fonts;
+mod heading_numbering;
 mod import;
 mod odoc_to_typst;
 mod pdf;
@@ -22,6 +23,7 @@ pub use style::{FontStyle, FontStyles, Gb9704Style, HeaderStyle, PageStyle, Styl
 pub use template::{validate_docx_template, write_docx_with_template};
 pub use typst_render::render_typst_pdf;
 
+use heading_numbering::HeadingNumbering;
 use odoc_model::{Block, HeadingLevel, ListStyle, ODoc};
 use std::fmt::Write as _;
 use std::io::{Cursor, Write};
@@ -388,8 +390,9 @@ pub(crate) fn document_xml(document: &ODoc, style: &Gb9704Style) -> String {
     {
         body.push_str(&paragraph(recipient, ParagraphKind::Recipient, style));
     }
+    let mut heading_numbering = HeadingNumbering::default();
     for block in &document.body.blocks {
-        body.push_str(&block_xml(block, style));
+        body.push_str(&block_xml(block, style, &mut heading_numbering));
     }
     for (index, attachment) in document.body.attachments.iter().enumerate() {
         let mut text = format!("附件{}：{}", index + 1, attachment.title.trim());
@@ -442,10 +445,11 @@ enum ParagraphKind {
     Note,
 }
 
-fn block_xml(block: &Block, style: &Gb9704Style) -> String {
+fn block_xml(block: &Block, style: &Gb9704Style, numbering: &mut HeadingNumbering) -> String {
     match block {
         Block::Heading { level, content, .. } => {
-            paragraph(content, ParagraphKind::Heading(*level), style)
+            let content = numbering.format(*level, content);
+            paragraph(&content, ParagraphKind::Heading(*level), style)
         }
         Block::Paragraph { content, .. } => paragraph(content, ParagraphKind::Body, style),
         Block::Quote { content, .. } => paragraph(content, ParagraphKind::Quote, style),
@@ -727,5 +731,50 @@ mod tests {
             write_docx(&document),
             Err(ExportError::InvalidDocument(_))
         ));
+    }
+
+    #[test]
+    fn docx_typst_and_print_html_number_canonical_headings_identically() {
+        let headings = [
+            (HeadingLevel::L1, "总体要求", "一、总体要求"),
+            (HeadingLevel::L2, "检查范围", "（一）检查范围"),
+            (HeadingLevel::L3, "实施目标", "1. 实施目标"),
+            (HeadingLevel::L4, "具体措施", "（1）具体措施"),
+            (HeadingLevel::L4, "补充措施", "（2）补充措施"),
+            (HeadingLevel::L2, "职责分工", "（二）职责分工"),
+            (HeadingLevel::L3, "落实责任", "1. 落实责任"),
+            (HeadingLevel::L1, "组织保障", "二、组织保障"),
+            (HeadingLevel::L2, "（一）已有编号", "（一）已有编号"),
+            (HeadingLevel::L2, "后续事项", "（二）后续事项"),
+        ];
+        let mut document = ODoc::empty();
+        document.body.blocks = headings
+            .iter()
+            .map(|(level, content, _)| Block::heading(*level, (*content).to_owned()))
+            .collect();
+        let bytes = write_docx(&document).unwrap();
+        let mut archive = ZipArchive::new(Cursor::new(bytes)).unwrap();
+        let mut xml = String::new();
+        archive
+            .by_name("word/document.xml")
+            .unwrap()
+            .read_to_string(&mut xml)
+            .unwrap();
+        let typst = odoc_to_typst(&document, &Gb9704Style::default());
+        let html = print_html(&document, &Gb9704Style::default());
+        for (_, _, expected) in headings {
+            assert!(xml.contains(expected), "DOCX missing {expected}");
+            assert!(typst.contains(expected), "Typst missing {expected}");
+            assert!(html.contains(expected), "Print HTML missing {expected}");
+        }
+        assert!(!xml.contains("（一）（一）"));
+        assert_eq!(
+            document.body.blocks[0],
+            Block::Heading {
+                id: document.body.blocks[0].id().to_owned(),
+                level: HeadingLevel::L1,
+                content: "总体要求".to_owned(),
+            }
+        );
     }
 }

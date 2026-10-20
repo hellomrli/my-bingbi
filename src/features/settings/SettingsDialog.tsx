@@ -673,6 +673,7 @@ export function SettingsDialog({ open, config, onClose, onSave, onShowGuide, ini
                       placeholder="https://api.example.com"
                       required
                     />
+                    <span className="field-hint">填写完整 API 根地址（如 /v1、/v2 或 /api/paas/v4）；只填域名时使用协议默认路径。</span>
                   </div>
                   <div className="settings-group">
                     <label htmlFor="provider-model">模型</label>

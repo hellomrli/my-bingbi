@@ -1,8 +1,9 @@
 import { ChevronDown, History, LoaderCircle, X } from "lucide-react";
 import { useModal } from "../../hooks/useModal";
 import { useEffect, useState } from "react";
-import { draftStageLabels, type DraftStageId } from "../../lib/engine";
+import { draftStageLabels, sessionOutcomeDocument, type DraftStageId } from "../../lib/engine";
 import { ipcErrorMessage, listSessions, listStageRuns } from "../../lib/ipc";
+import type { ODoc } from "../../lib/odoc";
 import type { SessionSummary, StageRunRecord } from "../../lib/store";
 
 interface SessionHistoryDialogProps {
@@ -10,6 +11,7 @@ interface SessionHistoryDialogProps {
   documentId: string | null;
   title: string;
   onClose: () => void;
+  onRecover: (document: ODoc) => Promise<void>;
 }
 
 const pipelineLabels: Record<string, string> = {
@@ -42,12 +44,26 @@ export function SessionHistoryDialog({
   documentId,
   title,
   onClose,
+  onRecover,
 }: SessionHistoryDialogProps) {
   const [sessions, setSessions] = useState<SessionSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [runs, setRuns] = useState<Record<string, StageRunRecord[]>>({});
   const [runBusy, setRunBusy] = useState<string | null>(null);
+  const [recovering, setRecovering] = useState(false);
+
+  async function recover(document: ODoc) {
+    setRecovering(true);
+    setError(null);
+    try {
+      await onRecover(document);
+    } catch (recoveryError) {
+      setError(ipcErrorMessage(recoveryError));
+    } finally {
+      setRecovering(false);
+    }
+  }
 
   useEffect(() => {
     if (!open || !documentId) return;
@@ -124,6 +140,7 @@ export function SessionHistoryDialog({
           {sessions?.map((session) => {
             const open = expanded === session.id;
             const stageRuns = runs[session.id];
+            const generated = sessionOutcomeDocument(session.stateJson);
             return (
               <div className={open ? "session-row is-expanded" : "session-row"} key={session.id}>
                 <button
@@ -142,6 +159,11 @@ export function SessionHistoryDialog({
                     ? <LoaderCircle size={14} className="is-spinning" />
                     : <ChevronDown size={14} className={open ? "is-flipped" : undefined} />}
                 </button>
+                {open && generated && (
+                  <button className="command-button" type="button" disabled={recovering} onClick={() => void recover(generated)}>
+                    另存生成结果（不覆盖当前文档）
+                  </button>
+                )}
                 {open && (
                   <table className="session-run-table">
                     <thead>

@@ -162,6 +162,21 @@ describe("useDraftPipeline", () => {
     expect(useWorkbenchStore.getState().document.body.title.text).toBe("运行期间用户改过的标题");
   });
 
+  it("does not start a draft when the document changes during the preflight save", async () => {
+    const saveBeforeDraft = vi.fn(async () => {
+      useWorkbenchStore.getState().updateTitle("保存期间用户修改的标题");
+    });
+    const { result } = renderPipeline({ saveBeforeDraft });
+
+    await act(async () => {
+      await result.current.startDraft(null);
+    });
+
+    expect(mockedStartDraft).not.toHaveBeenCalled();
+    expect(result.current.error).toContain("准备运行时文档已变更");
+    expect(useWorkbenchStore.getState().document.body.title.text).toBe("保存期间用户修改的标题");
+  });
+
   it("runs with the material the wizard composed, before the textarea re-renders", async () => {
     const document = useWorkbenchStore.getState().document;
     mockedStartDraft.mockResolvedValue(outcomeFor(document, 5));
@@ -284,5 +299,27 @@ describe("useDraftPipeline", () => {
 
     expect(result.current.completedStages).toEqual(["doctype", "facts", "retrieve"]);
     expect(mockedRerunStage).toHaveBeenCalledWith("session-1", "retrieve", expect.any(Function));
+  });
+
+  it("does not apply a stage rerun over edits made while it was running", async () => {
+    const document = useWorkbenchStore.getState().document;
+    mockedStartDraft.mockResolvedValue(outcomeFor(document, 5));
+    const { result, callbacks } = renderPipeline();
+    await act(async () => {
+      await result.current.startDraft(null);
+    });
+
+    mockedRerunStage.mockImplementation(async () => {
+      useWorkbenchStore.getState().updateTitle("重跑期间用户修改的标题");
+      const currentRevision = useWorkbenchStore.getState().document.revision;
+      return rerunFor({ ...document, revision: currentRevision + 1 }, "retrieve");
+    });
+    await act(async () => {
+      await result.current.rerun("retrieve");
+    });
+
+    expect(callbacks.onRerunOutcome).not.toHaveBeenCalled();
+    expect(result.current.error).toContain("运行期间文档已被修改");
+    expect(useWorkbenchStore.getState().document.body.title.text).toBe("重跑期间用户修改的标题");
   });
 });

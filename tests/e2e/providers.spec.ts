@@ -1,8 +1,9 @@
 import { expect, test } from "@playwright/test";
+import { openSettings } from "./helpers";
 
 test("adds a common provider from the preset picker", async ({ page }) => {
   await page.goto("/");
-  await page.getByRole("button", { name: "设置" }).click();
+  await openSettings(page);
   await page.getByRole("button", { name: "模型服务" }).click();
 
   await page.getByLabel("常用服务").selectOption("moonshot");
@@ -22,7 +23,7 @@ test("adds a common provider from the preset picker", async ({ page }) => {
 
 test("keeps the custom-provider path next to the presets", async ({ page }) => {
   await page.goto("/");
-  await page.getByRole("button", { name: "设置" }).click();
+  await openSettings(page);
   await page.getByRole("button", { name: "模型服务" }).click();
 
   await page.getByRole("button", { name: "新增模型服务" }).click();
@@ -34,7 +35,7 @@ test("keeps the custom-provider path next to the presets", async ({ page }) => {
 
 test("exposes the Cline Pass console as its own settings tab", async ({ page }) => {
   await page.goto("/");
-  await page.getByRole("button", { name: "设置" }).click();
+  await openSettings(page);
   await page.getByRole("button", { name: "Cline Pass" }).click();
 
   await expect(page.getByText(/一个订阅覆盖 DeepSeek/)).toBeVisible();

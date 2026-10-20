@@ -126,6 +126,7 @@ pub fn run() {
             commands::engine::rerun_stage,
             commands::engine::review_start,
             commands::lint::lint_document_now,
+            commands::lint::fact_check_document_now,
             commands::export::export_docx,
             commands::document::import_docx,
             commands::document::extract_docx_text,

@@ -18,7 +18,9 @@ pub enum StoreError {
     VersionNotFound { doc_id: String, seq: u32 },
     #[error("invalid document: {0}")]
     InvalidDocument(String),
-    #[error("document '{id}' revision {incoming} is older than stored revision {stored}")]
+    #[error("document '{0}' changed since the operation started")]
+    DocumentConflict(String),
+    #[error("document '{id}' revision {incoming} does not advance stored revision {stored}")]
     StaleRevision {
         id: String,
         incoming: u32,

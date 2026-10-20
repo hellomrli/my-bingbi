@@ -1,26 +1,8 @@
 import type { ReactNode } from "react";
-import type { Block, HeadingLevel } from "../../lib/odoc";
+import type { Block } from "../../lib/odoc";
+import { createHeadingCounters, formatHeading } from "../../lib/headingNumbering";
 import { markUnverifiedSegments } from "../../lib/lint";
 import { useWorkbenchStore } from "../../store/workbench";
-
-const chineseDigits = ["零", "一", "二", "三", "四", "五", "六", "七", "八", "九", "十"];
-
-function chineseNumber(value: number): string {
-  // Chinese numerals stay readable up to 99; headings beyond that fall back to Arabic digits.
-  if (value > 99) return String(value);
-  if (value <= 10) return chineseDigits[value];
-  if (value < 20) return `十${chineseDigits[value - 10]}`;
-  const tens = Math.floor(value / 10);
-  const ones = value % 10;
-  return `${chineseDigits[tens]}十${ones ? chineseDigits[ones] : ""}`;
-}
-
-function headingPrefix(level: HeadingLevel, number: number): string {
-  if (level === "l1") return `${chineseNumber(number)}、`;
-  if (level === "l2") return `（${chineseNumber(number)}）`;
-  if (level === "l3") return `${number}. `;
-  return `（${number}）`;
-}
 
 /** Wraps every unverified fact token in a red mark; plain text otherwise. */
 function renderMarked(text: string, tokens: string[] | undefined): ReactNode {
@@ -35,18 +17,14 @@ function renderMarked(text: string, tokens: string[] | undefined): ReactNode {
 }
 
 function renderBlocks(blocks: Block[], tokens: Record<string, string[]>) {
-  const counters: Record<HeadingLevel, number> = { l1: 0, l2: 0, l3: 0, l4: 0 };
+  const counters = createHeadingCounters();
 
   return blocks.map((block) => {
     if (block.type === "heading") {
-      counters[block.level] += 1;
-      if (block.level === "l1") counters.l2 = counters.l3 = counters.l4 = 0;
-      if (block.level === "l2") counters.l3 = counters.l4 = 0;
-      if (block.level === "l3") counters.l4 = 0;
+      const content = formatHeading(block.content || "未填写标题", block.level, counters);
       return (
         <p className={`official-heading ${block.level}`} id={`preview-${block.id}`} key={block.id}>
-          {headingPrefix(block.level, counters[block.level])}
-          {renderMarked(block.content || "未填写标题", tokens[block.id])}
+          {renderMarked(content, tokens[block.id])}
         </p>
       );
     }

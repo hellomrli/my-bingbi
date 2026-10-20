@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import { useWorkbenchStore } from "./store/workbench";
@@ -43,14 +43,23 @@ vi.mock("./lib/ipc", async (importOriginal) => {
   };
 });
 
+vi.mock("./lib/engine", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./lib/engine")>();
+  return { ...actual, startDraft: vi.fn() };
+});
+
 import { createEmptyDocument, isDesktopRuntime, saveDocument } from "./lib/ipc";
+import { startDraft } from "./lib/engine";
+import type { DraftOutcome } from "./lib/generated/engine";
 
 const mockedSave = vi.mocked(saveDocument);
+const mockedStartDraft = vi.mocked(startDraft);
 
 beforeEach(() => {
   localStorage.clear();
   useWorkbenchStore.setState(useWorkbenchStore.getInitialState(), true);
   mockedSave.mockClear();
+  mockedStartDraft.mockReset();
   vi.mocked(isDesktopRuntime).mockReturnValue(false);
   vi.mocked(createEmptyDocument).mockImplementation(async () => (await import("./lib/document")).createEmptyDocument());
   vi.spyOn(window, "confirm").mockReturnValue(true);
@@ -70,7 +79,7 @@ describe("App writing desk", () => {
     expect(screen.getByRole("button", { name: /开始写作/ })).toBeTruthy();
     // Optional metadata fields stay out of the main flow.
     expect(screen.queryByText("发文机关标志")).toBeNull();
-    expect(screen.queryByText("密级")).toBeNull();
+    expect(screen.getByLabelText("写作密级")).toBeTruthy();
   });
 
   it("accepts a rough brief and an optional document type", async () => {
@@ -121,6 +130,51 @@ describe("App writing desk", () => {
     expect(await screen.findByText("已新建空白文档，从写作台开始吧")).toBeTruthy();
     expect(useWorkbenchStore.getState().document.body.title.text).toBe("");
     expect(screen.getByLabelText("写作要求")).toBeTruthy();
+  });
+
+  it("inherits the selected security level when starting a new document", async () => {
+    render(<App />);
+
+    fireEvent.change(screen.getByLabelText("写作密级"), { target: { value: "secret" } });
+    fireEvent.click(await screen.findByRole("button", { name: "更多" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /新建写作/ }));
+
+    await waitFor(() => expect(useWorkbenchStore.getState().document.meta.securityLevel).toBe("secret"));
+    expect((screen.getByLabelText("写作密级") as HTMLSelectElement).value).toBe("secret");
+  });
+
+  it("starts a secret draft from a secret blank document and keeps it on the local provider", async () => {
+    vi.mocked(isDesktopRuntime).mockReturnValue(true);
+    mockedStartDraft.mockImplementation(async () => {
+      const draft = useWorkbenchStore.getState().document;
+      return {
+        sessionId: "secret-session",
+        document: { ...structuredClone(draft), revision: draft.revision + 1 },
+        typeDecision: { value: "request", confidence: 1, alternatives: [], missingInformation: [] },
+        facts: { facts: [], missingInformation: [] },
+        stages: [],
+        lintReport: null,
+        factCheckReport: null,
+        score: null,
+        revisionIterations: 0,
+      } satisfies DraftOutcome;
+    });
+    render(<App />);
+
+    await screen.findByRole("option", { name: "本地 Ollama" });
+    const originalId = useWorkbenchStore.getState().document.id;
+    fireEvent.change(screen.getByLabelText("写作密级"), { target: { value: "secret" } });
+    fireEvent.change(screen.getByLabelText("写作要求"), { target: { value: "编制秘密级设备保障请示" } });
+    fireEvent.click(screen.getByRole("button", { name: /开始写作/ }));
+
+    await waitFor(() => expect(mockedStartDraft).toHaveBeenCalledTimes(1));
+    const request = mockedStartDraft.mock.calls[0][0];
+    expect(request.documentId).not.toBe(originalId);
+    expect(request.providerId).toBe("ollama");
+    expect(mockedSave).toHaveBeenCalledWith(
+      expect.objectContaining({ id: request.documentId, meta: expect.objectContaining({ securityLevel: "secret" }) }),
+      "autosave",
+    );
   });
 
   it("opens the command palette and runs the settings action", async () => {
@@ -175,7 +229,7 @@ describe("App writing desk", () => {
 
     const drawer = await screen.findByRole("dialog", { name: "质检结果" });
     expect(drawer).toBeTruthy();
-    expect(screen.getByText(/事实台账/)).toBeTruthy();
+    expect(within(drawer).getByRole("heading", { name: /事实台账/ })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "返回正文" }));
     expect(screen.queryByRole("dialog", { name: "质检结果" })).toBeNull();
   });

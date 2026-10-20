@@ -57,7 +57,7 @@ pub(crate) async fn draft_start<R: tauri::Runtime>(
     let input = DraftInput {
         material: request.material,
         model_text: request.model_text,
-        initial_document: Some(document),
+        initial_document: Some(document.clone()),
         confirmed_doc_type: request.confirmed_doc_type,
         template_id: request.template_id,
     };
@@ -65,25 +65,27 @@ pub(crate) async fn draft_start<R: tauri::Runtime>(
     let engine_run = engine.run(input, Some(event_sender));
     tokio::pin!(engine_run);
     let mut document_saved = false;
+    let mut events_open = true;
     loop {
         tokio::select! {
             result = &mut engine_run => {
                 let outcome = result.map_err(map_engine_error)?;
                 if !document_saved {
-                    save_draft_document(&state, &outcome.document)?;
+                    save_draft_document(&state, &outcome.document, &document)?;
+                    document_saved = true;
                 }
                 while let Some(event) = event_receiver.recv().await {
-                    persist_completed_event(&state, &event, &mut document_saved)?;
+                    persist_completed_event(&state, &event, &document, &mut document_saved)?;
                     on_event.send(event).map_err(|_| map_engine_error(EngineError::Cancelled))?;
                 }
                 return Ok(outcome);
             }
-            event = event_receiver.recv() => match event {
+            event = event_receiver.recv(), if events_open => match event {
                 Some(event) => {
-                    persist_completed_event(&state, &event, &mut document_saved)?;
+                    persist_completed_event(&state, &event, &document, &mut document_saved)?;
                     on_event.send(event).map_err(|_| map_engine_error(EngineError::Cancelled))?;
                 }
-                None => return Err(map_engine_error(EngineError::Cancelled)),
+                None => events_open = false,
             }
         }
     }
@@ -123,6 +125,7 @@ pub(crate) async fn rerun_stage<R: tauri::Runtime>(
     let document = lock_documents(&state)?
         .get_document(&session.document_id)
         .map_err(map_store_error)?;
+    ensure_rerun_base(&session.state_json, &document)?;
     let provider_id = lock_documents(&state)?
         .list_stage_runs(&request.session_id)
         .map_err(map_store_error)?
@@ -164,30 +167,40 @@ pub(crate) async fn rerun_stage<R: tauri::Runtime>(
     let engine_run = engine.rerun_stage(&request.session_id, stage_id, Some(event_sender));
     tokio::pin!(engine_run);
     let mut document_saved = false;
+    let mut events_open = true;
     loop {
         tokio::select! {
             result = &mut engine_run => {
                 let mut outcome = result.map_err(map_engine_error)?;
-                // A rerun of an old session may replace a document that has since been
-                // re-drafted; never let the replacement regress the stored revision.
-                if outcome.document.revision < document.revision {
-                    outcome.document.revision = document.revision;
-                }
+                // The session lineage was checked before running. Advance that base, then
+                // retain the result even when the transactional save detects a later edit.
+                outcome.document.revision = document.revision.checked_add(1).ok_or(IpcError {
+                    code: "invalid_input",
+                    message: "文档版本号已达上限。",
+                })?;
+                let outcome_json = serde_json::to_string(&outcome).map_err(|_| IpcError {
+                    code: "serialization_failed",
+                    message: "生成结果无法序列化。",
+                })?;
+                lock_documents(&state)?
+                    .complete_session(&outcome.session_id, &outcome_json)
+                    .map_err(map_store_error)?;
                 if !document_saved {
-                    save_draft_document(&state, &outcome.document)?;
+                    save_draft_document(&state, &outcome.document, &document)?;
+                    document_saved = true;
                 }
                 while let Some(event) = event_receiver.recv().await {
-                    persist_completed_event(&state, &event, &mut document_saved)?;
+                    persist_completed_event(&state, &event, &document, &mut document_saved)?;
                     on_event.send(event).map_err(|_| map_engine_error(EngineError::Cancelled))?;
                 }
                 return Ok(outcome);
             }
-            event = event_receiver.recv() => match event {
+            event = event_receiver.recv(), if events_open => match event {
                 Some(event) => {
-                    persist_completed_event(&state, &event, &mut document_saved)?;
+                    persist_completed_event(&state, &event, &document, &mut document_saved)?;
                     on_event.send(event).map_err(|_| map_engine_error(EngineError::Cancelled))?;
                 }
-                None => return Err(map_engine_error(EngineError::Cancelled)),
+                None => events_open = false,
             }
         }
     }
@@ -224,6 +237,7 @@ pub(crate) async fn review_start<R: tauri::Runtime>(
     let (event_sender, mut event_receiver) = tokio::sync::mpsc::channel(32);
     let engine_run = engine.run(ReviewInput { document, focus }, Some(event_sender));
     tokio::pin!(engine_run);
+    let mut events_open = true;
     loop {
         tokio::select! {
             result = &mut engine_run => {
@@ -233,11 +247,11 @@ pub(crate) async fn review_start<R: tauri::Runtime>(
                 }
                 return Ok(outcome);
             }
-            event = event_receiver.recv() => match event {
+            event = event_receiver.recv(), if events_open => match event {
                 Some(event) => {
                     on_event.send(event).map_err(|_| map_engine_error(EngineError::Cancelled))?;
                 }
-                None => return Err(map_engine_error(EngineError::Cancelled)),
+                None => events_open = false,
             }
         }
     }
@@ -411,22 +425,39 @@ fn validate_review_start_request(request: &ReviewStartRequest) -> Result<Option<
 fn persist_completed_event(
     state: &AppState,
     event: &DraftEvent,
+    expected: &ODoc,
     document_saved: &mut bool,
 ) -> Result<(), IpcError> {
     if let DraftEvent::Completed { outcome } = event
         && !*document_saved
     {
-        save_draft_document(state, &outcome.document)?;
+        save_draft_document(state, &outcome.document, expected)?;
         *document_saved = true;
     }
     Ok(())
 }
 
-fn save_draft_document(state: &AppState, document: &ODoc) -> Result<(), IpcError> {
+fn save_draft_document(state: &AppState, document: &ODoc, expected: &ODoc) -> Result<(), IpcError> {
     lock_documents(state)?
-        .save_document(document, Some("draft"))
+        .save_document_if_unchanged(document, expected, Some("draft"))
         .map(|_| ())
         .map_err(map_store_error)
+}
+
+fn ensure_rerun_base(state_json: &str, document: &ODoc) -> Result<(), IpcError> {
+    let recorded = serde_json::from_str::<DraftOutcome>(state_json)
+        .map(|outcome| outcome.document)
+        .or_else(|_| {
+            serde_json::from_str::<RerunOutcome>(state_json).map(|outcome| outcome.document)
+        });
+    if recorded.as_ref().is_ok_and(|base| base == document) {
+        Ok(())
+    } else {
+        Err(IpcError {
+            code: "document_conflict",
+            message: "当前文档已不同于该会话的生成结果，请基于最新内容重新起草。",
+        })
+    }
 }
 
 #[cfg(test)]

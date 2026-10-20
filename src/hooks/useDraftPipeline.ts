@@ -16,7 +16,7 @@ import {
 } from "../lib/engine";
 import { errorCode } from "../lib/errors";
 import { appendGenerationLog } from "../lib/generationLog";
-import { ipcErrorMessage, isDesktopRuntime } from "../lib/ipc";
+import { IpcError, ipcErrorMessage, isDesktopRuntime } from "../lib/ipc";
 import type { ProviderProfile } from "../lib/llm";
 import type { DocumentType, ODoc } from "../lib/odoc";
 import { useWorkbenchStore } from "../store/workbench";
@@ -113,7 +113,9 @@ export function useDraftPipeline({
   // Identity + revision of the document the active run snapshotted. A finished run may only be
   // written back while the workbench still shows exactly that state, otherwise the user's edits
   // made during the run would be lost.
-  const runBaseRef = useRef<{ id: string; revision: number } | null>(null);
+  const runBaseRef = useRef<ODoc | null>(null);
+  const runningRef = useRef(false);
+  const appliedRef = useRef(false);
   // Async runs compare against the document they started from.
   const documentId = document.id;
 
@@ -129,7 +131,6 @@ export function useDraftPipeline({
 
   /** Switching documents invalidates every recorded stage of the previous run. */
   useEffect(() => {
-    setDrafting(false);
     setCompletedStages([]);
     setSessionId(null);
     resetTransientState();
@@ -154,9 +155,9 @@ export function useDraftPipeline({
   function canWriteBack(outcomeDocumentId: string): boolean {
     const base = runBaseRef.current;
     const current = useWorkbenchStore.getState().document;
-    if (base && current.id === base.id && current.revision === base.revision) return true;
+    if (base && current.id === outcomeDocumentId && JSON.stringify(current) === JSON.stringify(base)) return true;
     if (current.id === outcomeDocumentId) {
-      const message = "运行期间文档已被修改，结果未自动应用；请重新发起以使用最新内容。";
+      const message = "运行期间文档已被修改，结果未自动应用；可从起草记录中另存生成结果。";
       setError(message);
       appendGenerationLog({
         level: "error",
@@ -170,6 +171,7 @@ export function useDraftPipeline({
   }
 
   function applyOutcome(outcome: DraftOutcome) {
+    appliedRef.current = true;
     setSessionId(outcome.sessionId);
     resetTransientState();
     appendGenerationLog({
@@ -232,7 +234,7 @@ export function useDraftPipeline({
     if (event.type === "completed") {
       // The stream's final event can arrive after the user opened another document or edited the
       // current one; it must not clobber either state.
-      if (canWriteBack(event.outcome.document.id)) {
+      if (!appliedRef.current && canWriteBack(event.outcome.document.id)) {
         const current = useWorkbenchStore.getState().document;
         if (shouldApplyDraftOutcome(current.id, current.revision, event.outcome)) {
           applyOutcome(event.outcome);
@@ -251,7 +253,7 @@ export function useDraftPipeline({
       templateIdOverride?: string | null;
     },
   ): Promise<void> {
-    if (drafting) return;
+    if (runningRef.current) return;
     if (!isDesktopRuntime()) {
       setError("模型调用仅在桌面应用中可用。");
       appendGenerationLog({
@@ -325,6 +327,8 @@ export function useDraftPipeline({
       pipeline: nextKind,
       documentId: document.id,
     });
+    runningRef.current = true;
+    appliedRef.current = false;
     setDrafting(true);
     setKind(nextKind);
     setStage(null);
@@ -340,11 +344,15 @@ export function useDraftPipeline({
     }
 
     try {
+      const expected = JSON.stringify(useWorkbenchStore.getState().document);
       await saveBeforeDraft();
       const snapshot = useWorkbenchStore.getState().document;
+      if (JSON.stringify(snapshot) !== expected) {
+        throw new IpcError("document_conflict", "准备运行时文档已变更，请基于最新内容重新发起。");
+      }
       // Remember exactly what the pipeline saw: a completed event may only be written back
       // while the workbench still shows this id/revision.
-      runBaseRef.current = { id: snapshot.id, revision: snapshot.revision };
+      runBaseRef.current = structuredClone(snapshot);
       const outcome = await start(
         {
           documentId: snapshot.id,
@@ -358,7 +366,7 @@ export function useDraftPipeline({
       );
       // Older runtimes may return the outcome without delivering the final channel event.
       const current = useWorkbenchStore.getState().document;
-      if (shouldApplyDraftOutcome(current.id, current.revision, outcome) && canWriteBack(current.id)) {
+      if (!appliedRef.current && canWriteBack(outcome.document.id) && shouldApplyDraftOutcome(current.id, current.revision, outcome)) {
         applyOutcome(outcome);
       }
     } catch (runError) {
@@ -388,6 +396,7 @@ export function useDraftPipeline({
       }
     } finally {
       runBaseRef.current = null;
+      runningRef.current = false;
       setDrafting(false);
     }
   }
@@ -417,11 +426,12 @@ export function useDraftPipeline({
   }
 
   async function rerun(stageId: DraftStageId): Promise<void> {
-    if (drafting || !sessionId) return;
+    if (runningRef.current || !sessionId) return;
     if (!isDesktopRuntime()) {
       setError("模型调用仅在桌面应用中可用。");
       return;
     }
+    runningRef.current = true;
     setDrafting(true);
     setStage(stageId);
     stageRef.current = stageId;
@@ -430,11 +440,18 @@ export function useDraftPipeline({
     if (stageId === "draft" || stageId === "deai") setText("");
 
     try {
+      const expected = JSON.stringify(useWorkbenchStore.getState().document);
+      await saveBeforeDraft();
+      const snapshot = useWorkbenchStore.getState().document;
+      if (JSON.stringify(snapshot) !== expected) {
+        throw new IpcError("document_conflict", "准备运行时文档已变更，请基于最新内容重新发起。");
+      }
+      runBaseRef.current = structuredClone(snapshot);
       const outcome = await rerunStage(sessionId, stageId, handleEvent);
       // The rerun streams only stage events, so the returned document is applied here; the
       // content guard keeps this idempotent if a future runtime also delivers a final event.
       const current = useWorkbenchStore.getState().document;
-      if (shouldApplyRerunOutcome(current, outcome)) {
+      if (canWriteBack(outcome.document.id) && shouldApplyRerunOutcome(current, outcome)) {
         onRerunOutcome(outcome, stageId);
         // Downstream stages ran against the previous output, so their records no longer hold.
         const order = stageOrder(kind);
@@ -452,6 +469,8 @@ export function useDraftPipeline({
         if (isDraftStage(stageRef.current ?? "")) setFailedStage(stageRef.current);
       }
     } finally {
+      runBaseRef.current = null;
+      runningRef.current = false;
       setDrafting(false);
     }
   }

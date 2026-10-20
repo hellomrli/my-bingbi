@@ -53,7 +53,8 @@ interface WorkbenchState {
   updateHeadingLevel: (id: string, level: HeadingLevel) => void;
   addBlock: (kind: "paragraph" | "heading") => void;
   removeBlock: (id: string) => void;
-  addFact: (input: Pick<Fact, "kind" | "value" | "unit" | "source">) => void;
+  addFact: (input: Pick<Fact, "kind" | "value" | "unit" | "source"> & Partial<Pick<Fact, "sourceRef" | "verified">>) => void;
+  updateFact: (id: string, patch: Partial<Pick<Fact, "kind" | "value" | "unit" | "sourceRef" | "verified">>) => void;
   removeFact: (id: string) => void;
 }
 
@@ -218,12 +219,27 @@ export const useWorkbenchStore = create<WorkbenchState>()(
               ...input,
               unit: input.unit?.trim() || null,
               role: null,
-              sourceRef: null,
-              verified: input.source !== "model_generated",
+              sourceRef: input.sourceRef?.trim() || null,
+              verified: input.verified ?? input.source !== "model_generated",
             });
           }),
           dirty: true,
         })),
+      updateFact: (id, patch) =>
+        set((state) => {
+          if (!state.document.facts.facts.some((fact) => fact.id === id)) return {};
+          return {
+            document: changed(state.document, (document) => {
+              const fact = document.facts.facts.find((item) => item.id === id)!;
+              const contentChanged = ["kind", "value", "unit", "sourceRef"].some((key) => Object.hasOwn(patch, key));
+              Object.assign(fact, patch);
+              fact.unit = fact.unit?.trim() || null;
+              fact.sourceRef = fact.sourceRef?.trim() || null;
+              if (contentChanged || !fact.value.trim()) fact.verified = false;
+            }),
+            dirty: true,
+          };
+        }),
       removeFact: (id) =>
         set((state) => ({
           document: changed(state.document, (document) => {

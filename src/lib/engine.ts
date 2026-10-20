@@ -7,7 +7,7 @@ import type {
 } from "./generated/engine";
 
 export type { RerunOutcome, Score };
-import type { DocumentType } from "./odoc";
+import type { DocumentType, ODoc } from "./odoc";
 import { IpcError, isDesktopRuntime } from "./ipc";
 
 /** The persisted draft pipeline order used by both the engine and workbench UI. */
@@ -73,8 +73,24 @@ export function shouldApplyRerunOutcome(current: {
 }, outcome: RerunOutcome): boolean {
   return (
     current.id === outcome.document.id &&
+    current.revision < outcome.document.revision &&
     JSON.stringify(current) !== JSON.stringify(outcome.document)
   );
+}
+
+/** Completed sessions retain their result even when applying it would overwrite a user edit. */
+export function sessionOutcomeDocument(stateJson: string): ODoc | null {
+  try {
+    const candidate = JSON.parse(stateJson)?.document as Partial<ODoc> | undefined;
+    if (candidate?.schemaVersion !== "0.1.0" || typeof candidate.id !== "string"
+      || !Number.isInteger(candidate.revision) || !candidate.meta
+      || !["public", "internal", "secret", "confidential"].includes(candidate.meta.securityLevel)
+      || typeof candidate.body?.title?.text !== "string" || !Array.isArray(candidate.body.blocks)
+      || !Array.isArray(candidate.facts?.facts)) return null;
+    return candidate as ODoc;
+  } catch {
+    return null;
+  }
 }
 
 export const draftStageLabels: Record<DraftStageId, string> = {

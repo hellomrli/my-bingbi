@@ -11,7 +11,7 @@ import type {
 } from "./llm";
 import type { ODoc } from "./odoc";
 import type { PackSummary, TemplateSummary } from "./pack";
-import type { LintReport } from "./generated/lint";
+import type { FactCheckReport, LintReport } from "./generated/lint";
 import type {
   AppConfig,
   CrashEvent,
@@ -211,7 +211,7 @@ export async function saveDocument(document: ODoc, stage: string): Promise<SaveD
   const repository = readBrowserRepository();
   const existing = repository.documents[document.id];
   const now = Date.now();
-  if (existing && document.revision < existing.document.revision && JSON.stringify(existing.document) !== JSON.stringify(document)) {
+  if (existing && document.revision <= existing.document.revision && JSON.stringify(existing.document) !== JSON.stringify(document)) {
     throw browserError("stale_revision", "检测到较新的已保存版本，请重新打开公文后再修改。");
   }
   const versionCreated = !existing || JSON.stringify(existing.document) !== JSON.stringify(document);
@@ -334,6 +334,12 @@ export async function lintDocumentNow(document: ODoc): Promise<LintReport> {
     throw browserError("lint_unavailable", "规则校验仅在桌面应用中可用。");
   }
   return invoke<LintReport>("lint_document_now", { document });
+}
+
+/** Rechecks human-confirmed facts against the latest in-memory text; never calls a model. */
+export async function factCheckDocumentNow(document: ODoc): Promise<FactCheckReport> {
+  if (!isDesktopRuntime()) throw browserError("lint_unavailable", "事实回查仅在桌面应用中可用。");
+  return invoke<FactCheckReport>("fact_check_document_now", { document });
 }
 
 /** Lists recently updated documents (newest first). */

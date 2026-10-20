@@ -493,6 +493,15 @@
   font-size: var(--fs-xs);
 }
 
+.composer-model {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
+  color: var(--ink-3);
+  font-size: var(--fs-xs);
+}
+
 .composer-model select:hover {
   border-color: var(--line);
   background: var(--surface-2);
@@ -934,6 +943,90 @@
   gap: 6px;
   overflow: auto;
   padding: 12px 18px;
+}
+
+.quality-scroll {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+}
+
+.quality-scroll .quality-list {
+  overflow: visible;
+}
+
+.quality-recheck {
+  margin: 12px 18px 0;
+}
+
+.fact-ledger h3,
+.fact-ledger h4 {
+  margin: 0 0 8px;
+  color: var(--ink);
+}
+
+.fact-ledger p {
+  margin: 0 0 12px;
+  line-height: 1.7;
+}
+
+.fact-ledger-list {
+  display: grid;
+  gap: 12px;
+}
+
+.fact-ledger-item,
+.fact-ledger-add {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+  margin: 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+
+.fact-ledger-add {
+  margin-top: 14px;
+}
+
+.fact-ledger label {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.fact-ledger input:not([type="checkbox"]),
+.fact-ledger select {
+  width: 100%;
+  min-width: 0;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+}
+
+.fact-ledger-fields {
+  display: grid;
+  grid-template-columns: 65px minmax(0, 1fr) 52px;
+  gap: 6px;
+}
+
+.fact-ledger-actions,
+.fact-ledger .fact-verify {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.fact-ledger-actions {
+  justify-content: space-between;
+}
+
+.fact-origin {
+  overflow-wrap: anywhere;
 }
 
 .quality-item {

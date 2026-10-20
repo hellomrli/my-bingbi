@@ -2506,6 +2506,13 @@ textarea::placeholder {
   gap: 7px;
 }
 
+.field-hint {
+  color: var(--ink-3);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
 .settings-group > label,
 .toggle-row b {
   color: var(--ink);

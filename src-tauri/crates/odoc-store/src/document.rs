@@ -63,8 +63,38 @@ impl DocumentStore {
         document: &ODoc,
         stage: Option<&str>,
     ) -> Result<SaveDocumentResult, StoreError> {
+        self.save_document_checked(document, stage, None)
+    }
+
+    /// Saves a generated replacement only if the stored document still matches its input.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StoreError::DocumentConflict`] if the input snapshot changed or was deleted,
+    /// or the same validation and storage errors as [`Self::save_document`].
+    pub fn save_document_if_unchanged(
+        &mut self,
+        document: &ODoc,
+        expected: &ODoc,
+        stage: Option<&str>,
+    ) -> Result<SaveDocumentResult, StoreError> {
+        if document.id != expected.id {
+            return Err(StoreError::InvalidDocument(
+                "replacement ID mismatch".to_owned(),
+            ));
+        }
+        self.save_document_checked(document, stage, Some(expected))
+    }
+
+    fn save_document_checked(
+        &mut self,
+        document: &ODoc,
+        stage: Option<&str>,
+        expected: Option<&ODoc>,
+    ) -> Result<SaveDocumentResult, StoreError> {
         validate_document(document)?;
         let json = serde_json::to_string(document)?;
+        let expected_json = expected.map(serde_json::to_string).transpose()?;
         let now = unix_millis()?;
         let transaction = self.connection.transaction()?;
         let previous: Option<(String, u32)> = transaction
@@ -75,8 +105,17 @@ impl DocumentStore {
             )
             .optional()?;
         let created = previous.is_none();
+        // Compare the complete snapshot inside the write transaction, not just r + 1: a user
+        // edit and a model outcome can independently produce the same revision.
+        if let Some(expected_json) = expected_json
+            && previous
+                .as_ref()
+                .is_none_or(|(stored, _)| stored != &expected_json)
+        {
+            return Err(StoreError::DocumentConflict(document.id.clone()));
+        }
         if let Some((previous_json, stored_revision)) = &previous
-            && document.revision < *stored_revision
+            && document.revision <= *stored_revision
             && previous_json != &json
         {
             return Err(StoreError::StaleRevision {
@@ -511,5 +550,76 @@ mod tests {
             store.get_document(&document.id).unwrap().body.title.text,
             "较新内容"
         );
+    }
+
+    #[test]
+    fn equal_revisions_with_different_content_are_rejected() {
+        let mut store = DocumentStore::open_in_memory().unwrap();
+        let document = ODoc::empty();
+        store.save_document(&document, None).unwrap();
+        let mut replacement = document.clone();
+        replacement.body.title.text = "同版本冲突".to_owned();
+        assert!(matches!(
+            store.save_document(&replacement, None),
+            Err(StoreError::StaleRevision { .. })
+        ));
+        assert_eq!(store.get_document(&document.id).unwrap(), document);
+    }
+
+    #[test]
+    fn generated_save_cannot_replace_a_concurrent_edit_even_with_a_higher_revision() {
+        let mut store = DocumentStore::open_in_memory().unwrap();
+        let base = ODoc::empty();
+        store.save_document(&base, None).unwrap();
+        let mut edited = base.clone();
+        edited.revision += 1;
+        edited.body.title.text = "用户已保存的修改".to_owned();
+        store.save_document(&edited, None).unwrap();
+        for revision in [edited.revision, edited.revision + 10] {
+            let mut generated = base.clone();
+            generated.revision = revision;
+            generated.body.title.text = "模型生成".to_owned();
+            assert!(matches!(
+                store.save_document_if_unchanged(&generated, &base, Some("draft")),
+                Err(StoreError::DocumentConflict(_))
+            ));
+            assert_eq!(store.get_document(&base.id).unwrap(), edited);
+            assert_eq!(store.list_document_versions(&base.id).unwrap().len(), 2);
+        }
+    }
+
+    #[test]
+    fn generated_save_requires_the_full_input_snapshot_and_an_existing_document() {
+        let mut store = DocumentStore::open_in_memory().unwrap();
+        let base = ODoc::empty();
+        store.save_document(&base, None).unwrap();
+        let mut generated = base.clone();
+        generated.revision += 1;
+        generated.body.title.text = "生成结果".to_owned();
+        let mut wrong_base = base.clone();
+        wrong_base.meta.security_level = odoc_model::SecurityLevel::Secret;
+        assert!(matches!(
+            store.save_document_if_unchanged(&generated, &wrong_base, None),
+            Err(StoreError::DocumentConflict(_))
+        ));
+        store
+            .save_document_if_unchanged(&generated, &base, Some("draft"))
+            .unwrap();
+        assert_eq!(store.get_document(&base.id).unwrap(), generated);
+        assert!(
+            !store
+                .save_document(&generated, None)
+                .unwrap()
+                .version_created
+        );
+        store.delete_document(&base.id).unwrap();
+        assert!(matches!(
+            store.save_document_if_unchanged(&generated, &base, None),
+            Err(StoreError::DocumentConflict(_))
+        ));
+        assert!(matches!(
+            store.save_document_if_unchanged(&ODoc::empty(), &base, None),
+            Err(StoreError::InvalidDocument(_))
+        ));
     }
 }

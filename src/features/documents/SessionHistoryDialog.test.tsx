@@ -3,6 +3,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
+import { createEmptyDocument } from "../../lib/document";
 import { SessionHistoryDialog } from "./SessionHistoryDialog";
 
 vi.mock("@tauri-apps/api/core", async (importOriginal) => {
@@ -19,13 +20,14 @@ beforeEach(() => {
   (window as unknown as { __TAURI_INTERNALS__: object }).__TAURI_INTERNALS__ = {};
 });
 
-function renderDialog() {
+function renderDialog(onRecover = vi.fn(async () => undefined)) {
   return render(
     <SessionHistoryDialog
       open
       documentId="doc-1"
       title="设备经费请示"
       onClose={() => undefined}
+      onRecover={onRecover}
     />,
   );
 }
@@ -160,5 +162,32 @@ describe("SessionHistoryDialog cost panel", () => {
     renderDialog();
     fireEvent.click(await screen.findByRole("button", { name: /展开 起草 记录的阶段明细/ }));
     expect(await screen.findByText("custom-stage")).toBeTruthy();
+  });
+
+  it("offers generated output as a new document instead of replacing the current one", async () => {
+    const generated = createEmptyDocument();
+    generated.body.title.text = "未覆盖的生成结果";
+    mockedInvoke.mockImplementation(async (command: string) => {
+      if (command === "list_sessions") {
+        return [{
+          id: "session-1",
+          documentId: "doc-1",
+          pipeline: "draft",
+          stateJson: JSON.stringify({ document: generated }),
+          costTokens: 25,
+          createdAt: 1_000_000,
+          updatedAt: 1_753_900_000_000,
+        }];
+      }
+      if (command === "list_stage_runs") return [];
+      throw new Error(`unexpected command ${command}`);
+    });
+    const onRecover = vi.fn(async () => undefined);
+    renderDialog(onRecover);
+
+    fireEvent.click(await screen.findByRole("button", { name: /展开 起草 记录的阶段明细/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "另存生成结果（不覆盖当前文档）" }));
+
+    await waitFor(() => expect(onRecover).toHaveBeenCalledWith(generated));
   });
 });

@@ -64,7 +64,9 @@ function renderHome(onAddReferences = vi.fn()) {
       onOpenDocuments={vi.fn()}
       onOpenRecent={vi.fn()}
       recentDocuments={[]}
-      documentId="doc-1"
+      securityLevel="internal"
+      onSecurityLevelChange={vi.fn()}
+      prepareKnowledgeDocument={async () => "doc-1"}
       kbEnabled
       currentTitle=""
       onContinueDocument={vi.fn()}

@@ -36,6 +36,10 @@ pub(crate) fn map_store_error(error: StoreError) -> IpcError {
             code: "stale_revision",
             message: "检测到较新的已保存版本，请重新打开公文后再修改。",
         },
+        StoreError::DocumentConflict(_) => IpcError {
+            code: "document_conflict",
+            message: "运行期间文档已变更，未覆盖当前内容；生成结果已保留，可从起草记录中另存。",
+        },
         StoreError::Serialization(_) => IpcError {
             code: "serialization_failed",
             message: "公文数据无法序列化。",

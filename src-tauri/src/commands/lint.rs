@@ -1,5 +1,5 @@
 use crate::error::{IpcError, map_lint_error};
-use odoc_lint::LintReport;
+use odoc_lint::{FactCheckReport, LintReport};
 use odoc_model::ODoc;
 use odoc_pack::PackRegistry;
 use tauri::State;
@@ -15,4 +15,10 @@ pub(crate) fn lint_document_now(
     packs: State<'_, PackRegistry>,
 ) -> Result<LintReport, IpcError> {
     odoc_lint::lint_document(&document, &packs).map_err(map_lint_error)
+}
+
+/// Rechecks the current ledger without a model call or a persisted draft session.
+#[tauri::command]
+pub(crate) fn fact_check_document_now(document: ODoc) -> Result<FactCheckReport, IpcError> {
+    odoc_lint::fact_check_document(&document).map_err(map_lint_error)
 }

@@ -153,47 +153,45 @@ impl ProviderClient {
     }
 
     fn chat_endpoint(&self) -> Result<Url, LlmError> {
-        let base = self.base_url()?;
-        let base_path = base.path().trim_end_matches('/');
+        let base = self.api_base()?;
         let endpoint = match self.profile.kind {
-            ProviderKind::OpenAiCompatible if base_path.ends_with("/v1") => "chat/completions",
-            ProviderKind::OpenAiCompatible => "v1/chat/completions",
-            ProviderKind::Anthropic if base_path.ends_with("/v1") => "messages",
-            ProviderKind::Anthropic => "v1/messages",
-            ProviderKind::Ollama if base_path.ends_with("/api") => "chat",
-            ProviderKind::Ollama => "api/chat",
+            ProviderKind::OpenAiCompatible => "chat/completions",
+            ProviderKind::Anthropic => "messages",
+            ProviderKind::Ollama => "chat",
         };
         base.join(endpoint)
             .map_err(|_| LlmError::InvalidConfiguration)
     }
 
     fn models_endpoint(&self) -> Result<Url, LlmError> {
-        let base = self.base_url()?;
-        let base_path = base.path().trim_end_matches('/');
+        let base = self.api_base()?;
         let endpoint = match self.profile.kind {
-            ProviderKind::OpenAiCompatible | ProviderKind::Anthropic
-                if base_path.ends_with("/v1") =>
-            {
-                "models"
-            }
-            ProviderKind::OpenAiCompatible | ProviderKind::Anthropic => "v1/models",
-            ProviderKind::Ollama if base_path.ends_with("/api") => "tags",
-            ProviderKind::Ollama => "api/tags",
+            ProviderKind::OpenAiCompatible | ProviderKind::Anthropic => "models",
+            ProviderKind::Ollama => "tags",
         };
         base.join(endpoint)
             .map_err(|_| LlmError::InvalidConfiguration)
     }
 
     fn embeddings_endpoint(&self) -> Result<Url, LlmError> {
-        let base = self.base_url()?;
-        let base_path = base.path().trim_end_matches('/');
-        let endpoint = if base_path.ends_with("/v1") {
-            "embeddings"
-        } else {
-            "v1/embeddings"
-        };
+        let base = self.api_base()?;
+        let endpoint = "embeddings";
         base.join(endpoint)
             .map_err(|_| LlmError::InvalidConfiguration)
+    }
+
+    /// A configured path is the complete API root. Host-only URLs keep the historic defaults
+    /// so common OpenAI/Anthropic and Ollama configurations remain usable without a path.
+    fn api_base(&self) -> Result<Url, LlmError> {
+        let mut base = self.base_url()?;
+        if base.path().trim_matches('/').is_empty() {
+            let default_root = match self.profile.kind {
+                ProviderKind::OpenAiCompatible | ProviderKind::Anthropic => "v1/",
+                ProviderKind::Ollama => "api/",
+            };
+            base.set_path(&format!("/{default_root}"));
+        }
+        Ok(base)
     }
 
     fn base_url(&self) -> Result<Url, LlmError> {

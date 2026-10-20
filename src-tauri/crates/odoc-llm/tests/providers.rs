@@ -111,6 +111,85 @@ fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 }
 
 #[tokio::test]
+async fn compatible_api_roots_are_respected_for_chat_models_and_embeddings() {
+    for root in [
+        "",
+        "/v1",
+        "/compatible-mode/v1",
+        "/api/paas/v4",
+        "/v2",
+        "/v1beta/openai",
+        "/api/v1",
+        "/openai/v1",
+    ] {
+        for trailing_slash in [false, true] {
+            for operation in ["chat/completions", "models", "embeddings"] {
+                let body = match operation {
+                    "chat/completions" => {
+                        r#"{"choices":[{"message":{"content":"OK"},"finish_reason":"stop"}]}"#
+                    }
+                    "models" => r#"{"data":[{"id":"test-model"}]}"#,
+                    _ => r#"{"data":[{"embedding":[0.1,0.2]}]}"#,
+                };
+                let (host, request_rx, task) = spawn_server(MockResponse {
+                    status: "200 OK",
+                    content_type: "application/json",
+                    chunks: vec![body.as_bytes().to_vec()],
+                    initial_delay: Duration::ZERO,
+                    chunk_delay: Duration::ZERO,
+                })
+                .await;
+                let suffix = if trailing_slash { "/" } else { "" };
+                let client = ProviderClient::new(
+                    profile(
+                        ProviderKind::OpenAiCompatible,
+                        format!("{host}{root}{suffix}"),
+                    ),
+                    None,
+                )
+                .expect("client should build");
+                match operation {
+                    "chat/completions" => {
+                        client
+                            .chat(chat_request(SecurityLevel::Internal))
+                            .await
+                            .expect("chat");
+                    }
+                    "models" => {
+                        assert_eq!(
+                            client.list_models().await.expect("models"),
+                            vec!["test-model"]
+                        );
+                    }
+                    _ => {
+                        assert_eq!(
+                            client
+                                .embed(&["sample".to_owned()], SecurityLevel::Internal)
+                                .await
+                                .expect("embeddings")
+                                .len(),
+                            1
+                        );
+                    }
+                }
+                let request = request_rx.await.expect("request should arrive");
+                let request = String::from_utf8_lossy(&request);
+                let method = if operation == "models" { "GET" } else { "POST" };
+                let expected_root = if root.is_empty() { "/v1" } else { root };
+                assert!(
+                    request.starts_with(&format!(
+                        "{method} {expected_root}/{operation} HTTP/1.1\r\n"
+                    )),
+                    "unexpected endpoint: {}",
+                    request.lines().next().unwrap_or_default()
+                );
+                task.await.expect("server should finish");
+            }
+        }
+    }
+}
+
+#[tokio::test]
 async fn openai_chat_uses_compatible_endpoint_and_keeps_secret_out_of_json() {
     let body = r#"{"choices":[{"message":{"content":"收到"},"finish_reason":"stop"}],"usage":{"prompt_tokens":8,"completion_tokens":2,"total_tokens":10}}"#;
     let (base_url, request_rx, task) = spawn_server(MockResponse {

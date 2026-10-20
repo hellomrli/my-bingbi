@@ -2,7 +2,8 @@ import { AlertCircle, CheckCircle2, ClipboardCheck, Lightbulb, LoaderCircle, Sca
 import { useMemo, useState } from "react";
 import { useModal } from "../../hooks/useModal";
 import type { Finding, Severity } from "../../lib/lint";
-import { useWorkbenchStore, type FindingFilter } from "../../store/workbench";
+import type { FindingFilter } from "../../store/workbench";
+import { FactLedger } from "../lint-panel/FactLedger";
 
 const severityMeta: Record<Severity, { label: string; icon: typeof AlertCircle }> = {
   error: { label: "错误", icon: AlertCircle },
@@ -18,6 +19,9 @@ interface QualityDrawerProps {
   onClose: () => void;
   onLocate: (finding: Finding) => void;
   onReview: () => void;
+  checking: boolean;
+  checkError: string | null;
+  onRecheck: () => void;
 }
 
 export function QualityDrawer({
@@ -28,9 +32,11 @@ export function QualityDrawer({
   onClose,
   onLocate,
   onReview,
+  checking,
+  checkError,
+  onRecheck,
 }: QualityDrawerProps) {
   const [filter, setFilter] = useState<FindingFilter>("all");
-  const facts = useWorkbenchStore((state) => state.document.facts.facts);
   const sectionRef = useModal<HTMLElement>(open, onClose);
   const filtered = filter === "all" ? findings : findings.filter((finding) => finding.severity === filter);
   const counts = useMemo(
@@ -91,6 +97,12 @@ export function QualityDrawer({
           ))}
         </div>
 
+        <div className="quality-scroll">
+        {checkError && <p className="composer-message is-error" role="alert">{checkError}</p>}
+        <button className="command-button quality-recheck" type="button" onClick={onRecheck} disabled={checking}>
+          {checking && <LoaderCircle size={14} className="is-spinning" />}
+          {checking ? "正在核验…" : "重新核验规则与事实"}
+        </button>
         <div className="quality-list">
           {filtered.length === 0 && (
             <div className="quality-empty">
@@ -118,8 +130,8 @@ export function QualityDrawer({
         </div>
 
         <div className="quality-facts">
-          <span>事实台账 {facts.length} 项</span>
-          <small>由写作过程自动提取，可在正文中逐条核对。</small>
+          <FactLedger />
+        </div>
         </div>
 
         <footer className="quality-footer">

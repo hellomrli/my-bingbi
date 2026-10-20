@@ -6,13 +6,13 @@ import type { KbHit, KbNote } from "../../lib/kb";
 
 interface KnowledgePickerDialogProps {
   open: boolean;
-  documentId: string;
+  prepareDocument: () => Promise<string>;
   onClose: () => void;
   onInsert: (label: string, content: string) => void;
 }
 
 /** Optional knowledge-base quote dialog; the writer's main screen stays a single input. */
-export function KnowledgePickerDialog({ open, documentId, onClose, onInsert }: KnowledgePickerDialogProps) {
+export function KnowledgePickerDialog({ open, prepareDocument, onClose, onInsert }: KnowledgePickerDialogProps) {
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<KbHit[]>([]);
   const [selected, setSelected] = useState<KbNote | null>(null);
@@ -39,6 +39,7 @@ export function KnowledgePickerDialog({ open, documentId, onClose, onInsert }: K
     setSelected(null);
     setSearched(true);
     try {
+      const documentId = await prepareDocument();
       setHits(await kbSearch({
         vault: null,
         keyword: query.trim(),
@@ -60,6 +61,7 @@ export function KnowledgePickerDialog({ open, documentId, onClose, onInsert }: K
     setBusy(true);
     setError(null);
     try {
+      const documentId = await prepareDocument();
       setSelected(await kbGet(path, documentId));
     } catch (loadError) {
       setError(ipcErrorMessage(loadError));

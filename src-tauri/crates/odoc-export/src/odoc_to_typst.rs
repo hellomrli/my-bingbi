@@ -9,6 +9,7 @@ use std::fmt::Write as _;
 
 use odoc_model::{Block, HeadingLevel, ListStyle, ODoc};
 
+use crate::heading_numbering::HeadingNumbering;
 use crate::style::{FontStyle, Gb9704Style};
 
 /// Converts an `ODoc` into a complete Typst source string.
@@ -41,8 +42,9 @@ pub fn odoc_to_typst(document: &ODoc, style: &Gb9704Style) -> String {
         write_flush_paragraph(&mut out, &recipients, style);
     }
 
+    let mut heading_numbering = HeadingNumbering::default();
     for block in &document.body.blocks {
-        write_block(&mut out, block, style);
+        write_block(&mut out, block, style, &mut heading_numbering);
     }
 
     if !document.body.attachments.is_empty() {
@@ -149,9 +151,17 @@ fn write_flush_paragraph(out: &mut String, text: &str, style: &Gb9704Style) {
     let _ = writeln!(out);
 }
 
-fn write_block(out: &mut String, block: &Block, style: &Gb9704Style) {
+fn write_block(
+    out: &mut String,
+    block: &Block,
+    style: &Gb9704Style,
+    numbering: &mut HeadingNumbering,
+) {
     match block {
-        Block::Heading { content, level, .. } => write_heading(out, *level, content, style),
+        Block::Heading { content, level, .. } => {
+            let content = numbering.format(*level, content);
+            write_heading(out, *level, &content, style);
+        }
         Block::Paragraph { content, .. } => {
             if !content.trim().is_empty() {
                 let _ = writeln!(out, "{}", escape(content));

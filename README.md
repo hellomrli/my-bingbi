@@ -123,7 +123,7 @@ Cline Pass 是一个聚合订阅网关，一个 Key 可以使用 DeepSeek、GLM�
 - Windows 更新包为 NSIS 安装器，Linux 为 AppImage；两者都由发布流水线生成 `.sig` 并写入 `latest.json`。
 - 更新公钥已固化在 `src-tauri/tauri.conf.json`，本地构建也能检查同一条签名通道；私钥只存在仓库 secret `TAURI_SIGNING_PRIVATE_KEY`。
 - 校验失败、网络失败、清单缺少当前平台等错误会给出不同提示，不会把签名失败误报成"已是最新"。
-- **只有发布比当前更高的版本才会提示更新**。当前 v1.1.7 已是最新；下一个更高版本发布后，v1.1.7 及更早版本即可收到。
+- **只有发布比当前更高的版本才会提示更新**。本次发布 `v1.1.8` 后，v1.1.7 及更早版本即可收到更新提示。
 
 ![在线更新提示：显示当前版本与可安装的新版本](docs/assets/update-banner.png)
 

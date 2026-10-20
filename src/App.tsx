@@ -29,6 +29,7 @@ import {
   deleteDocument,
   exportDocx,
   exportPdf,
+  factCheckDocumentNow,
   importDocx,
   ipcErrorMessage,
   IpcError,
@@ -53,6 +54,7 @@ import type { DocumentType, ODoc } from "./lib/odoc";
 import { lintDocument, unverifiedTokenMap } from "./lib/lint";
 import { composeMaterialWithReferences, type DraftReference } from "./lib/materialReferences";
 import { selectFindings, type RevisionedReport } from "./lib/report";
+import { errorCode } from "./lib/errors";
 import type { AppConfig, DocumentSummary } from "./lib/store";
 import { useWorkbenchStore } from "./store/workbench";
 
@@ -111,6 +113,7 @@ function App() {
   const setTheme = useWorkbenchStore((state) => state.setTheme);
   const markSaved = useWorkbenchStore((state) => state.markSaved);
   const updateTitle = useWorkbenchStore((state) => state.updateTitle);
+  const updateSecurityLevel = useWorkbenchStore((state) => state.updateSecurityLevel);
   const showGrid = useWorkbenchStore((state) => state.showGrid);
   const toggleGrid = useWorkbenchStore((state) => state.toggleGrid);
   const importInputRef = useRef<HTMLInputElement>(null);
@@ -141,8 +144,11 @@ function App() {
   const [material, setMaterial] = useState("");
   const [references, setReferences] = useState<DraftReference[]>([]);
   const [startingDraft, setStartingDraft] = useState(false);
+  const startingDraftRef = useRef(false);
   const [engineLintReport, setEngineLintReport] = useState<RevisionedReport<LintReport> | null>(null);
   const [engineFactCheckReport, setEngineFactCheckReport] = useState<RevisionedReport<FactCheckReport> | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [checkError, setCheckError] = useState<string | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [reviewing, setReviewing] = useState(false);
   const [reviewStage, setReviewStage] = useState<ReviewStageId | null>(null);
@@ -170,27 +176,64 @@ function App() {
   // Desktop: keep the panel on the kernel's pack-driven rules. The local rule subset still
   // renders instantly while the debounced kernel check runs, so typing stays responsive.
   const lintFailureLogged = useRef(false);
+  const checkRequestRef = useRef(0);
   useEffect(() => {
+    const request = ++checkRequestRef.current;
+    setChecking(false);
     if (!desktopRuntime) return;
-    if (engineLintReport?.documentId === document.id && engineLintReport.revision === document.revision) return;
+    if (engineLintReport?.documentId === document.id && engineLintReport.revision === document.revision
+      && engineFactCheckReport?.documentId === document.id && engineFactCheckReport.revision === document.revision) return;
     const snapshot = document;
+    let active = true;
     const timeout = window.setTimeout(() => {
-      lintDocumentNow(snapshot)
-        .then((report) => {
-          setEngineLintReport((current) =>
-            current && current.documentId === snapshot.id && current.revision >= snapshot.revision
-              ? current
-              : { documentId: snapshot.id, revision: snapshot.revision, report },
-          );
+      if (request !== checkRequestRef.current) return;
+      setChecking(true);
+      Promise.all([lintDocumentNow(snapshot), factCheckDocumentNow(snapshot)])
+        .then(([lint, facts]) => {
+          if (!active || request !== checkRequestRef.current) return;
+          setChecking(false);
+          setEngineLintReport({ documentId: snapshot.id, revision: snapshot.revision, report: lint });
+          setEngineFactCheckReport({ documentId: snapshot.id, revision: snapshot.revision, report: facts });
+          setUnverifiedTokens(unverifiedTokenMap(facts.findings));
+          setCheckError(null);
         })
-        .catch(() => {
+        .catch((error) => {
+          if (!active || request !== checkRequestRef.current) return;
+          setChecking(false);
+          setCheckError(ipcErrorMessage(error));
           if (lintFailureLogged.current) return;
           lintFailureLogged.current = true;
-          console.warn("kernel lint unavailable; showing the local rule subset");
+          console.warn("kernel checks unavailable; showing the local rule subset");
         });
     }, 250);
-    return () => window.clearTimeout(timeout);
-  }, [desktopRuntime, document, engineLintReport]);
+    return () => {
+      active = false;
+      window.clearTimeout(timeout);
+    };
+  }, [desktopRuntime, document, engineLintReport, engineFactCheckReport, setUnverifiedTokens]);
+
+  async function recheckDocument() {
+    if (checking) return;
+    const request = ++checkRequestRef.current;
+    setChecking(true);
+    setCheckError(null);
+    const snapshot = useWorkbenchStore.getState().document;
+    try {
+      const [lint, facts] = await Promise.all([lintDocumentNow(snapshot), factCheckDocumentNow(snapshot)]);
+      if (request !== checkRequestRef.current) return;
+      const current = useWorkbenchStore.getState().document;
+      if (JSON.stringify(current) !== JSON.stringify(snapshot)) {
+        throw new IpcError("document_conflict", "核验期间文档已修改，请重新核验最新版本。");
+      }
+      setEngineLintReport({ documentId: snapshot.id, revision: snapshot.revision, report: lint });
+      setEngineFactCheckReport({ documentId: snapshot.id, revision: snapshot.revision, report: facts });
+      setUnverifiedTokens(unverifiedTokenMap(facts.findings));
+    } catch (error) {
+      if (request === checkRequestRef.current) setCheckError(ipcErrorMessage(error));
+    } finally {
+      if (request === checkRequestRef.current) setChecking(false);
+    }
+  }
 
   // Desktop: check the signed release channel once per start when auto-update is enabled. A
   // failure stays silent; the settings page still offers a manual check with an explicit error.
@@ -362,7 +405,9 @@ function App() {
   async function handleNew() {
     if (dirty && !window.confirm("当前修改尚未保存，仍要新建公文吗？")) return;
     try {
+      const securityLevel = useWorkbenchStore.getState().document.meta.securityLevel;
       const next = await createEmptyDocument();
+      next.meta.securityLevel = securityLevel;
       setDocument(next, null);
       setEngineLintReport(null);
       setEngineFactCheckReport(null);
@@ -433,6 +478,7 @@ function App() {
       await deleteDocument(id);
       if (id === document.id) {
         const next = await createEmptyDocument();
+        next.meta.securityLevel = document.meta.securityLevel;
         setDocument(next, null);
         setEngineLintReport(null);
         setEngineFactCheckReport(null);
@@ -480,6 +526,23 @@ function App() {
     void refreshDocuments();
   }
 
+  async function recoverSessionDocument(generated: ODoc) {
+    if (useWorkbenchStore.getState().dirty && !window.confirm("当前修改尚未保存，仍要打开另存的生成结果吗？")) return;
+    const empty = await createEmptyDocument();
+    const recovered = { ...structuredClone(generated), id: empty.id, revision: 0 };
+    const saved = await saveDocument(recovered, "session_recovery");
+    setDocument(recovered, saved.savedAt);
+    setSavedVersion(saved.versionSeq);
+    setEngineLintReport(null);
+    setEngineFactCheckReport(null);
+    setSessionTarget(null);
+    setLibraryOpen(false);
+    setComposing(false);
+    setView("structure");
+    setNotice("生成结果已另存为新文档，原文档保持不变");
+    void refreshDocuments();
+  }
+
   async function handleSaveConfig(next: AppConfig) {
     try {
       const normalized = {
@@ -504,14 +567,27 @@ function App() {
     try {
       const result = await saveDocument(snapshot, "autosave");
       const current = useWorkbenchStore.getState().document;
-      if (current.id === snapshot.id && current.revision === snapshot.revision) {
-        markSaved(result.savedAt);
-        setSavedVersion(result.versionSeq);
+      if (JSON.stringify(current) !== JSON.stringify(snapshot)) {
+        throw new IpcError("document_conflict", "准备运行时文档已变更，请基于最新内容重新发起。");
       }
+      markSaved(result.savedAt);
+      setSavedVersion(result.versionSeq);
       if (libraryOpen) await refreshDocuments();
     } finally {
       setSaving(false);
     }
+  }
+
+  async function prepareKnowledgeDocument(): Promise<string> {
+    const snapshot = useWorkbenchStore.getState().document;
+    const result = await saveDocument(snapshot, "kb_context");
+    const current = useWorkbenchStore.getState().document;
+    if (JSON.stringify(current) !== JSON.stringify(snapshot)) {
+      throw new IpcError("document_conflict", "文档或密级已变更，请重新检索知识库。");
+    }
+    markSaved(result.savedAt);
+    setSavedVersion(result.versionSeq);
+    return snapshot.id;
   }
 
   function applyDraftOutcome(outcome: DraftOutcome) {
@@ -600,7 +676,7 @@ function App() {
   }
 
   async function handleStartWriting(docType: DocumentType | null) {
-    if (draftPipeline.drafting || startingDraft) return;
+    if (draftPipeline.drafting || startingDraftRef.current) return;
     if (!material.trim()) {
       setNotice("先写一下想生成什么，再开始");
       return;
@@ -612,12 +688,17 @@ function App() {
     }
     // Flip this before the first await: creating the document and saving it can take a
     // moment, and the user must see that the click registered before the first stage starts.
+    startingDraftRef.current = true;
     setStartingDraft(true);
     try {
       const current = useWorkbenchStore.getState().document;
       if (!isBlankDocument(current)) {
         if (useWorkbenchStore.getState().dirty && !window.confirm("当前修改尚未保存，仍要新建一篇吗？")) return;
         const next = await createEmptyDocument();
+        if (JSON.stringify(useWorkbenchStore.getState().document) !== JSON.stringify(current)) {
+          throw new IpcError("document_conflict", "准备写作时文档或密级已变更，请基于最新内容重新发起。");
+        }
+        next.meta.securityLevel = current.meta.securityLevel;
         setDocument(next, null);
         setEngineLintReport(null);
         setEngineFactCheckReport(null);
@@ -627,6 +708,7 @@ function App() {
     } catch (error) {
       setNotice(ipcErrorMessage(error));
     } finally {
+      startingDraftRef.current = false;
       setStartingDraft(false);
     }
   }
@@ -751,7 +833,10 @@ function App() {
   }
 
   async function handleExport() {
-    if (errorCount) return;
+    if (errorCount) {
+      setQualityOpen(true);
+      return;
+    }
     const baseName = document.body.title.text.trim() || "未命名公文";
     const snapshot = useWorkbenchStore.getState().document;
     setSaving(true);
@@ -771,6 +856,10 @@ function App() {
         setNotice("浏览器版已导出 ODoc JSON");
       }
     } catch (error) {
+      if (errorCode(error) === "export_blocked") {
+        setQualityOpen(true);
+        void recheckDocument();
+      }
       setNotice(ipcErrorMessage(error));
     } finally {
       setSaving(false);
@@ -778,7 +867,10 @@ function App() {
   }
 
   async function handlePrint() {
-    if (errorCount) return;
+    if (errorCount) {
+      setQualityOpen(true);
+      return;
+    }
     const baseName = document.body.title.text.trim() || "未命名公文";
     if (!desktopRuntime) {
       setView("preview");
@@ -811,6 +903,10 @@ function App() {
         setNotice("未找到可用中文字体，已打开打印预览");
       }
     } catch (error) {
+      if (errorCode(error) === "export_blocked") {
+        setQualityOpen(true);
+        void recheckDocument();
+      }
       setNotice(ipcErrorMessage(error));
     } finally {
       setSaving(false);
@@ -894,7 +990,7 @@ function App() {
       id: "document-info",
       label: "文档信息（可选）",
       hint: "发文字号、主送机关、落款等",
-      disabled: composing,
+      disabled: startingDraft || draftPipeline.drafting,
       run: () => setInfoOpen(true),
     },
   ];
@@ -979,7 +1075,9 @@ function App() {
             onOpenDocuments={() => setLibraryOpen(true)}
             onOpenRecent={(id) => void handleOpenDocument(id)}
             recentDocuments={documents}
-            documentId={document.id}
+            securityLevel={document.meta.securityLevel}
+            onSecurityLevelChange={updateSecurityLevel}
+            prepareKnowledgeDocument={prepareKnowledgeDocument}
             kbEnabled={desktopRuntime && kbConfig.enabled}
             references={references}
             onAddReferences={handleAddReferences}
@@ -1082,6 +1180,7 @@ function App() {
         documentId={sessionTarget?.id ?? null}
         title={sessionTarget?.title ?? ""}
         onClose={() => setSessionTarget(null)}
+        onRecover={recoverSessionDocument}
       />
       <SettingsDialog
         open={settingsOpen}
@@ -1123,6 +1222,9 @@ function App() {
         findings={displayedFindings}
         canReview={canReview}
         reviewing={reviewing}
+        checking={checking}
+        checkError={checkError}
+        onRecheck={() => void recheckDocument()}
         onClose={() => setQualityOpen(false)}
         onLocate={(finding) => locateReviewNode(finding.nodeId)}
         onReview={() => {

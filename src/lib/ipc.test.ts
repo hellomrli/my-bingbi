@@ -114,6 +114,16 @@ describe("browser document repository", () => {
     expect((await loadDocument(document.id)).body.title.text).toBe("较新内容");
   });
 
+  it("rejects different content at the same revision without creating a version", async () => {
+    const document = createEmptyDocument();
+    await saveDocument(document, "autosave");
+    const replacement = structuredClone(document);
+    replacement.body.title.text = "同版本的不同内容";
+    await expect(saveDocument(replacement, "draft")).rejects.toMatchObject({ code: "stale_revision" });
+    expect(await loadDocument(document.id)).toEqual(document);
+    expect(await listDocumentVersions(document.id)).toHaveLength(1);
+  });
+
   it("round-trips application config", async () => {
     expect(await loadAppConfig()).toEqual(defaultAppConfig);
     const config = { ...defaultAppConfig, theme: "dark" as const, autosaveEnabled: false };

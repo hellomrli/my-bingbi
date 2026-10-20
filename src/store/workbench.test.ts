@@ -67,6 +67,29 @@ describe("workbench store", () => {
     expect(modelFact.verified).toBe(false);
   });
 
+  it("preserves fact provenance and clears confirmation after content edits", () => {
+    state().setDocument(createEmptyDocument(), null);
+    state().addFact({
+      kind: "data",
+      value: "15",
+      unit: "万元",
+      source: "model_generated",
+      sourceRef: "会议纪要第 2 页",
+    });
+    let fact = state().document.facts.facts[0];
+    expect(fact).toMatchObject({ source: "model_generated", sourceRef: "会议纪要第 2 页", verified: false });
+
+    state().updateFact(fact.id, { verified: true });
+    expect(state().document.facts.facts[0].verified).toBe(true);
+    state().updateFact(fact.id, { value: "18" });
+    fact = state().document.facts.facts[0];
+    expect(fact.value).toBe("18");
+    expect(fact.verified).toBe(false);
+    expect(fact.sourceRef).toBe("会议纪要第 2 页");
+    state().updateFact(fact.id, { unit: "  ", sourceRef: "  " });
+    expect(state().document.facts.facts[0]).toMatchObject({ unit: null, sourceRef: null, verified: false });
+  });
+
   it("opens a document with a clean dirty flag and no stale highlights", () => {
     state().updateTitle("草稿");
     state().setUnverifiedTokens({ "block-1": ["15万元"] });
