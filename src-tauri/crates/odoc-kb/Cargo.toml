@@ -17,7 +17,7 @@ serde_yaml = "0.9.34"
 thiserror = "2.0"
 tokio = { version = "1.43", features = ["macros", "rt", "sync", "time"] }
 tokio-tungstenite = { version = "0.26", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
-ts-rs = { version = "11.1", features = ["serde-compat"] }
+ts-rs = { version = "12.0", features = ["serde-compat"] }
 url = "2.5"
 walkdir = "2.5"
 
