@@ -614,7 +614,10 @@ mod tests {
         let expected = vec!["A&B < 10 中 &raw;".to_owned()];
         assert_eq!(collect_tag_text(xml, &["t"]).expect("tag"), expected);
         assert_eq!(collect_leaf_text(xml, &[]).expect("leaf"), expected);
-        assert!(collect_leaf_text(xml, &["t"]).expect("ignored").is_empty());
+        assert_eq!(
+            collect_leaf_text(xml, &["t"]).expect("ignored"),
+            Vec::<String>::new()
+        );
         assert_eq!(
             parse_shared_strings(br"<sst><si><t>A&amp;B</t></si></sst>").expect("shared"),
             vec!["A&B"]

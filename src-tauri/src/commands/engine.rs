@@ -511,6 +511,7 @@ mod tests {
         };
         assert!(validate_draft_start_request(&base).is_ok());
         let imitating = DraftStartRequest {
+            material_security_level: None,
             document_id: "doc".to_owned(),
             material: "申请事项".to_owned(),
             provider_id: "ollama".to_owned(),
@@ -521,6 +522,7 @@ mod tests {
         };
         assert!(validate_draft_start_request(&imitating).is_ok());
         let oversized_model = DraftStartRequest {
+            material_security_level: None,
             document_id: "doc".to_owned(),
             material: "申请事项".to_owned(),
             provider_id: "ollama".to_owned(),
@@ -531,6 +533,7 @@ mod tests {
         };
         assert!(validate_draft_start_request(&oversized_model).is_err());
         let control_character_model = DraftStartRequest {
+            material_security_level: None,
             document_id: "doc".to_owned(),
             material: "申请事项".to_owned(),
             provider_id: "ollama".to_owned(),
