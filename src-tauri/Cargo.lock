@@ -3634,7 +3634,7 @@ dependencies = [
  "quick-xml 0.41.0",
  "serde",
  "thiserror 2.0.20",
- "toml 0.8.23",
+ "toml 1.1.4+spec-1.1.0",
  "typst",
  "typst-pdf",
  "zip 7.2.0",
@@ -3712,7 +3712,7 @@ dependencies = [
  "serde_yaml",
  "tempfile",
  "thiserror 2.0.20",
- "toml 0.8.23",
+ "toml 1.1.4+spec-1.1.0",
  "ts-rs",
  "walkdir",
 ]
