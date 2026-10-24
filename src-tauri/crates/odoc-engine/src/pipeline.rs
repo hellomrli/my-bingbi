@@ -2010,7 +2010,9 @@ mod tests {
                         .allows_remote_provider()
                 );
             } else {
-                assert!(!referenced.is_empty());
+                if referenced.is_empty() {
+                    panic!("local source should be injected: {search_level}/{fetched_level}");
+                }
                 assert_eq!(
                     outcome.document.meta.security_level,
                     odoc_model::SecurityLevel::Secret
