@@ -104,7 +104,8 @@ pub fn fact_check_document(document: &ODoc) -> Result<FactCheckReport, LintError
     let date =
         Regex::new(r"\d{4}年\d{1,2}月\d{1,2}日").map_err(|_| LintError::InvalidFactPattern)?;
     let document_number =
-        Regex::new(r"[\p{Han}A-Za-z][\p{Han}A-Za-z0-9]*〔[0-9]{4}〕[0-9]+号|〔[0-9]{4}〕[0-9]+号").map_err(|_| LintError::InvalidFactPattern)?;
+        Regex::new(r"[\p{Han}A-Za-z][\p{Han}A-Za-z0-9]*〔[0-9]{4}〕[0-9]+号|〔[0-9]{4}〕[0-9]+号")
+            .map_err(|_| LintError::InvalidFactPattern)?;
     let number_with_unit = Regex::new(r"[+\-−]?[0-9]+(?:\.[0-9]+)?(?:万|亿)?(?:平方千米|平方公里|平方米|平方厘米|立方米|千瓦时|百分点|人次|千米|公里|厘米|毫米|公顷|千克|公斤|毫克|千瓦|小时|分钟|秒钟|个月|万元|亿元|海里|吨|米|亩|升|克|秒|个|份|项|户|家|辆|套|台|件|人|次|元|年|月|日|%|％|号|万|亿)")
         .map_err(|_| LintError::InvalidFactPattern)?;
     let bare_number = Regex::new(r"(?:^|[^0-9A-Za-z_.+\-−])([+\-−]?[0-9]+(?:\.[0-9]+)?)")
@@ -624,11 +625,13 @@ fn extract_fact_tokens(
     let mut spans = date
         .find_iter(text)
         .map(|m| (m.start(), m.end(), m.as_str().to_owned()))
-        .chain(
-            document_number
-                .find_iter(text)
-                .map(|m| (m.start(), m.end(), document_number_token(m.as_str()).to_owned())),
-        )
+        .chain(document_number.find_iter(text).map(|m| {
+            (
+                m.start(),
+                m.end(),
+                document_number_token(m.as_str()).to_owned(),
+            )
+        }))
         .chain(
             number_with_unit
                 .find_iter(text)
@@ -639,13 +642,18 @@ fn extract_fact_tokens(
         let Some(matched) = capture.get(1) else {
             continue;
         };
-        if spans.iter().any(|(start, end, _)| *start <= matched.start() && *end >= matched.end()) {
+        if spans
+            .iter()
+            .any(|(start, end, _)| *start <= matched.start() && *end >= matched.end())
+        {
             continue;
         }
         // Unknown units must not degrade into a bare number that an unrelated fact can clear.
-        let suffix_len = text[matched.end()..].chars()
+        let suffix_len = text[matched.end()..]
+            .chars()
             .take_while(|character| matches!(*character, '\u{3400}'..='\u{9fff}'))
-            .map(char::len_utf8).sum::<usize>();
+            .map(char::len_utf8)
+            .sum::<usize>();
         let end = matched.end() + suffix_len;
         spans.push((matched.start(), end, text[matched.start()..end].to_owned()));
     }
@@ -663,20 +671,41 @@ fn extract_fact_tokens(
 }
 
 fn verified_fact_terms(facts: &[Fact]) -> BTreeSet<String> {
-    facts.iter().filter(|fact| fact.verified).map(|fact| {
-        let value = fact.value.trim();
-        match fact.unit.as_deref().map(str::trim).filter(|unit| !unit.is_empty()) {
-            Some(unit) if !value.ends_with(unit) => format!("{value}{unit}"),
-            _ => value.to_owned(),
-        }
-    }).filter(|term| !term.is_empty()).collect()
+    facts
+        .iter()
+        .filter(|fact| fact.verified)
+        .map(|fact| {
+            let value = fact.value.trim();
+            match fact
+                .unit
+                .as_deref()
+                .map(str::trim)
+                .filter(|unit| !unit.is_empty())
+            {
+                Some(unit) if !value.ends_with(unit) => format!("{value}{unit}"),
+                _ => value.to_owned(),
+            }
+        })
+        .filter(|term| !term.is_empty())
+        .collect()
 }
 
 fn document_number_token(value: &str) -> &str {
     // Remove prose introducers, never the issuing authority itself. Unknown prose remains
     // unmatched rather than allowing two different authorities to share a verified number.
     let mut token = value;
-    for prefix in ["依据", "根据", "按照", "参照", "文号为", "文号是", "文号", "编号为", "编号", "执行"] {
+    for prefix in [
+        "依据",
+        "根据",
+        "按照",
+        "参照",
+        "文号为",
+        "文号是",
+        "文号",
+        "编号为",
+        "编号",
+        "执行",
+    ] {
         if let Some((_, tail)) = token.rsplit_once(prefix) {
             token = tail;
         }
@@ -689,9 +718,11 @@ fn fact_covers_token(token: &str, term: &str) -> bool {
     if token == term {
         return true;
     }
-    if token.contains('〔') || term.contains('〔')
+    if token.contains('〔')
+        || term.contains('〔')
         || (token.contains('年') && token.contains('月'))
-        || (term.contains('年') && term.contains('月')) {
+        || (term.contains('年') && term.contains('月'))
+    {
         return false;
     }
     match (fact_numeric_part(token), fact_numeric_part(term)) {
@@ -828,11 +859,23 @@ mod tests {
         ] {
             let mut document = ODoc::empty();
             document.body.blocks = vec![Block::paragraph(body.to_owned())];
-            document.facts.facts.push(Fact::from_user_input(FactKind::Data, value.to_owned(), unit.map(str::to_owned), None, None));
+            document.facts.facts.push(Fact::from_user_input(
+                FactKind::Data,
+                value.to_owned(),
+                unit.map(str::to_owned),
+                None,
+                None,
+            ));
             let report = fact_check_document(&document).expect("check");
-            assert_eq!(report.unresolved_tokens, unresolved, "{body} / {value} {unit:?}");
+            assert_eq!(
+                report.unresolved_tokens, unresolved,
+                "{body} / {value} {unit:?}"
+            );
         }
-        assert!(!fact_covers_token("9007199254740993元", "9007199254740992元"));
+        assert!(!fact_covers_token(
+            "9007199254740993元",
+            "9007199254740992元"
+        ));
         assert!(!fact_covers_token("-15%", "15%"));
         assert!(!fact_covers_token("〔2026〕27号", "甲发〔2026〕27号"));
     }

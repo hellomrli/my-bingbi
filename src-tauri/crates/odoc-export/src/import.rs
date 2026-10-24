@@ -152,7 +152,9 @@ fn parse_paragraphs(xml: &[u8]) -> Result<Vec<ParsedParagraph>, ExportError> {
             Ok(Event::Start(event)) if event.local_name().as_ref() == b"t" => in_text = true,
             Ok(event @ (Event::Text(_) | Event::GeneralRef(_) | Event::CData(_))) if in_text => {
                 if let Some(paragraph) = current.as_mut() {
-                    paragraph.text.push_str(&crate::xml_text::decode_text(&event)?);
+                    paragraph
+                        .text
+                        .push_str(&crate::xml_text::decode_text(&event)?);
                 }
             }
             Ok(Event::End(event)) if event.local_name().as_ref() == b"t" => in_text = false,
@@ -234,7 +236,11 @@ mod tests {
         let bytes = crate::write_docx(&document).expect("export");
         let imported = read_docx(&bytes).expect("import");
         assert_eq!(imported.body.blocks[0].plain_text(), text);
-        assert!(crate::extract_reference_text("reference.docx", &bytes).expect("reference").contains(text));
+        assert!(
+            crate::extract_reference_text("reference.docx", &bytes)
+                .expect("reference")
+                .contains(text)
+        );
     }
 
     #[test]

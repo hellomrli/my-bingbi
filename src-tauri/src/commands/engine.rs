@@ -5,7 +5,7 @@ use crate::dto::{DraftStartRequest, RerunStageRequest, ReviewStartRequest};
 use crate::error::{IpcError, map_engine_error, map_store_error, map_tauri_error};
 use crate::state::AppState;
 use crate::util::{
-    MAX_DRAFT_MATERIAL_BYTES, builtin_pipeline_path, lock_documents, provider_client, active_packs,
+    MAX_DRAFT_MATERIAL_BYTES, active_packs, builtin_pipeline_path, lock_documents, provider_client,
 };
 use odoc_engine::{
     DraftEngine, DraftEvent, DraftInput, DraftJournal, DraftOutcome, EngineError,
@@ -40,7 +40,9 @@ pub(crate) async fn draft_start<R: tauri::Runtime>(
         draft_document.meta.security_level = draft_document.meta.security_level.max(level);
     }
     let provider = provider_client(&state, &request.provider_id)?;
-    if !draft_document.meta.security_level.allows_remote_provider() && !provider.capabilities().is_local {
+    if !draft_document.meta.security_level.allows_remote_provider()
+        && !provider.capabilities().is_local
+    {
         return Err(IpcError {
             code: "model_security_blocked",
             message: "当前密级仅允许本地模型，无法启动起草。",

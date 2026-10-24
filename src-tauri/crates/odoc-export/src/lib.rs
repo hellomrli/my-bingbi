@@ -12,8 +12,8 @@ mod pdf;
 mod reference;
 mod style;
 mod template;
-mod xml_text;
 pub mod typst_render;
+mod xml_text;
 
 pub use fonts::{FontSet, discover_system_fonts, resolve_font_path, resolve_font_set};
 pub use import::read_docx;

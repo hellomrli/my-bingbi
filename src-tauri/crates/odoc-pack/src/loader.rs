@@ -501,10 +501,16 @@ pub struct PackRegistry {
 impl PackRegistry {
     /// Snapshot the enabled registry for one operation. Core packs are mandatory; an empty
     /// selection (including legacy configurations) means no optional packs, not all packs.
+    #[must_use]
     pub fn enabled(&self, active_ids: &[String]) -> Self {
         Self {
-            packs: self.packs.iter()
-                .filter(|(id, _)| matches!(id.as_str(), "gb9704-format" | "renmin-style") || active_ids.contains(id))
+            packs: self
+                .packs
+                .iter()
+                .filter(|(id, _)| {
+                    matches!(id.as_str(), "gb9704-format" | "renmin-style")
+                        || active_ids.contains(id)
+                })
                 .map(|(id, pack)| (id.clone(), pack.clone()))
                 .collect(),
         }

@@ -1,6 +1,6 @@
 use super::super::ExportError;
-use quick_xml::Reader;
 use crate::xml_text::decode_text;
+use quick_xml::Reader;
 use quick_xml::events::{BytesStart, Event};
 use std::collections::{BTreeMap, HashMap};
 use std::io::{Cursor, Read};
@@ -253,11 +253,14 @@ fn collect_tag_text(xml: &[u8], tags: &[&str]) -> Result<Vec<String>, ExportErro
                     active = Some(local);
                 }
             }
-            Ok(event @ (Event::Text(_) | Event::GeneralRef(_) | Event::CData(_))) if active.is_some() => {
+            Ok(event @ (Event::Text(_) | Event::GeneralRef(_) | Event::CData(_)))
+                if active.is_some() =>
+            {
                 current.push_str(&decode_text(&event).map_err(|_| ExportError::InvalidReference)?);
             }
             Ok(Event::End(event)) => {
-                let local = String::from_utf8_lossy(event.local_name().as_ref()).to_ascii_lowercase();
+                let local =
+                    String::from_utf8_lossy(event.local_name().as_ref()).to_ascii_lowercase();
                 if active.as_deref() == Some(local.as_str()) {
                     push_text(&mut values, &mut current);
                     active = None;
@@ -280,7 +283,10 @@ fn push_text(values: &mut Vec<String>, current: &mut String) {
 }
 
 fn collect_leaf_text(xml: &[u8], ignored: &[&str]) -> Result<Vec<String>, ExportError> {
-    let ignored: Vec<String> = ignored.iter().map(|value| value.to_ascii_lowercase()).collect();
+    let ignored: Vec<String> = ignored
+        .iter()
+        .map(|value| value.to_ascii_lowercase())
+        .collect();
     let mut reader = Reader::from_reader(xml);
     reader.config_mut().trim_text(false);
     let mut buffer = Vec::new();
@@ -294,7 +300,8 @@ fn collect_leaf_text(xml: &[u8], ignored: &[&str]) -> Result<Vec<String>, Export
                 stack.push(local_name(&event).to_ascii_lowercase());
             }
             Ok(event @ (Event::Text(_) | Event::GeneralRef(_) | Event::CData(_)))
-                if !stack.is_empty() && !stack.iter().any(|name| ignored.contains(name)) => {
+                if !stack.is_empty() && !stack.iter().any(|name| ignored.contains(name)) =>
+            {
                 current.push_str(&decode_text(&event).map_err(|_| ExportError::InvalidReference)?);
             }
             Ok(Event::End(_)) => {
@@ -473,9 +480,12 @@ fn parse_sheet(xml: &[u8], shared_strings: &[String]) -> Result<Vec<Vec<String>>
                     cell.in_value = true;
                 }
             }
-            Ok(event @ (Event::Text(_) | Event::GeneralRef(_) | Event::CData(_))) if current_cell.as_ref().is_some_and(|cell| cell.in_value) => {
+            Ok(event @ (Event::Text(_) | Event::GeneralRef(_) | Event::CData(_)))
+                if current_cell.as_ref().is_some_and(|cell| cell.in_value) =>
+            {
                 if let Some(cell) = current_cell.as_mut() {
-                    cell.value.push_str(&decode_text(&event).map_err(|_| ExportError::InvalidReference)?);
+                    cell.value
+                        .push_str(&decode_text(&event).map_err(|_| ExportError::InvalidReference)?);
                 }
             }
             Ok(Event::End(event))
@@ -605,7 +615,10 @@ mod tests {
         assert_eq!(collect_tag_text(xml, &["t"]).expect("tag"), expected);
         assert_eq!(collect_leaf_text(xml, &[]).expect("leaf"), expected);
         assert!(collect_leaf_text(xml, &["t"]).expect("ignored").is_empty());
-        assert_eq!(parse_shared_strings(br"<sst><si><t>A&amp;B</t></si></sst>").expect("shared"), vec!["A&B"]);
+        assert_eq!(
+            parse_shared_strings(br"<sst><si><t>A&amp;B</t></si></sst>").expect("shared"),
+            vec!["A&B"]
+        );
         assert_eq!(parse_sheet(br#"<worksheet><row r="1"><c r="A1" t="inlineStr"><is><t>A&amp;B &lt; &#65;</t></is></c></row></worksheet>"#, &[]).expect("sheet"), vec![vec!["A&B < A"]]);
     }
 

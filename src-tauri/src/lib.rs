@@ -142,7 +142,10 @@ pub fn run() {
         .run(|app, event| {
             // Route native Quit (including Cmd+Q) through the same frontend close/save guard.
             // Explicit restart exit codes are issued only by the guarded updater flow.
-            if let tauri::RunEvent::ExitRequested { api, code: None, .. } = event {
+            if let tauri::RunEvent::ExitRequested {
+                api, code: None, ..
+            } = event
+            {
                 if let Some(window) = app.get_webview_window("main") {
                     api.prevent_exit();
                     let _ = window.close();

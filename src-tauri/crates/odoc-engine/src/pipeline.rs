@@ -5,7 +5,10 @@ use crate::types::{
     StageStatus, StageSummary, StyleProfile, TypeDecision,
 };
 use futures_util::future::try_join_all;
-use odoc_kb::{KbError, KbHit, KbProvider, KbQuery, SearchMode, hybrid_search_with_semantic, source_security_level};
+use odoc_kb::{
+    KbError, KbHit, KbProvider, KbQuery, SearchMode, hybrid_search_with_semantic,
+    source_security_level,
+};
 use odoc_lint::{FactCheckReport, LintReport, fact_check_document, lint_document};
 use odoc_llm::{ChatMessage, ChatRequest, ChatResponse, ChatRole, LlmProvider};
 use odoc_model::{Block, DocumentType, Fact, HeadingLevel, ODoc};
@@ -712,13 +715,15 @@ impl<'a, J: DraftJournal, P: LlmProvider + ?Sized> DraftEngine<'a, J, P> {
                     Err(KbError::NotFound) => hit.snippet.clone(),
                     Err(error) => return Err(error.into()),
                 };
-                if !self.provider.capabilities().is_local && !source_level.allows_remote_provider() {
+                if !self.provider.capabilities().is_local && !source_level.allows_remote_provider()
+                {
                     continue;
                 }
                 let reference = format_kb_reference(&hit, &note_text, remaining);
                 remaining = remaining.saturating_sub(reference.len());
                 if !reference.is_empty() {
-                    context.document.meta.security_level = context.document.meta.security_level.max(source_level);
+                    context.document.meta.security_level =
+                        context.document.meta.security_level.max(source_level);
                     resources.push(reference);
                 }
             }
@@ -930,7 +935,13 @@ impl<'a, J: DraftJournal, P: LlmProvider + ?Sized> DraftEngine<'a, J, P> {
         stage: &StageConfig,
         context: &RunContext,
     ) -> Result<ChatRequest, EngineError> {
-        if !context.document.meta.security_level.allows_remote_provider() && !self.provider.capabilities().is_local {
+        if !context
+            .document
+            .meta
+            .security_level
+            .allows_remote_provider()
+            && !self.provider.capabilities().is_local
+        {
             return Err(odoc_llm::LlmError::RemoteProviderBlocked.into());
         }
         let mut references = context.pack_context.clone();
@@ -1751,7 +1762,10 @@ mod tests {
                     title: "历史设备请示".to_owned(),
                     snippet: "历史材料摘要".to_owned(),
                     score: 0.9,
-                    frontmatter: self.search_level.map(|level| Frontmatter::from([("security_level".into(), level.into())])).unwrap_or_default(),
+                    frontmatter: self
+                        .search_level
+                        .map(|level| Frontmatter::from([("security_level".into(), level.into())]))
+                        .unwrap_or_default(),
                 }])
             } else {
                 Ok(Vec::new())
@@ -1764,7 +1778,10 @@ mod tests {
                 path: path.to_owned(),
                 title: "历史设备请示".to_owned(),
                 content: "历史文件明确了设备采购流程。".to_owned(),
-                frontmatter: self.fetched_level.map(|level| Frontmatter::from([("security_level".into(), level.into())])).unwrap_or_default(),
+                frontmatter: self
+                    .fetched_level
+                    .map(|level| Frontmatter::from([("security_level".into(), level.into())]))
+                    .unwrap_or_default(),
                 tags: Vec::new(),
                 links: Vec::new(),
                 modified_at: None,
@@ -1945,23 +1962,64 @@ mod tests {
             (false, "secret", "internal"),
             (false, "internal", "secret"),
         ] {
-            let provider = FakeProvider { remote, ..FakeProvider::default() };
-            let kb = FakeKnowledgeBase { search_level: Some(search_level), fetched_level: Some(fetched_level) };
+            let provider = FakeProvider {
+                remote,
+                ..FakeProvider::default()
+            };
+            let kb = FakeKnowledgeBase {
+                search_level: Some(search_level),
+                fetched_level: Some(fetched_level),
+            };
             let registry = packs();
-            let engine = DraftEngine::new(pipeline(), &registry, &provider, &NoopJournal).expect("engine").with_knowledge_base(&kb);
-            let outcome = engine.run(DraftInput {
-                material: "申请购置应急排水设备经费，15万元。".into(),
-                model_text: None, initial_document: None, confirmed_doc_type: None, template_id: None,
-            }, None).await.expect("run");
+            let engine = DraftEngine::new(pipeline(), &registry, &provider, &NoopJournal)
+                .expect("engine")
+                .with_knowledge_base(&kb);
+            let outcome = engine
+                .run(
+                    DraftInput {
+                        material: "申请购置应急排水设备经费，15万元。".into(),
+                        model_text: None,
+                        initial_document: None,
+                        confirmed_doc_type: None,
+                        template_id: None,
+                    },
+                    None,
+                )
+                .await
+                .expect("run");
             let requests = provider.requests.lock().expect("requests");
-            let referenced = requests.iter().filter(|request| request.messages.iter().any(|message| message.content.contains("历史文件明确了设备采购流程"))).collect::<Vec<_>>();
+            let referenced = requests
+                .iter()
+                .filter(|request| {
+                    request
+                        .messages
+                        .iter()
+                        .any(|message| message.content.contains("历史文件明确了设备采购流程"))
+                })
+                .collect::<Vec<_>>();
             if remote {
-                assert!(referenced.is_empty(), "remote source: {search_level}/{fetched_level}");
-                assert!(outcome.document.meta.security_level.allows_remote_provider());
+                assert!(
+                    referenced.is_empty(),
+                    "remote source: {search_level}/{fetched_level}"
+                );
+                assert!(
+                    outcome
+                        .document
+                        .meta
+                        .security_level
+                        .allows_remote_provider()
+                );
             } else {
                 assert!(!referenced.is_empty());
-                assert_eq!(outcome.document.meta.security_level, odoc_model::SecurityLevel::Secret);
-                assert!(referenced.iter().all(|request| request.security_level == odoc_model::SecurityLevel::Secret));
+                assert_eq!(
+                    outcome.document.meta.security_level,
+                    odoc_model::SecurityLevel::Secret
+                );
+                assert!(
+                    referenced
+                        .iter()
+                        .all(|request| request.security_level == odoc_model::SecurityLevel::Secret)
+                );
             }
         }
     }

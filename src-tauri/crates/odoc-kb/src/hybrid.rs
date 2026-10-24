@@ -152,8 +152,10 @@ async fn fold_semantic_scores<P: LlmProvider + ?Sized>(
     let security_level = result.iter().fold(security_level, |level, hit| {
         level.max(source_security_level(&hit.frontmatter))
     });
-    if result.is_empty() || !capabilities.embeddings
-        || (!capabilities.is_local && !security_level.allows_remote_provider()) {
+    if result.is_empty()
+        || !capabilities.embeddings
+        || (!capabilities.is_local && !security_level.allows_remote_provider())
+    {
         return;
     }
     let Some(query_vector) = semantic
@@ -377,14 +379,30 @@ mod tests {
 
     #[async_trait]
     impl LlmProvider for RecordingSemantic {
-        fn id(&self) -> &str { "recording" }
-        fn capabilities(&self) -> Capabilities {
-            Capabilities { is_local: self.local, ..SemanticProvider.capabilities() }
+        fn id(&self) -> &'static str {
+            "recording"
         }
-        async fn chat(&self, _: ChatRequest) -> Result<ChatResponse, LlmError> { unreachable!() }
-        async fn chat_stream(&self, _: ChatRequest, _: Sender<ChatDelta>) -> Result<(), LlmError> { unreachable!() }
-        async fn embed(&self, texts: &[String], level: SecurityLevel) -> Result<Vec<Vec<f32>>, LlmError> {
-            self.calls.lock().expect("calls").push((texts.to_vec(), level));
+        fn capabilities(&self) -> Capabilities {
+            Capabilities {
+                is_local: self.local,
+                ..SemanticProvider.capabilities()
+            }
+        }
+        async fn chat(&self, _: ChatRequest) -> Result<ChatResponse, LlmError> {
+            unreachable!()
+        }
+        async fn chat_stream(&self, _: ChatRequest, _: Sender<ChatDelta>) -> Result<(), LlmError> {
+            unreachable!()
+        }
+        async fn embed(
+            &self,
+            texts: &[String],
+            level: SecurityLevel,
+        ) -> Result<Vec<Vec<f32>>, LlmError> {
+            self.calls
+                .lock()
+                .expect("calls")
+                .push((texts.to_vec(), level));
             Ok(texts.iter().map(|_| vec![1.0, 0.0]).collect())
         }
     }
@@ -392,24 +410,63 @@ mod tests {
     #[tokio::test]
     async fn mixed_classification_retrieval_never_embeds_restricted_sources_remotely() {
         let root = tempfile::tempdir().expect("temp vault");
-        for (name, level, text) in [("ordinary", "internal", "flood ordinary"), ("secret", "secret", "flood SECRET_MARKER"), ("unknown", "unknown", "flood UNKNOWN_MARKER")] {
-            std::fs::write(root.path().join(format!("{name}.md")), format!("---\nsecurity_level: {level}\n---\n{text}\n")).expect("note");
+        for (name, level, text) in [
+            ("ordinary", "internal", "flood ordinary"),
+            ("secret", "secret", "flood SECRET_MARKER"),
+            ("unknown", "unknown", "flood UNKNOWN_MARKER"),
+        ] {
+            std::fs::write(
+                root.path().join(format!("{name}.md")),
+                format!("---\nsecurity_level: {level}\n---\n{text}\n"),
+            )
+            .expect("note");
         }
         let vault = crate::LocalVaultProvider::open(root.path(), "test").expect("vault");
-        let query = KbQuery { keyword: "flood".into(), search_content: true, ..KbQuery::default() };
-        let remote = RecordingSemantic { local: false, calls: std::sync::Mutex::new(Vec::new()) };
-        let hits = hybrid_search_with_semantic(&vault, &query, SecurityLevel::Internal, Some(&remote)).await.expect("search");
+        let query = KbQuery {
+            keyword: "flood".into(),
+            search_content: true,
+            ..KbQuery::default()
+        };
+        let remote = RecordingSemantic {
+            local: false,
+            calls: std::sync::Mutex::new(Vec::new()),
+        };
+        let hits =
+            hybrid_search_with_semantic(&vault, &query, SecurityLevel::Internal, Some(&remote))
+                .await
+                .expect("search");
         assert_eq!(hits.len(), 1);
-        let calls = remote.calls.lock().expect("calls");
-        assert_eq!(calls.len(), 2);
-        assert!(calls.iter().all(|(texts, level)| level.allows_remote_provider() && texts.iter().all(|text| !text.contains("MARKER"))));
-        drop(calls);
-        let local = RecordingSemantic { local: true, calls: std::sync::Mutex::new(Vec::new()) };
-        let hits = hybrid_search_with_semantic(&vault, &query, SecurityLevel::Internal, Some(&local)).await.expect("search");
+        {
+            let calls = remote.calls.lock().expect("calls");
+            assert_eq!(calls.len(), 2);
+            assert!(
+                calls
+                    .iter()
+                    .all(|(texts, level)| level.allows_remote_provider()
+                        && texts.iter().all(|text| !text.contains("MARKER")))
+            );
+        }
+        let local = RecordingSemantic {
+            local: true,
+            calls: std::sync::Mutex::new(Vec::new()),
+        };
+        let hits =
+            hybrid_search_with_semantic(&vault, &query, SecurityLevel::Internal, Some(&local))
+                .await
+                .expect("search");
         assert_eq!(hits.len(), 3);
-        assert!(local.calls.lock().expect("calls").iter().all(|(_, level)| *level == SecurityLevel::Confidential));
+        assert!(
+            local
+                .calls
+                .lock()
+                .expect("calls")
+                .iter()
+                .all(|(_, level)| *level == SecurityLevel::Confidential)
+        );
         remote.calls.lock().expect("calls").clear();
-        hybrid_search_with_semantic(&vault, &query, SecurityLevel::Secret, Some(&remote)).await.expect("lexical fallback");
+        hybrid_search_with_semantic(&vault, &query, SecurityLevel::Secret, Some(&remote))
+            .await
+            .expect("lexical fallback");
         assert!(remote.calls.lock().expect("calls").is_empty());
     }
 
