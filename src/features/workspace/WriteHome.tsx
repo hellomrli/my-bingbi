@@ -25,6 +25,7 @@ import {
   referenceContentBytes,
   safeReferenceLabel,
   type DraftReference,
+  referenceSecurityLevel,
 } from "../../lib/materialReferences";
 import type { DocumentType, SecurityLevel } from "../../lib/odoc";
 import { extractUploadedFileText, uploadAccept } from "../../lib/referenceFiles";
@@ -112,7 +113,8 @@ export function WriteHome({
   const [dragActive, setDragActive] = useState(false);
   const [referenceMessage, setReferenceMessage] = useState<{ text: string; error: boolean } | null>(null);
   const uploadRef = useRef<HTMLInputElement>(null);
-  const restricted = securityLevel === "secret" || securityLevel === "confidential";
+  const referenceLevel = referenceSecurityLevel(references);
+  const restricted = securityLevel === "secret" || securityLevel === "confidential" || referenceLevel === "secret" || referenceLevel === "confidential";
   const enabledProviders = providers.filter((provider) => provider.enabled && (!restricted || provider.isLocal));
   const selectedProvider = enabledProviders.find((provider) => provider.id === providerId);
   const stageCount = draftStages.length;
@@ -512,12 +514,12 @@ export function WriteHome({
           open={knowledgeOpen}
           prepareDocument={prepareKnowledgeDocument}
           onClose={() => setKnowledgeOpen(false)}
-          onInsert={(label, content) => {
+          onInsert={(label, content, securityLevel) => {
             if (references.some((reference) => reference.label === label)) {
               setReferenceMessage({ text: "这份知识库资料已经加入参考材料。", error: true });
               return;
             }
-            onAddReferences([{ id: createId("ref"), kind: "知识库", label, content }]);
+            onAddReferences([{ id: createId("ref"), kind: "知识库", label, content, securityLevel }]);
             setReferenceMessage({ text: `已加入知识库参考：${label}（正文不会粘贴内容）`, error: false });
           }}
         />

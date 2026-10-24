@@ -5,7 +5,7 @@ use crate::dto::{DraftStartRequest, RerunStageRequest, ReviewStartRequest};
 use crate::error::{IpcError, map_engine_error, map_store_error, map_tauri_error};
 use crate::state::AppState;
 use crate::util::{
-    MAX_DRAFT_MATERIAL_BYTES, builtin_pipeline_path, lock_documents, provider_client,
+    MAX_DRAFT_MATERIAL_BYTES, builtin_pipeline_path, lock_documents, provider_client, active_packs,
 };
 use odoc_engine::{
     DraftEngine, DraftEvent, DraftInput, DraftJournal, DraftOutcome, EngineError,
@@ -29,13 +29,18 @@ pub(crate) async fn draft_start<R: tauri::Runtime>(
     on_event: Channel<DraftEvent>,
 ) -> Result<DraftOutcome, IpcError> {
     validate_draft_start_request(&request)?;
+    let packs = active_packs(&state, &packs)?;
     let document = lock_documents(&state).and_then(|store| {
         store
             .get_document(&request.document_id)
             .map_err(map_store_error)
     })?;
+    let mut draft_document = document.clone();
+    if let Some(level) = request.material_security_level {
+        draft_document.meta.security_level = draft_document.meta.security_level.max(level);
+    }
     let provider = provider_client(&state, &request.provider_id)?;
-    if !document.meta.security_level.allows_remote_provider() && !provider.capabilities().is_local {
+    if !draft_document.meta.security_level.allows_remote_provider() && !provider.capabilities().is_local {
         return Err(IpcError {
             code: "model_security_blocked",
             message: "当前密级仅允许本地模型，无法启动起草。",
@@ -48,7 +53,7 @@ pub(crate) async fn draft_start<R: tauri::Runtime>(
         state: &state,
         provider_id: request.provider_id,
     };
-    let knowledge_base = optional_kb_provider(&state, document.meta.security_level)?;
+    let knowledge_base = optional_kb_provider(&state, draft_document.meta.security_level)?;
     let mut engine =
         DraftEngine::new(pipeline, &packs, &provider, &journal).map_err(map_engine_error)?;
     if let Some(knowledge_base) = knowledge_base.as_deref() {
@@ -57,7 +62,7 @@ pub(crate) async fn draft_start<R: tauri::Runtime>(
     let input = DraftInput {
         material: request.material,
         model_text: request.model_text,
-        initial_document: Some(document.clone()),
+        initial_document: Some(draft_document),
         confirmed_doc_type: request.confirmed_doc_type,
         template_id: request.template_id,
     };
@@ -108,6 +113,7 @@ pub(crate) async fn rerun_stage<R: tauri::Runtime>(
     on_event: Channel<DraftEvent>,
 ) -> Result<RerunOutcome, IpcError> {
     validate_rerun_stage_request(&request)?;
+    let packs = active_packs(&state, &packs)?;
     let session = lock_documents(&state)?
         .get_session(&request.session_id)
         .map_err(map_store_error)?;
@@ -220,6 +226,7 @@ pub(crate) async fn review_start<R: tauri::Runtime>(
     on_event: Channel<ReviewEvent>,
 ) -> Result<ReviewOutcome, IpcError> {
     let focus = validate_review_start_request(&request)?;
+    let packs = active_packs(&state, &packs)?;
     let document = lock_documents(&state).and_then(|store| {
         store
             .get_document(&request.document_id)
@@ -471,6 +478,7 @@ mod tests {
     #[test]
     fn draft_request_rejects_empty_and_oversized_material() {
         let empty = DraftStartRequest {
+            material_security_level: None,
             document_id: "doc".to_owned(),
             material: " \n".to_owned(),
             provider_id: "ollama".to_owned(),
@@ -490,6 +498,7 @@ mod tests {
     #[test]
     fn draft_request_validates_model_text_and_selects_the_imitate_pipeline() {
         let base = DraftStartRequest {
+            material_security_level: None,
             document_id: "doc".to_owned(),
             material: "申请事项".to_owned(),
             provider_id: "ollama".to_owned(),

@@ -18,7 +18,6 @@ import {
 import { useModal } from "../../hooks/useModal";
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 import {
-  applyUpdate,
   checkForUpdate,
   deleteProviderSecret,
   deleteDocxTemplate,
@@ -52,6 +51,7 @@ interface SettingsDialogProps {
   onClose: () => void;
   onSave: (config: AppConfig) => Promise<void>;
   onShowGuide?: () => void;
+  onInstallUpdate: () => Promise<void>;
   /** Tab to open on; command-palette and deep links use this. Defaults to 常规. */
   initialTab?: SettingsTab;
 }
@@ -86,7 +86,7 @@ function profileInput(profile: ProviderProfile): ProviderProfileInput {
   return input;
 }
 
-export function SettingsDialog({ open, config, onClose, onSave, onShowGuide, initialTab = "general" }: SettingsDialogProps) {
+export function SettingsDialog({ open, config, onClose, onSave, onShowGuide, onInstallUpdate, initialTab = "general" }: SettingsDialogProps) {
   const [tab, setTab] = useState<SettingsTab>("general");
   const [draft, setDraft] = useState(config);
   const [saving, setSaving] = useState(false);
@@ -191,7 +191,7 @@ export function SettingsDialog({ open, config, onClose, onSave, onShowGuide, ini
     setUpdateBusy(true);
     setUpdateMessage(null);
     try {
-      await applyUpdate();
+      await onInstallUpdate();
       // Success restarts the app; reaching here means the restart was deferred.
     } catch (error) {
       setUpdateMessage(ipcErrorMessage(error));

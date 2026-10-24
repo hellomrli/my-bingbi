@@ -9,6 +9,7 @@ mod fns_watch;
 mod hybrid;
 mod local;
 mod mcp;
+mod security;
 mod tagging;
 mod types;
 
@@ -17,6 +18,7 @@ pub use fns_watch::{FnsPendingChange, FnsWatchConfig, FnsWatchEvent, watch_fns_n
 pub use hybrid::{hybrid_search, hybrid_search_with_semantic};
 pub use local::{LocalVaultProvider, parse_markdown_note};
 pub use mcp::McpProvider;
+pub use security::source_security_level;
 pub use tagging::suggest_missing_frontmatter;
 pub use types::{
     ChangeEvent, ChangeKind, Frontmatter, KbConfig, KbError, KbHit, KbNote, KbProviderKind,

@@ -6,8 +6,10 @@ import {
   MAX_DRAFT_MATERIAL_BYTES,
   parseMaterialReferences,
   referenceContentBytes,
+  referenceSecurityLevel,
   removeMaterialReference,
   safeReferenceLabel,
+  sourceSecurityLevel,
   type DraftReference,
 } from "./materialReferences";
 
@@ -69,5 +71,32 @@ describe("draft references", () => {
   it("rejects duplicate labels instead of silently duplicating content", () => {
     const composed = composeMaterialWithReferences("写通知", [references[0], references[0]]);
     expect(composed.error).toContain("已经加入");
+  });
+});
+
+describe("reference security level", () => {
+  it("parses the kernel's classification vocabulary and fails closed", () => {
+    expect(sourceSecurityLevel({})).toBe("internal");
+    expect(sourceSecurityLevel({ security_level: " 公开 " })).toBe("public");
+    expect(sourceSecurityLevel({ security_level: "内部" })).toBe("internal");
+    expect(sourceSecurityLevel({ security_level: "秘密" })).toBe("secret");
+    expect(sourceSecurityLevel({ security_level: "PUBLIC" })).toBe("public");
+    expect(sourceSecurityLevel({ security_level: "绝密" })).toBe("confidential");
+    expect(sourceSecurityLevel({ security_level: "" })).toBe("confidential");
+  });
+
+  it("takes the highest level and fails closed for untagged knowledge notes", () => {
+    expect(referenceSecurityLevel([])).toBe("public");
+    expect(referenceSecurityLevel([{ id: "upload", kind: "上传文件", label: "a.txt", content: "内容" }])).toBe("internal");
+    // Legacy knowledge references carry no metadata, so they cannot be treated as cloud-safe.
+    expect(referenceSecurityLevel([{ id: "kb", kind: "知识库", label: "旧资料", content: "内容" }])).toBe("confidential");
+    expect(referenceSecurityLevel([
+      { id: "kb", kind: "知识库", label: "旧资料", content: "内容", securityLevel: "public" },
+      { id: "upload", kind: "上传文件", label: "b.txt", content: "内容", securityLevel: "secret" },
+    ])).toBe("secret");
+    expect(referenceSecurityLevel([
+      { id: "upload", kind: "上传文件", label: "b.txt", content: "内容", securityLevel: "confidential" },
+      { id: "kb", kind: "知识库", label: "旧资料", content: "内容", securityLevel: "public" },
+    ])).toBe("confidential");
   });
 });

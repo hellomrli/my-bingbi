@@ -5,7 +5,7 @@ use crate::error::{
     IpcError, map_export_error, map_pdf_error, map_store_error, map_template_error,
 };
 use crate::state::AppState;
-use crate::util::{ensure_exportable, export_style, lock_documents};
+use crate::util::{active_packs, ensure_exportable, export_style, lock_documents};
 use odoc_export::{
     Gb9704Style, discover_system_fonts, odoc_to_typst, print_html, render_typst_pdf,
     resolve_font_path, validate_docx_template, write_docx_with_style, write_docx_with_template,
@@ -24,6 +24,7 @@ pub(crate) fn export_docx(
     packs: State<'_, PackRegistry>,
     document_id: String,
 ) -> Result<DocxExportResult, IpcError> {
+    let packs = active_packs(&state, &packs)?;
     let document = lock_documents(&state)?
         .get_document(&document_id)
         .map_err(map_store_error)?;
@@ -66,6 +67,7 @@ pub(crate) fn export_pdf(
     packs: State<'_, PackRegistry>,
     document_id: String,
 ) -> Result<PdfExportResult, IpcError> {
+    let packs = active_packs(&state, &packs)?;
     let document = lock_documents(&state)?
         .get_document(&document_id)
         .map_err(map_store_error)?;

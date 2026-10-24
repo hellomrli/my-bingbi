@@ -2,13 +2,15 @@ import { Database, FileText, LoaderCircle, Search, X } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
 import { useModal } from "../../hooks/useModal";
 import { ipcErrorMessage, kbGet, kbSearch } from "../../lib/ipc";
+import { sourceSecurityLevel } from "../../lib/materialReferences";
+import type { SecurityLevel } from "../../lib/odoc";
 import type { KbHit, KbNote } from "../../lib/kb";
 
 interface KnowledgePickerDialogProps {
   open: boolean;
   prepareDocument: () => Promise<string>;
   onClose: () => void;
-  onInsert: (label: string, content: string) => void;
+  onInsert: (label: string, content: string, securityLevel: SecurityLevel) => void;
 }
 
 /** Optional knowledge-base quote dialog; the writer's main screen stays a single input. */
@@ -146,7 +148,7 @@ export function KnowledgePickerDialog({ open, prepareDocument, onClose, onInsert
                 className="command-button primary"
                 type="button"
                 onClick={() => {
-                  onInsert(`${selected.title}｜${selected.path}`, selected.content);
+                  onInsert(`${selected.title}｜${selected.path}`, selected.content, sourceSecurityLevel(selected.frontmatter));
                   onClose();
                 }}
               >

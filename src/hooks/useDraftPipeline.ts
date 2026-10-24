@@ -18,7 +18,7 @@ import { errorCode } from "../lib/errors";
 import { appendGenerationLog } from "../lib/generationLog";
 import { IpcError, ipcErrorMessage, isDesktopRuntime } from "../lib/ipc";
 import type { ProviderProfile } from "../lib/llm";
-import type { DocumentType, ODoc } from "../lib/odoc";
+import type { DocumentType, ODoc, SecurityLevel } from "../lib/odoc";
 import { useWorkbenchStore } from "../store/workbench";
 
 export type DraftPipelineKind = "draft" | "imitate" | "polish";
@@ -28,6 +28,7 @@ interface UseDraftPipelineOptions {
   providers: ProviderProfile[];
   providerId: string;
   material: string;
+  materialSecurityLevel?: SecurityLevel;
   modelText: string;
   /** Selected knowledge-pack template; empty means the per-type default. */
   templateId?: string | null;
@@ -91,6 +92,7 @@ export function useDraftPipeline({
   providers,
   providerId,
   material,
+  materialSecurityLevel,
   modelText,
   templateId,
   saveBeforeDraft,
@@ -139,7 +141,8 @@ export function useDraftPipeline({
   function providerRejection(): string | null {
     const selected = providers.find((provider) => provider.id === providerId);
     // Read the store at call time: the composer may have just swapped in a fresh document.
-    const restricted = isRestricted(useWorkbenchStore.getState().document);
+    const restricted = isRestricted(useWorkbenchStore.getState().document)
+      || materialSecurityLevel === "secret" || materialSecurityLevel === "confidential";
     if (!selected?.enabled || (restricted && !selected.isLocal)) {
       return restricted ? "当前密级仅允许本地模型，请先选择本地服务。" : "模型服务不可用，请先在设置中启用服务。";
     }
@@ -357,6 +360,7 @@ export function useDraftPipeline({
         {
           documentId: snapshot.id,
           material: materialText.trim(),
+          materialSecurityLevel,
           providerId,
           confirmedDocType: options.confirmedDocType ?? null,
           templateId: (options.templateIdOverride ?? templateId) || null,

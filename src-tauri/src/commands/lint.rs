@@ -1,4 +1,6 @@
 use crate::error::{IpcError, map_lint_error};
+use crate::state::AppState;
+use crate::util::active_packs;
 use odoc_lint::{FactCheckReport, LintReport};
 use odoc_model::ODoc;
 use odoc_pack::PackRegistry;
@@ -12,8 +14,10 @@ use tauri::State;
 #[tauri::command]
 pub(crate) fn lint_document_now(
     document: ODoc,
+    state: State<'_, AppState>,
     packs: State<'_, PackRegistry>,
 ) -> Result<LintReport, IpcError> {
+    let packs = active_packs(&state, &packs)?;
     odoc_lint::lint_document(&document, &packs).map_err(map_lint_error)
 }
 

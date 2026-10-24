@@ -1,4 +1,4 @@
-use crate::{Frontmatter, KbError, KbHit, KbProvider, KbQuery};
+use crate::{Frontmatter, KbError, KbHit, KbProvider, KbQuery, source_security_level};
 use odoc_llm::{LlmProvider, SecurityLevel};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -127,6 +127,10 @@ pub async fn hybrid_search_with_semantic<P: LlmProvider + ?Sized>(
             .then_with(|| left.vault.cmp(&right.vault))
     });
     if let Some(semantic) = semantic {
+        // Filter before embedding, not after: the snippets themselves are sensitive input.
+        if !semantic.capabilities().is_local {
+            result.retain(|hit| source_security_level(&hit.frontmatter).allows_remote_provider());
+        }
         fold_semantic_scores(semantic, query, security_level, &mut result).await;
     }
     result.truncate(query.normalized_limit() as usize);
@@ -144,6 +148,14 @@ async fn fold_semantic_scores<P: LlmProvider + ?Sized>(
     security_level: SecurityLevel,
     result: &mut [KbHit],
 ) {
+    let capabilities = semantic.capabilities();
+    let security_level = result.iter().fold(security_level, |level, hit| {
+        level.max(source_security_level(&hit.frontmatter))
+    });
+    if result.is_empty() || !capabilities.embeddings
+        || (!capabilities.is_local && !security_level.allows_remote_provider()) {
+        return;
+    }
     let Some(query_vector) = semantic
         .embed(std::slice::from_ref(&query.keyword), security_level)
         .await
@@ -356,6 +368,49 @@ mod tests {
         ) -> Result<(), LlmError> {
             Ok(())
         }
+    }
+
+    struct RecordingSemantic {
+        local: bool,
+        calls: std::sync::Mutex<Vec<(Vec<String>, SecurityLevel)>>,
+    }
+
+    #[async_trait]
+    impl LlmProvider for RecordingSemantic {
+        fn id(&self) -> &str { "recording" }
+        fn capabilities(&self) -> Capabilities {
+            Capabilities { is_local: self.local, ..SemanticProvider.capabilities() }
+        }
+        async fn chat(&self, _: ChatRequest) -> Result<ChatResponse, LlmError> { unreachable!() }
+        async fn chat_stream(&self, _: ChatRequest, _: Sender<ChatDelta>) -> Result<(), LlmError> { unreachable!() }
+        async fn embed(&self, texts: &[String], level: SecurityLevel) -> Result<Vec<Vec<f32>>, LlmError> {
+            self.calls.lock().expect("calls").push((texts.to_vec(), level));
+            Ok(texts.iter().map(|_| vec![1.0, 0.0]).collect())
+        }
+    }
+
+    #[tokio::test]
+    async fn mixed_classification_retrieval_never_embeds_restricted_sources_remotely() {
+        let root = tempfile::tempdir().expect("temp vault");
+        for (name, level, text) in [("ordinary", "internal", "flood ordinary"), ("secret", "secret", "flood SECRET_MARKER"), ("unknown", "unknown", "flood UNKNOWN_MARKER")] {
+            std::fs::write(root.path().join(format!("{name}.md")), format!("---\nsecurity_level: {level}\n---\n{text}\n")).expect("note");
+        }
+        let vault = crate::LocalVaultProvider::open(root.path(), "test").expect("vault");
+        let query = KbQuery { keyword: "flood".into(), search_content: true, ..KbQuery::default() };
+        let remote = RecordingSemantic { local: false, calls: std::sync::Mutex::new(Vec::new()) };
+        let hits = hybrid_search_with_semantic(&vault, &query, SecurityLevel::Internal, Some(&remote)).await.expect("search");
+        assert_eq!(hits.len(), 1);
+        let calls = remote.calls.lock().expect("calls");
+        assert_eq!(calls.len(), 2);
+        assert!(calls.iter().all(|(texts, level)| level.allows_remote_provider() && texts.iter().all(|text| !text.contains("MARKER"))));
+        drop(calls);
+        let local = RecordingSemantic { local: true, calls: std::sync::Mutex::new(Vec::new()) };
+        let hits = hybrid_search_with_semantic(&vault, &query, SecurityLevel::Internal, Some(&local)).await.expect("search");
+        assert_eq!(hits.len(), 3);
+        assert!(local.calls.lock().expect("calls").iter().all(|(_, level)| *level == SecurityLevel::Confidential));
+        remote.calls.lock().expect("calls").clear();
+        hybrid_search_with_semantic(&vault, &query, SecurityLevel::Secret, Some(&remote)).await.expect("lexical fallback");
+        assert!(remote.calls.lock().expect("calls").is_empty());
     }
 
     fn query() -> KbQuery {

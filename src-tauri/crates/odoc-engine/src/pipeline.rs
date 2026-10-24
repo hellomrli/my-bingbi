@@ -5,7 +5,7 @@ use crate::types::{
     StageStatus, StageSummary, StyleProfile, TypeDecision,
 };
 use futures_util::future::try_join_all;
-use odoc_kb::{KbError, KbHit, KbProvider, KbQuery, SearchMode, hybrid_search_with_semantic};
+use odoc_kb::{KbError, KbHit, KbProvider, KbQuery, SearchMode, hybrid_search_with_semantic, source_security_level};
 use odoc_lint::{FactCheckReport, LintReport, fact_check_document, lint_document};
 use odoc_llm::{ChatMessage, ChatRequest, ChatResponse, ChatRole, LlmProvider};
 use odoc_model::{Block, DocumentType, Fact, HeadingLevel, ODoc};
@@ -702,14 +702,23 @@ impl<'a, J: DraftJournal, P: LlmProvider + ?Sized> DraftEngine<'a, J, P> {
                 if remaining == 0 {
                     break;
                 }
+                let mut source_level = source_security_level(&hit.frontmatter);
                 let note_text = match provider.get(&hit.path).await {
-                    Ok(note) => note.content,
+                    Ok(note) => {
+                        // Metadata can change between search and fetch; never downgrade the hit.
+                        source_level = source_level.max(source_security_level(&note.frontmatter));
+                        note.content
+                    }
                     Err(KbError::NotFound) => hit.snippet.clone(),
                     Err(error) => return Err(error.into()),
                 };
+                if !self.provider.capabilities().is_local && !source_level.allows_remote_provider() {
+                    continue;
+                }
                 let reference = format_kb_reference(&hit, &note_text, remaining);
                 remaining = remaining.saturating_sub(reference.len());
                 if !reference.is_empty() {
+                    context.document.meta.security_level = context.document.meta.security_level.max(source_level);
                     resources.push(reference);
                 }
             }
@@ -921,6 +930,9 @@ impl<'a, J: DraftJournal, P: LlmProvider + ?Sized> DraftEngine<'a, J, P> {
         stage: &StageConfig,
         context: &RunContext,
     ) -> Result<ChatRequest, EngineError> {
+        if !context.document.meta.security_level.allows_remote_provider() && !self.provider.capabilities().is_local {
+            return Err(odoc_llm::LlmError::RemoteProviderBlocked.into());
+        }
         let mut references = context.pack_context.clone();
         references.extend(load_injections(
             self.packs,
@@ -1629,6 +1641,7 @@ mod tests {
 
     #[derive(Default)]
     struct FakeProvider {
+        remote: bool,
         streamed: Arc<Mutex<Vec<String>>>,
         requests: Arc<Mutex<Vec<ChatRequest>>>,
     }
@@ -1672,7 +1685,7 @@ mod tests {
                 tool_calling: false,
                 embeddings: false,
                 context_window: Some(32_000),
-                is_local: true,
+                is_local: !self.remote,
             }
         }
 
@@ -1722,7 +1735,11 @@ mod tests {
         }
     }
 
-    struct FakeKnowledgeBase;
+    #[derive(Default)]
+    struct FakeKnowledgeBase {
+        search_level: Option<&'static str>,
+        fetched_level: Option<&'static str>,
+    }
 
     #[async_trait]
     impl KbProvider for FakeKnowledgeBase {
@@ -1734,7 +1751,7 @@ mod tests {
                     title: "历史设备请示".to_owned(),
                     snippet: "历史材料摘要".to_owned(),
                     score: 0.9,
-                    frontmatter: Frontmatter::new(),
+                    frontmatter: self.search_level.map(|level| Frontmatter::from([("security_level".into(), level.into())])).unwrap_or_default(),
                 }])
             } else {
                 Ok(Vec::new())
@@ -1747,7 +1764,7 @@ mod tests {
                 path: path.to_owned(),
                 title: "历史设备请示".to_owned(),
                 content: "历史文件明确了设备采购流程。".to_owned(),
-                frontmatter: Frontmatter::new(),
+                frontmatter: self.fetched_level.map(|level| Frontmatter::from([("security_level".into(), level.into())])).unwrap_or_default(),
                 tags: Vec::new(),
                 links: Vec::new(),
                 modified_at: None,
@@ -1884,9 +1901,10 @@ mod tests {
     async fn retrieve_stage_injects_bounded_knowledge_base_sources_into_draft() {
         let provider = FakeProvider::default();
         let pack_registry = packs();
+        let kb = FakeKnowledgeBase::default();
         let engine = DraftEngine::new(pipeline(), &pack_registry, &provider, &NoopJournal)
             .expect("engine should construct")
-            .with_knowledge_base(&FakeKnowledgeBase);
+            .with_knowledge_base(&kb);
         engine
             .run(
                 DraftInput {
@@ -1916,6 +1934,36 @@ mod tests {
         assert!(system.contains("历史文件明确了设备采购流程。"));
         assert!(system.contains("输入安全边界"));
         assert_eq!(system.matches("知识库来源：").count(), 1);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn retrieval_preserves_source_security_and_rechecks_fetched_metadata() {
+        for (remote, search_level, fetched_level) in [
+            (true, "secret", "secret"),
+            (true, "internal", "secret"),
+            (true, "internal", "unknown-classification"),
+            (false, "secret", "internal"),
+            (false, "internal", "secret"),
+        ] {
+            let provider = FakeProvider { remote, ..FakeProvider::default() };
+            let kb = FakeKnowledgeBase { search_level: Some(search_level), fetched_level: Some(fetched_level) };
+            let registry = packs();
+            let engine = DraftEngine::new(pipeline(), &registry, &provider, &NoopJournal).expect("engine").with_knowledge_base(&kb);
+            let outcome = engine.run(DraftInput {
+                material: "申请购置应急排水设备经费，15万元。".into(),
+                model_text: None, initial_document: None, confirmed_doc_type: None, template_id: None,
+            }, None).await.expect("run");
+            let requests = provider.requests.lock().expect("requests");
+            let referenced = requests.iter().filter(|request| request.messages.iter().any(|message| message.content.contains("历史文件明确了设备采购流程"))).collect::<Vec<_>>();
+            if remote {
+                assert!(referenced.is_empty(), "remote source: {search_level}/{fetched_level}");
+                assert!(outcome.document.meta.security_level.allows_remote_provider());
+            } else {
+                assert!(!referenced.is_empty());
+                assert_eq!(outcome.document.meta.security_level, odoc_model::SecurityLevel::Secret);
+                assert!(referenced.iter().all(|request| request.security_level == odoc_model::SecurityLevel::Secret));
+            }
+        }
     }
 
     #[tokio::test(flavor = "current_thread")]

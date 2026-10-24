@@ -1,3 +1,5 @@
+import type { SecurityLevel } from "./odoc";
+
 /** Material reference markers shared by the composer and the draft pipeline. */
 export interface MaterialReference {
   kind: "知识库" | "上传文件";
@@ -84,6 +86,7 @@ export interface DraftReference {
   kind: "知识库" | "上传文件";
   label: string;
   content: string;
+  securityLevel?: SecurityLevel;
 }
 
 /** Builds the hidden material sent to the kernel: user brief followed by quoted sources. */
@@ -102,4 +105,22 @@ export function composeMaterialWithReferences(
 
 export function referenceContentBytes(references: readonly DraftReference[]): number {
   return references.reduce((total, reference) => total + materialByteLength(reference.content), 0);
+}
+
+/** Mirrors the kernel's conservative handling of explicit, unknown classifications. */
+export function sourceSecurityLevel(frontmatter: Record<string, string | undefined>): SecurityLevel {
+  const value = frontmatter.security_level?.trim().toLowerCase();
+  if (value === undefined || value === "internal" || value === "内部") return "internal";
+  if (value === "public" || value === "公开") return "public";
+  if (value === "secret" || value === "秘密") return "secret";
+  return "confidential";
+}
+
+export function referenceSecurityLevel(references: readonly DraftReference[]): SecurityLevel {
+  const levels: SecurityLevel[] = ["public", "internal", "secret", "confidential"];
+  return references.reduce<SecurityLevel>((level, reference) => {
+    // Old knowledge references without metadata must not silently become cloud-safe.
+    const source = reference.securityLevel ?? (reference.kind === "知识库" ? "confidential" : "internal");
+    return levels[Math.max(levels.indexOf(level), levels.indexOf(source))];
+  }, "public");
 }

@@ -303,9 +303,9 @@ git push origin v1.1.7
 
 ## 状态
 
-**M0–M4 主线功能已闭环。** 当前已有可运行的 React 工作台、A4 国标版心预览、结构化正文编辑、确定性质检、事实台账与回查标红、最近文档、自动保存、版本快照与 diff、起草/仿写/审核三种流水线、单步重跑、会话成本记录、知识包管理、字体检测、首次运行引导、自定义规则与本地崩溃诊断；桌面版可导出 GB/T 9704 严格 docx（支持机关模板注入）与零依赖 PDF（内置 Typst 引擎）。Rust 侧已建立 Tauri 壳、`odoc-model` AST、`odoc-store` SQLite 持久化、`odoc-llm` 多 Provider、`odoc-kb`（FNS/本地 Vault/MCP + WebSocket 增量订阅）、`odoc-lint` 规则引擎与 `odoc-export` 排版。模型凭据只存系统 Keyring，秘密及以上公文在内核层禁止远程调用。Linux `.deb` 与本机验证、CI 原生 Linux/Windows 壳检查与安装包产物均已就绪。
+**M0–M4 主线功能已闭环。** 当前已有可运行的 React 工作台、A4 国标版心预览、结构化正文编辑、确定性质检、事实台账与回查标红、最近文档、自动保存、版本快照与 diff、起草/仿写/审核三种流水线、单步重跑、会话成本记录、知识包管理、字体检测、首次运行引导、自定义规则与本地崩溃诊断；桌面版可导出 GB/T 9704 严格 docx（支持机关模板注入）与零依赖 PDF（内置 Typst 引擎），缺字体时改用隐藏打印帧预览。关闭、重载或安装更新前统一经过保存屏障，保存失败会留在当前文档并允许重试。Rust 侧已建立 Tauri 壳、`odoc-model` AST、`odoc-store` SQLite 持久化、`odoc-llm` 多 Provider、`odoc-kb`（FNS/本地 Vault/MCP + WebSocket 增量订阅）、`odoc-lint` 规则引擎与 `odoc-export` 排版。模型凭据只存系统 Keyring，秘密及以上公文在内核层禁止远程调用；知识库引用与上传材料的密级会并入同一道拦截，前端与内核都按最高级放行。Linux `.deb` 与本机验证、CI 原生 Linux/Windows 壳检查与安装包产物均已就绪。
 
-**M0–M4 里程碑已完成。** v1.1.7 已于 2026-10-19 发布，GitHub Releases 提供 Linux（`.deb` / AppImage）与 Windows（NSIS `.exe`）安装包及 updater 清单；后续版本按 [`.github/workflows/release.yml`](.github/workflows/release.yml) 打 `v*` tag 发布（流程见 [`docs/PLAN.md` §9](docs/PLAN.md)）。可选增强：知识包在线安装与更新。
+**M0–M4 里程碑已完成。** v1.1.8 已于 2026-10-20 发布，GitHub Releases 提供 Linux（`.deb` / AppImage）与 Windows（NSIS `.exe`）安装包及 updater 清单；后续版本按 [`.github/workflows/release.yml`](.github/workflows/release.yml) 打 `v*` tag 发布（流程见 [`docs/PLAN.md` §9](docs/PLAN.md)）。可选增强：知识包在线安装与更新。
 
 ---
 

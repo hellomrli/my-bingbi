@@ -150,12 +150,9 @@ fn parse_paragraphs(xml: &[u8]) -> Result<Vec<ParsedParagraph>, ExportError> {
                 }
             }
             Ok(Event::Start(event)) if event.local_name().as_ref() == b"t" => in_text = true,
-            Ok(Event::Text(event)) if in_text => {
+            Ok(event @ (Event::Text(_) | Event::GeneralRef(_) | Event::CData(_))) if in_text => {
                 if let Some(paragraph) = current.as_mut() {
-                    let decoded = event.decode().map_err(|_| ExportError::InvalidXml)?;
-                    paragraph
-                        .text
-                        .push_str(&unescape(&decoded).map_err(|_| ExportError::InvalidXml)?);
+                    paragraph.text.push_str(&crate::xml_text::decode_text(&event)?);
                 }
             }
             Ok(Event::End(event)) if event.local_name().as_ref() == b"t" => in_text = false,
@@ -222,4 +219,29 @@ fn is_recipient(value: &str) -> bool {
 fn looks_like_document_number(value: &str) -> bool {
     let value = value.trim();
     value.contains('〔') && value.contains('〕') && value.contains('号')
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn docx_roundtrip_preserves_special_characters_in_text_and_references() {
+        let text = "A&B; 5 < 10; x > 0; \"quote\" 'apostrophe'; 中文";
+        let mut document = ODoc::empty();
+        document.body.title.text = "Roundtrip".into();
+        document.body.blocks = vec![Block::paragraph(text.into())];
+        let bytes = crate::write_docx(&document).expect("export");
+        let imported = read_docx(&bytes).expect("import");
+        assert_eq!(imported.body.blocks[0].plain_text(), text);
+        assert!(crate::extract_reference_text("reference.docx", &bytes).expect("reference").contains(text));
+    }
+
+    #[test]
+    fn xml_entities_numeric_references_and_cdata_are_decoded_once() {
+        let xml = br"<p><t>A&amp;B &lt; &gt; &quot; &apos; &#65;&#x4E2D; &amp;lt;<![CDATA[ &raw; ]]></t><tab/><t>tail</t><br/></p>";
+        let paragraphs = parse_paragraphs(xml).expect("parse");
+        assert_eq!(paragraphs[0].text, "A&B < > \" ' A中 &lt; &raw; \ttail\n");
+        assert!(parse_paragraphs(b"<p><t>&external;</t></p>").is_err());
+    }
 }

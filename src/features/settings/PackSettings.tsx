@@ -23,7 +23,7 @@ const capabilityLabels: Record<PackCapability, string> = {
 
 export function PackSettings({ activePackIds, onSave }: PackSettingsProps) {
   const [packs, setPacks] = useState<PackSummary[]>([]);
-  const [draft, setDraft] = useState<string[]>(activePackIds);
+  const [draft, setDraft] = useState<string[]>(() => [...new Set([...corePackIds, ...activePackIds])]);
   const [busy, setBusy] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -43,11 +43,6 @@ export function PackSettings({ activePackIds, onSave }: PackSettingsProps) {
   function togglePack(packId: string) {
     const enabled = draft.includes(packId);
     if (enabled) {
-      const switchable = draft.filter((id) => !corePackIds.has(id));
-      if (switchable.length <= 1) {
-        setMessage("至少需要启用一个可切换知识包。");
-        return;
-      }
       setDraft((current) => current.filter((id) => id !== packId));
     } else {
       setDraft((current) => [...current, packId]);

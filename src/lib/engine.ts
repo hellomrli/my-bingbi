@@ -7,7 +7,7 @@ import type {
 } from "./generated/engine";
 
 export type { RerunOutcome, Score };
-import type { DocumentType, ODoc } from "./odoc";
+import type { DocumentType, ODoc, SecurityLevel } from "./odoc";
 import { IpcError, isDesktopRuntime } from "./ipc";
 
 /** The persisted draft pipeline order used by both the engine and workbench UI. */
@@ -112,6 +112,7 @@ export * from "./generated/engine";
 export interface DraftStartInput {
   documentId: string;
   material: string;
+  materialSecurityLevel?: SecurityLevel;
   providerId: string;
   confirmedDocType?: DocumentType | null;
   /** Reference text for imitate mode; its presence selects the imitate pipeline. */
@@ -134,6 +135,7 @@ export async function startDraft(
     request: {
       documentId: input.documentId,
       material: input.material,
+      materialSecurityLevel: input.materialSecurityLevel ?? null,
       providerId: input.providerId,
       confirmedDocType: input.confirmedDocType ?? null,
       modelText: input.modelText ?? null,
@@ -174,6 +176,7 @@ export async function startPolish(
     request: {
       documentId: input.documentId,
       material: input.material,
+      materialSecurityLevel: input.materialSecurityLevel ?? null,
       providerId: input.providerId,
       confirmedDocType: input.confirmedDocType ?? null,
       modelText: null,

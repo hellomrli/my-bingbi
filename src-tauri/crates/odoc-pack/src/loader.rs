@@ -17,7 +17,7 @@ const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_PACK_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_PACK_FILES: usize = 512;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct LoadedPack {
     root: PathBuf,
     canonical_root: PathBuf,
@@ -499,6 +499,17 @@ pub struct PackRegistry {
 }
 
 impl PackRegistry {
+    /// Snapshot the enabled registry for one operation. Core packs are mandatory; an empty
+    /// selection (including legacy configurations) means no optional packs, not all packs.
+    pub fn enabled(&self, active_ids: &[String]) -> Self {
+        Self {
+            packs: self.packs.iter()
+                .filter(|(id, _)| matches!(id.as_str(), "gb9704-format" | "renmin-style") || active_ids.contains(id))
+                .map(|(id, pack)| (id.clone(), pack.clone()))
+                .collect(),
+        }
+    }
+
     /// Loads all immediate child directories containing a `pack.toml` manifest.
     ///
     /// # Errors

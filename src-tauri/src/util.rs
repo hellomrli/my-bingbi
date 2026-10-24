@@ -47,6 +47,11 @@ pub(crate) fn pack_summaries(packs: &PackRegistry) -> Vec<PackSummary> {
         .collect()
 }
 
+pub(crate) fn active_packs(state: &AppState, installed: &PackRegistry) -> Result<PackRegistry, IpcError> {
+    let config = lock_documents(state)?.app_config().map_err(map_store_error)?;
+    Ok(installed.enabled(&config.active_pack_ids))
+}
+
 pub(crate) fn builtin_pack_root<R: tauri::Runtime>(
     app: &tauri::App<R>,
 ) -> Result<PathBuf, tauri::Error> {

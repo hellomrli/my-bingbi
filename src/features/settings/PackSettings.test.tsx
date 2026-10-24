@@ -64,7 +64,7 @@ beforeEach(() => {
 describe("PackSettings", () => {
   it("lists packs with core packs locked on", async () => {
     render(
-      <PackSettings activePackIds={["gb9704-format", "renmin-style"]} onSave={vi.fn()} />,
+      <PackSettings activePackIds={[]} onSave={vi.fn()} />,
     );
     expect(await screen.findByText("GB/T 9704 格式规范包")).toBeTruthy();
     expect(screen.getByText("人民日报语言包")).toBeTruthy();
@@ -93,14 +93,14 @@ describe("PackSettings", () => {
     expect(await screen.findByText("知识包设置已保存")).toBeTruthy();
   });
 
-  it("keeps at least one switchable pack enabled", async () => {
+  it("allows disabling the last optional pack while keeping core packs enabled", async () => {
     const onSave = vi.fn();
     render(<PackSettings activePackIds={["gb9704-format", "renmin-style", "local-corpus"]} onSave={onSave} />);
     const custom = await screen.findByRole("checkbox", { name: /本单位语料包/ });
     fireEvent.click(custom);
-    // The pack stays enabled and the guard message explains why.
-    expect((custom as unknown as HTMLInputElement).checked).toBe(true);
-    expect(await screen.findByText("至少需要启用一个可切换知识包。")).toBeTruthy();
+    expect((custom as HTMLInputElement).checked).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "保存知识包设置" }));
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith(["gb9704-format", "renmin-style"]));
   });
 
   it("shows the user pack directory and reports load issues", async () => {

@@ -137,6 +137,16 @@ pub fn run() {
             commands::export::save_docx_template,
             commands::export::delete_docx_template,
         ])
-        .run(tauri::generate_context!())
-        .expect("failed to run the Bingbi desktop application");
+        .build(tauri::generate_context!())
+        .expect("failed to build the Bingbi desktop application")
+        .run(|app, event| {
+            // Route native Quit (including Cmd+Q) through the same frontend close/save guard.
+            // Explicit restart exit codes are issued only by the guarded updater flow.
+            if let tauri::RunEvent::ExitRequested { api, code: None, .. } = event {
+                if let Some(window) = app.get_webview_window("main") {
+                    api.prevent_exit();
+                    let _ = window.close();
+                }
+            }
+        });
 }

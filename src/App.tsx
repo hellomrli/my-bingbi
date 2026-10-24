@@ -1,6 +1,9 @@
 import { LayoutTemplate, LockKeyhole, PenLine, ShieldAlert } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArchiveDialog } from "./features/documents/ArchiveDialog";
+import { DocumentExitDialog } from "./features/documents/DocumentExitDialog";
+import { useDocumentLifecycle } from "./hooks/useDocumentLifecycle";
+import { printPreviewHtml } from "./lib/printPreview";
 import { DocumentLibrary } from "./features/documents/DocumentLibrary";
 import { VersionHistoryDialog } from "./features/documents/VersionHistoryDialog";
 import { StructureEditor } from "./features/editor/StructureEditor";
@@ -52,7 +55,7 @@ import type { ProviderProfile } from "./lib/llm";
 import type { KbConfig } from "./lib/kb";
 import type { DocumentType, ODoc } from "./lib/odoc";
 import { lintDocument, unverifiedTokenMap } from "./lib/lint";
-import { composeMaterialWithReferences, type DraftReference } from "./lib/materialReferences";
+import { composeMaterialWithReferences, referenceSecurityLevel, type DraftReference } from "./lib/materialReferences";
 import { selectFindings, type RevisionedReport } from "./lib/report";
 import { errorCode } from "./lib/errors";
 import type { AppConfig, DocumentSummary } from "./lib/store";
@@ -255,14 +258,14 @@ function App() {
 
   async function installAvailableUpdate() {
     if (installingUpdate) return;
-    setInstallingUpdate(true);
-    try {
-      await applyUpdate();
-    } catch (error) {
-      setNotice(ipcErrorMessage(error));
-    } finally {
-      setInstallingUpdate(false);
-    }
+    await lifecycle.runGuarded(async () => {
+      setInstallingUpdate(true);
+      try {
+        await applyUpdate();
+      } finally {
+        setInstallingUpdate(false);
+      }
+    });
   }
 
   // Fact-check highlights describe one revision; once the text moves on they must not linger.
@@ -324,13 +327,14 @@ function App() {
   }, []);
 
   useEffect(() => {
-    const restricted = document.meta.securityLevel === "secret" || document.meta.securityLevel === "confidential";
+    const referenceLevel = referenceSecurityLevel(references);
+    const restricted = document.meta.securityLevel === "secret" || document.meta.securityLevel === "confidential" || referenceLevel === "secret" || referenceLevel === "confidential";
     if (!restricted) return;
     const selected = providers.find((provider) => provider.id === providerId);
     if (selected?.isLocal && selected.enabled) return;
     const local = providers.find((provider) => provider.enabled && provider.isLocal);
     if (local) setProviderId(local.id);
-  }, [document.meta.securityLevel, providerId, providers]);
+  }, [document.meta.securityLevel, references, providerId, providers]);
 
   useEffect(() => {
     if (!notice) return;
@@ -553,6 +557,10 @@ function App() {
       } satisfies AppConfig;
       await saveAppConfig(normalized);
       setConfig(normalized);
+      if (JSON.stringify(normalized.activePackIds) !== JSON.stringify(config.activePackIds)) {
+        setEngineLintReport(null);
+        setEngineFactCheckReport(null);
+      }
       setTheme(normalized.theme);
       setNotice("设置已保存");
     } catch (error) {
@@ -637,11 +645,20 @@ function App() {
     providers,
     providerId,
     material,
+    materialSecurityLevel: referenceSecurityLevel(references),
     modelText: "",
     templateId: "",
     saveBeforeDraft,
     onDraftOutcome: applyDraftOutcome,
     onRerunOutcome: applyRerunOutcome,
+  });
+
+  const lifecycle = useDocumentLifecycle({
+    desktop: desktopRuntime,
+    autosaveEnabled: config.autosaveEnabled,
+    busy: draftPipeline.drafting || startingDraft || reviewing || installingUpdate,
+    save: saveBeforeDraft,
+    onError: setNotice,
   });
 
   function handleAddReferences(next: DraftReference[]) {
@@ -893,13 +910,7 @@ function App() {
         downloadBytes(`${baseName}.pdf`, Uint8Array.from(result.bytes), "application/pdf");
         setNotice("PDF 已通过内置排版引擎导出");
       } else {
-        const preview = window.open("", "_blank", "noopener,noreferrer");
-        if (!preview) throw new IpcError("popup_blocked", "浏览器阻止了打印预览窗口。");
-        preview.document.open();
-        preview.document.write(result.html);
-        preview.document.close();
-        preview.focus();
-        window.setTimeout(() => preview.print(), 120);
+        await printPreviewHtml(result.html);
         setNotice("未找到可用中文字体，已打开打印预览");
       }
     } catch (error) {
@@ -920,7 +931,8 @@ function App() {
       : savedAt
         ? `已保存 ${new Date(savedAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}`
         : "尚未保存";
-  const cloudAllowed = document.meta.securityLevel === "public" || document.meta.securityLevel === "internal";
+  const materialLevel = referenceSecurityLevel(references);
+  const cloudAllowed = (document.meta.securityLevel === "public" || document.meta.securityLevel === "internal") && materialLevel !== "secret" && materialLevel !== "confidential";
   const selectedProvider = providers.find((provider) => provider.id === providerId);
   const canReview = desktopRuntime && Boolean(selectedProvider?.enabled) && !draftPipeline.drafting && !reviewing;
 
@@ -996,7 +1008,8 @@ function App() {
   ];
 
   return (
-    <div className={composing ? "app-shell is-home" : "app-shell"}>
+    <>
+    <div className={composing ? "app-shell is-home" : "app-shell"} inert={lifecycle.leaving}>
       <AppHeader
         composing={composing}
         title={document.body.title.text}
@@ -1188,6 +1201,7 @@ function App() {
         initialTab={settingsTab}
         onClose={() => void handleCloseSettings()}
         onSave={handleSaveConfig}
+        onInstallUpdate={installAvailableUpdate}
         onShowGuide={() => {
           setSettingsOpen(false);
           setGuideOpen(true);
@@ -1248,6 +1262,8 @@ function App() {
       )}
       {notice && <div className="toast" role="status">{notice}</div>}
     </div>
+    <DocumentExitDialog open={lifecycle.leaving} prompt={lifecycle.prompt} failure={lifecycle.failure} onChoice={lifecycle.decide} />
+    </>
   );
 }
 

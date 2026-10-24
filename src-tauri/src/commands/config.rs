@@ -5,7 +5,7 @@ use crate::error::{IpcError, map_kb_error, map_secret_error, map_store_error};
 use crate::state::AppState;
 use crate::util::{
     KB_FNS_TOKEN_ACCOUNT, KB_FNS_WS_TOKEN_ACCOUNT, KB_MCP_TOKEN_ACCOUNT, lock_documents,
-    pack_summaries, provider_secret_account,
+    pack_summaries, provider_secret_account, active_packs,
 };
 use odoc_kb::{KbConfig, KbProviderKind, LocalVaultProvider};
 use odoc_llm::{ProviderProfile, ProviderProfileInput};
@@ -22,8 +22,8 @@ pub(crate) fn list_pack_summaries(packs: State<'_, PackRegistry>) -> Vec<PackSum
 
 /// Lists the document templates available to the drafting UI.
 #[tauri::command]
-pub(crate) fn list_templates(packs: State<'_, PackRegistry>) -> Vec<TemplateSummary> {
-    packs.list_templates()
+pub(crate) fn list_templates(state: State<'_, AppState>, packs: State<'_, PackRegistry>) -> Result<Vec<TemplateSummary>, IpcError> {
+    Ok(active_packs(&state, &packs)?.list_templates())
 }
 
 #[tauri::command]

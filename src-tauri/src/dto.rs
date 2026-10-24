@@ -1,6 +1,6 @@
 //! Request and response payloads serialized across the IPC boundary.
 
-use odoc_model::{DocumentType, ODoc};
+use odoc_model::{DocumentType, ODoc, SecurityLevel};
 use odoc_store::SaveDocumentResult;
 use serde::{Deserialize, Serialize};
 
@@ -9,6 +9,9 @@ use serde::{Deserialize, Serialize};
 pub(crate) struct DraftStartRequest {
     pub(crate) document_id: String,
     pub(crate) material: String,
+    /// Highest classification carried by the manually attached material.
+    #[serde(default)]
+    pub(crate) material_security_level: Option<SecurityLevel>,
     pub(crate) provider_id: String,
     pub(crate) confirmed_doc_type: Option<DocumentType>,
     /// Reference text for imitate mode; its presence selects the imitate pipeline.

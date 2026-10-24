@@ -804,8 +804,8 @@ CI 用 GitHub Actions matrix（`windows-latest` + `ubuntu-22.04`）交叉产出�
 - [x] `odoc-engine`：`draft.yaml` 流水线跑通（文种路由 → 事实提取 → 骨架 → 起草）；已接入 SQLite 会话日志、流式 Tauri IPC 与密级边界
 - [x] 前端：要素表单 + 结构化编辑器 + A4 版式预览；已接入材料驱动入口（大致写作意图 + 知识库引用 + TXT/Markdown/CSV/JSON/YAML/PDF/OFD/DOC/DOCX/XLSX/XLS/WPS 上传）、Provider 选择、流式起草和低置信度文种确认，用户无需先写好正文
 - [x] `odoc-lint`：知识包规则引擎 + 事实回查；已接入 `lint`/`correct`/`factcheck` stage 和右侧质检面板
-- [x] 导出：桌面版简化 DOCX（OOXML ZIP + GB/T 9704 页面参数 + 内核 lint/factcheck 阻断）；PDF/WebView 打印待补
-- **验收**：输入"申请购置应急排水设备经费，15 万元，设备老化，强降雨"→ 出一份格式正确的**请示**，质检面板能报出问题，桌面版可导出简化 DOCX（PDF 待补）
+- [x] 导出：桌面版简化 DOCX（OOXML ZIP + GB/T 9704 页面参数 + 内核 lint/factcheck 阻断）；PDF 与 WebView 打印预览已接入
+- **验收**：输入"申请购置应急排水设备经费，15 万元，设备老化，强降雨"→ 出一份格式正确的**请示**，质检面板能报出问题，桌面版可导出简化 DOCX 与 PDF
 
 ### M2 — 知识库与严格排版（约 4 周）
 
@@ -814,7 +814,7 @@ CI 用 GitHub Actions matrix（`windows-latest` + `ubuntu-22.04`）交叉产出�
 - [x] Obsidian 库自动打标（frontmatter 补全，设置页可关）
 - [x] 检索增强已接入 `draft.yaml`（有界关键词召回 + 来源注入），素材侧栏可用
 - [x] 归档回写：生成的公文一键存回 Obsidian 库并带 frontmatter（`archive_document_to_kb` + 归档对话框）
-- [x] `odoc-export`：严格 docx 排版引擎（手写 OOXML + `style/gb9704.toml` 页面参数/字体/行距）+ 模板注入法 + LibreOffice PDF 兜底（实现路线为轻依赖手写 OOXML，非 docx-rs）
+- [x] `odoc-export`：严格 docx 排版引擎（手写 OOXML + `style/gb9704.toml` 页面参数/字体/行距）+ 模板注入法 + 内置 Typst PDF 引擎与打印预览兜底（实现路线为轻依赖手写 OOXML，非 docx-rs）
 - [x] 文种覆盖扩到 20+（gb9704-format 包已含 22 个文种骨架模板）
 - **验收**：起草时能自动召回"去年同类文件"作参考；导出的 docx 在 Word 里打开，各要素字体字号、版心、行距完全符合国标
 
@@ -826,17 +826,18 @@ CI 用 GitHub Actions matrix（`windows-latest` + `ubuntu-22.04`）交叉产出�
 - [x] 审核模式（`review.yaml`）：打开或导入已有公文 → 体检报告。内核新增 `review` stage 与只读的 `ReviewEngine`（文种复核 → 规则校验 → 事实回查 → 语义评审 → 质量评分），模型给出的节点标识经内核校验后才允许定位，全程不改写被审文档
 - [x] 仿写模式（`imitate.yaml`）：指定范文，学其笔法（新增 `style` 阶段提炼笔法档案，侧栏范文输入 + 仿写起草）
 - [x] 版本对比 diff 视图；单步重跑（工具栏点击已完成阶段，从记录快照重跑该阶段，下游阶段标记失效）
-- [x] 涉密拦截：密级 ≥ 秘密时强制本地模型
+- [x] 涉密拦截：密级 ≥ 秘密时强制本地模型；知识库引用与上传材料按最高密级并入同一边界，检索前后各复核一次，未知密级按机密处理
 - **验收**：生成的公文里凡是模型自己编的数字/文号/日期全部标红；跑通 ref2 的 5 个回归用例
 
 ### M4 — 打磨与开放（约 3 周）
 
 - [x] `LocalVaultProvider`（直读 vault 目录离线兜底）+ `McpProvider`（StreamableHTTP 通用通道，token 走 Keyring）
 - [x] Anthropic Provider（内置预设 + 上游模型嗅探）；成本统计面板（起草记录对话框：token 汇总 + 阶段明细，金额换算待定价表）
-- [x] 知识包管理 UI（启用/停用；用户包目录 + local-corpus 示例包自建；安装/更新待补）
+- [x] 知识包管理 UI（启用/停用；用户包目录 + local-corpus 示例包自建；起草、校验与导出按启用集合过滤；安装/更新待补）
 - [x] 用户自定义规则（编辑示例包 rules/ 或复制为新包，重启生效）、自定义机关 docx 模板（模板注入法 + 设置页上传）
 - [x] 字体检测与映射（FontFaceSet 探测国标字体缺失 + 设置页提示与映射）；首次运行引导（桌面端三步向导：欢迎 → 模型服务 → 开始使用）
 - [x] 自动更新（tauri-plugin-updater 启动检查 + 设置页手动检查；公钥固化在 `tauri.conf.json`，release 只配置 `TAURI_SIGNING_PRIVATE_KEY` secret，签名产物与 `latest.json` 由 workflow 生成）；本地崩溃诊断（用户主动启用后捕获 Rust panic，本机 SQLite 最多保留 100 条，设置页可查看与清空，全程不上传）
+- [x] 退出保护：关闭、重载或安装更新统一经过保存屏障；保存失败留在当前文档，可重试或明确放弃；生成过程中拒绝退出
 - [x] 文档与示例包（README 同步当前进度与快速开始；local-corpus 自定义规则示例包随用户包目录自动创建）
 - **验收**：一个新用户从下载到产出第一份合格公文，全程无需看文档
 
