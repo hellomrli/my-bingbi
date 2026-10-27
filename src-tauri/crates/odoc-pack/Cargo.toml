@@ -12,7 +12,7 @@ semver = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.9.34"
 thiserror = "2.0"
-toml = "0.8.23"
+toml = "1.1.4"
 ts-rs = { version = "11.1", features = ["serde-compat"] }
 walkdir = "2.5"
 
