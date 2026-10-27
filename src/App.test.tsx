@@ -157,6 +157,7 @@ describe("App writing desk", () => {
         factCheckReport: null,
         score: null,
         revisionIterations: 0,
+        warnings: [],
       } satisfies DraftOutcome;
     });
     render(<App />);
@@ -175,6 +176,37 @@ describe("App writing desk", () => {
       expect.objectContaining({ id: request.documentId, meta: expect.objectContaining({ securityLevel: "secret" }) }),
       "autosave",
     );
+  });
+
+  it("opens the generated body before asking an optional recipient question", async () => {
+    vi.mocked(isDesktopRuntime).mockReturnValue(true);
+    mockedStartDraft.mockImplementation(async () => {
+      const draft = structuredClone(useWorkbenchStore.getState().document);
+      draft.revision += 1;
+      draft.meta.docType = "notice";
+      draft.body.title.text = "关于开展防汛检查的通知";
+      draft.body.blocks = [{ type: "paragraph", id: "generated-body", content: "请组织开展防汛检查，核对值班安排。" }];
+      return {
+        sessionId: "optional-recipient-session", document: draft,
+        typeDecision: { value: "notice", confidence: 1, alternatives: [], missingInformation: [] },
+        facts: { facts: [], missingInformation: [], recipient: {
+          recipients: [], evidence: null, question: "这份通知准备发给谁？",
+        } },
+        stages: [], lintReport: { findings: [], errorCount: 0, warnCount: 0, infoCount: 0 },
+        factCheckReport: { findings: [], checkedTokens: 0, unresolvedTokens: 0 },
+        score: null, revisionIterations: 0, warnings: [],
+      } satisfies DraftOutcome;
+    });
+    render(<App />);
+    await screen.findByRole("option", { name: "本地 Ollama" });
+    fireEvent.change(screen.getByLabelText("写作要求"), { target: { value: "写一份防汛检查通知" } });
+    fireEvent.click(screen.getByRole("button", { name: /开始写作/ }));
+    expect(await screen.findByText("这份通知准备发给谁？")).toBeTruthy();
+    expect(screen.getByRole("article", { name: "A4 公文版式预览" }).textContent).toContain("请组织开展防汛检查");
+    fireEvent.click(screen.getByRole("button", { name: "先留空，继续编辑" }));
+    expect(screen.queryByLabelText("补充说明")).toBeNull();
+    expect(useWorkbenchStore.getState().document.body.mainRecipients).toEqual([]);
+    expect(useWorkbenchStore.getState().document.body.blocks[0]).toMatchObject({ content: "请组织开展防汛检查，核对值班安排。" });
   });
 
   it("opens the command palette and runs the settings action", async () => {

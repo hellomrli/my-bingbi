@@ -85,6 +85,7 @@ pub struct ProviderClient {
     client: Client,
     /// Same policy as `client` but without a whole-request deadline, for streaming responses.
     stream_client: Client,
+    stream_header_timeout: Duration,
     api_key: Option<String>,
 }
 
@@ -133,6 +134,7 @@ impl ProviderClient {
             profile,
             client,
             stream_client,
+            stream_header_timeout: timeout,
             api_key,
         })
     }
@@ -217,8 +219,7 @@ impl ProviderClient {
         Ok(self.authorize(self.client.post(self.chat_endpoint()?).json(body)))
     }
 
-    /// Streams have no whole-request deadline: the body may trickle in for minutes, so only
-    /// the connect timeout applies per chunk (see `STREAM_IDLE_TIMEOUT`).
+    /// Streams use separate header and idle deadlines rather than a whole-response deadline.
     fn post_stream(&self, body: &impl Serialize) -> Result<reqwest::RequestBuilder, LlmError> {
         Ok(self.authorize(self.stream_client.post(self.chat_endpoint()?).json(body)))
     }
@@ -233,11 +234,11 @@ impl ProviderClient {
     }
 
     async fn send_streaming(&self, body: &impl Serialize) -> Result<Response, LlmError> {
-        let response = self
-            .post_stream(body)?
-            .send()
-            .await
-            .map_err(|error| map_reqwest_error(&error))?;
+        let response =
+            tokio::time::timeout(self.stream_header_timeout, self.post_stream(body)?.send())
+                .await
+                .map_err(|_| LlmError::Timeout)?
+                .map_err(|error| map_reqwest_error(&error))?;
         ensure_success(response)
     }
 

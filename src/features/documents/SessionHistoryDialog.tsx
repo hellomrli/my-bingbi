@@ -1,7 +1,7 @@
 import { ChevronDown, History, LoaderCircle, X } from "lucide-react";
 import { useModal } from "../../hooks/useModal";
 import { useEffect, useState } from "react";
-import { draftStageLabels, sessionOutcomeDocument, type DraftStageId } from "../../lib/engine";
+import { draftStageLabels, sessionOutcomeDocument, stageRunStatus, stageSnapshotDocument, type DraftStageId } from "../../lib/engine";
 import { ipcErrorMessage, listSessions, listStageRuns } from "../../lib/ipc";
 import type { ODoc } from "../../lib/odoc";
 import type { SessionSummary, StageRunRecord } from "../../lib/store";
@@ -140,7 +140,7 @@ export function SessionHistoryDialog({
           {sessions?.map((session) => {
             const open = expanded === session.id;
             const stageRuns = runs[session.id];
-            const generated = sessionOutcomeDocument(session.stateJson);
+            const generated = sessionOutcomeDocument(session.stateJson) ?? stageSnapshotDocument(stageRuns ?? []);
             return (
               <div className={open ? "session-row is-expanded" : "session-row"} key={session.id}>
                 <button
@@ -169,6 +169,7 @@ export function SessionHistoryDialog({
                     <thead>
                       <tr>
                         <th>阶段</th>
+                        <th>状态</th>
                         <th>模型服务</th>
                         <th className="is-numeric">tokens</th>
                         <th className="is-numeric">耗时</th>
@@ -178,13 +179,14 @@ export function SessionHistoryDialog({
                       {stageRuns ? stageRuns.map((run) => (
                         <tr key={run.id}>
                           <td>{stageLabel(run.stageId)}</td>
+                          <td>{stageRunStatus(run).label}{stageRunStatus(run).message && <small> · {stageRunStatus(run).message}</small>}</td>
                           <td>{run.provider ?? "—"}</td>
                           <td className="is-numeric">{formatTokens(run.tokens)}</td>
                           <td className="is-numeric">{run.durationMs} ms</td>
                         </tr>
                       )) : (
                         <tr>
-                          <td colSpan={4}>
+                          <td colSpan={5}>
                             <LoaderCircle size={13} className="is-spinning" />
                             正在加载阶段明细
                           </td>
@@ -192,7 +194,7 @@ export function SessionHistoryDialog({
                       )}
                       {stageRuns && stageRuns.length === 0 && (
                         <tr>
-                          <td colSpan={4} className="session-empty-detail">本次未记录阶段明细</td>
+                          <td colSpan={5} className="session-empty-detail">本次未记录阶段明细</td>
                         </tr>
                       )}
                     </tbody>

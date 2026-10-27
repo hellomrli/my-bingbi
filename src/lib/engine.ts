@@ -8,6 +8,8 @@ import type {
 
 export type { RerunOutcome, Score };
 import type { DocumentType, ODoc, SecurityLevel } from "./odoc";
+import type { StageRunRecord } from "./store";
+import { blockText } from "./document";
 import { IpcError, isDesktopRuntime } from "./ipc";
 
 /** The persisted draft pipeline order used by both the engine and workbench UI. */
@@ -91,6 +93,28 @@ export function sessionOutcomeDocument(stateJson: string): ODoc | null {
   } catch {
     return null;
   }
+}
+
+/** Older sessions kept generated text in the next stage's input, before checkpoints existed. */
+export function stageSnapshotDocument(runs: readonly StageRunRecord[]): ODoc | null {
+  for (const run of [...runs].reverse()) {
+    if (!["deai", "lint", "correct", "factcheck", "score"].includes(run.stageId)) continue;
+    const document = sessionOutcomeDocument(run.inputJson);
+    if (document?.body.blocks.some((block) => blockText(block).trim())) return document;
+  }
+  return null;
+}
+
+export function stageRunStatus(run: StageRunRecord): { label: string; message: string } {
+  try {
+    const output: unknown = JSON.parse(run.outputJson ?? "null");
+    if (output && typeof output === "object") {
+      const { status, content } = output as { status?: string; content?: unknown };
+      const label = ({ running: "未结束", completed: "已完成", failed: "失败", cancelled: "已取消" } as Record<string, string>)[status ?? ""];
+      if (label) return { label, message: status === "failed" || status === "cancelled" ? (typeof content === "string" ? content : "") : "" };
+    }
+  } catch { /* Keep legacy or incomplete diagnostics readable. */ }
+  return { label: "未知", message: "" };
 }
 
 export const draftStageLabels: Record<DraftStageId, string> = {

@@ -35,7 +35,7 @@ export function DocumentInfoDialog({ open, onClose }: DocumentInfoDialogProps) {
           </button>
         </header>
 
-        <p className="document-info-note">都可以留空。不填不影响写作和导出，只是预览与红头版式会更完整。</p>
+        <p className="document-info-note">主送机关会优先根据写作要求判断，不明确时可通过对话补充，也可以留空。不填不影响写作和导出，正式发送前再核对。</p>
 
         <div className="document-info-grid">
           <label className="field">
@@ -83,7 +83,7 @@ export function DocumentInfoDialog({ open, onClose }: DocumentInfoDialogProps) {
             <input
               value={document.body.mainRecipients[0] ?? ""}
               onChange={(event) => updateRecipient(event.target.value)}
-              placeholder="主送机关"
+              placeholder="根据写作要求自动判断，也可留空"
             />
           </label>
           <label className="field">

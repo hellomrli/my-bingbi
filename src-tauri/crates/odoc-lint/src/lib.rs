@@ -366,11 +366,11 @@ fn apply_builtin_rules(document: &ODoc, findings: &mut Vec<Finding>) {
     {
         findings.push(Finding {
             id: "FMT-004".to_owned(),
-            severity: Severity::Error,
+            severity: Severity::Warn,
             node_id: document.body.id.clone(),
-            message: "公文缺少主送机关。".to_owned(),
+            message: "主送机关尚未明确，已暂留空，不影响继续写作和导出。".to_owned(),
             location: "主体 · 主送机关".to_owned(),
-            suggestion: None,
+            suggestion: Some("可通过补充说明确认收文对象，正式发送前再核对。".to_owned()),
             token: None,
         });
     }
@@ -785,6 +785,25 @@ mod tests {
                 .findings
                 .iter()
                 .any(|finding| finding.id == "gb9704-format/wenhao-bracket")
+        );
+        assert!(
+            report
+                .findings
+                .iter()
+                .any(|finding| { finding.id == "FMT-004" && finding.severity == Severity::Warn })
+        );
+    }
+
+    #[test]
+    fn informal_work_reports_do_not_require_a_main_recipient() {
+        let mut document = ODoc::empty();
+        document.meta.doc_type = odoc_model::DocumentType::WorkReport;
+        let report = lint_document(&document, &packs()).expect("rules should run");
+        assert!(
+            !report
+                .findings
+                .iter()
+                .any(|finding| finding.id == "FMT-004")
         );
     }
 

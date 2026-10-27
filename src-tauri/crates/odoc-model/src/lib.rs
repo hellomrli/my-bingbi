@@ -102,9 +102,6 @@ impl DocumentType {
                 | Self::Reply
                 | Self::Instruction
                 | Self::Proposal
-                | Self::WorkPlan
-                | Self::WorkReport
-                | Self::Memo
                 | Self::Invitation
         )
     }

@@ -15,6 +15,7 @@ export interface GenerationLogEntry {
   providerId?: string | null;
   pipeline?: string | null;
   documentId?: string | null;
+  sessionId?: string | null;
 }
 
 export type GenerationLogInput = Omit<GenerationLogEntry, "id" | "at">;
@@ -90,6 +91,7 @@ export function formatGenerationLogs(entries: GenerationLogEntry[]): string {
     if (entry.stage) bits.push(entry.stage);
     bits.push(entry.message);
     if (entry.code) bits.push(`[${entry.code}]`);
+    if (entry.sessionId) bits.push(`session=${entry.sessionId}`);
     return bits.join(" ");
   }).join("\n");
 }

@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DraftEvent, DraftOutcome, RerunOutcome } from "../lib/generated/engine";
 import type { ODoc } from "../lib/odoc";
 import { createEmptyDocument } from "../lib/document";
+import { readGenerationLogs } from "../lib/generationLog";
 import { useWorkbenchStore } from "../store/workbench";
 import { useDraftPipeline } from "./useDraftPipeline";
 
@@ -52,6 +53,7 @@ function outcomeFor(document: ODoc, revision: number, sessionId = "session-1"): 
     factCheckReport: null,
     score: null,
     revisionIterations: 0,
+    warnings: [],
   };
 }
 
@@ -211,6 +213,78 @@ describe("useDraftPipeline", () => {
     expect(result.current.error).toBe("模型连接失败");
     expect(result.current.failedStage).toBe("draft");
     expect(result.current.drafting).toBe(false);
+  });
+
+  it("retains a generated body after an auxiliary failure and applies the completed result", async () => {
+    const document = useWorkbenchStore.getState().document;
+    const outcome = outcomeFor(document, 5);
+    outcome.warnings = [{ stageId: "correct", code: "llm_timeout", message: "模型服务响应超时。" }];
+    mockedStartDraft.mockImplementation(async (_input, onEvent) => {
+      onEvent({ type: "session_started", sessionId: outcome.sessionId });
+      onEvent({ type: "stage_completed", output: {
+        stageId: "draft", status: "completed", content: "已生成正文", json: null, usage: null, durationMs: 1,
+      } });
+      onEvent({ type: "stage_started", stageId: "correct" });
+      onEvent({ type: "stage_failed", recoverable: true, output: {
+        stageId: "correct", status: "failed", content: "模型服务响应超时。",
+        json: JSON.stringify({ code: "llm_timeout" }), usage: null, durationMs: 180_000,
+      } });
+      return outcome;
+    });
+    const { result, callbacks } = renderPipeline();
+    await act(async () => result.current.startDraft(null));
+    expect(callbacks.onDraftOutcome).toHaveBeenCalledOnce();
+    expect(result.current.warnings).toEqual(outcome.warnings);
+    expect(result.current.error).toBeNull();
+    expect(result.current.drafting).toBe(false);
+    expect(readGenerationLogs().find((entry) => entry.code === "llm_timeout")?.sessionId).toBe("session-1");
+  });
+
+  it("records a terminal stage failure once, including its session id", async () => {
+    mockedStartDraft.mockImplementation(async (_input, onEvent) => {
+      onEvent({ type: "session_started", sessionId: "failed-session" });
+      onEvent({ type: "stage_started", stageId: "draft" });
+      onEvent({ type: "stage_failed", recoverable: false, output: {
+        stageId: "draft", status: "failed", content: "模型连接失败",
+        json: JSON.stringify({ code: "llm_network" }), usage: null, durationMs: 1,
+      } });
+      throw { code: "llm_network", message: "模型连接失败" };
+    });
+    const { result } = renderPipeline();
+    await act(async () => result.current.startDraft(null));
+    expect(result.current.failedStage).toBe("draft");
+    expect(result.current.sessionId).toBe("failed-session");
+    const errors = readGenerationLogs().filter((entry) => entry.event === "error");
+    expect(errors).toHaveLength(1);
+    expect(errors[0].sessionId).toBe("failed-session");
+  });
+
+  it("ignores channel events that arrive after a rejected command", async () => {
+    let sendEvent!: (event: DraftEvent) => void;
+    mockedStartDraft.mockImplementation(async (_input, onEvent) => {
+      sendEvent = onEvent;
+      throw { code: "llm_timeout", message: "请求超时" };
+    });
+    const { result } = renderPipeline();
+    await act(async () => result.current.startDraft(null));
+    await act(async () => {
+      sendEvent({ type: "stage_started", stageId: "correct" });
+      sendEvent({ type: "token", stageId: "draft", content: "迟到正文" });
+    });
+    expect(result.current.stage).toBeNull();
+    expect(result.current.text).toBe("");
+    expect(result.current.error).toBe("请求超时");
+  });
+
+  it("does not show an old command failure on a different document", async () => {
+    mockedStartDraft.mockImplementation(async () => {
+      useWorkbenchStore.getState().setDocument(createEmptyDocument(), null);
+      throw { code: "llm_timeout", message: "旧文档请求超时" };
+    });
+    const { result } = renderPipeline();
+    await act(async () => result.current.startDraft(null));
+    expect(result.current.error).toBeNull();
+    expect(result.current.failedStage).toBeNull();
   });
 
   it("treats a pending document-type confirmation as a pause, not a failure", async () => {

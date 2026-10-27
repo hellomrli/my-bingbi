@@ -55,6 +55,7 @@ interface WriteHomeProps {
   completedStages: DraftStageId[];
   draftText: string;
   error: string | null;
+  onOpenSessionHistory?: () => void;
   typeDecision: TypeDecision | null;
   confirmedDocType: DocumentType | null;
   onConfirmedDocTypeChange: (value: DocumentType) => void;
@@ -88,6 +89,7 @@ export function WriteHome({
   completedStages,
   draftText,
   error,
+  onOpenSessionHistory,
   typeDecision,
   confirmedDocType,
   onConfirmedDocTypeChange,
@@ -475,6 +477,12 @@ export function WriteHome({
           </div>
         )}
         {error && <div className="composer-message is-error" role="alert">{error}</div>}
+        {error && !busy && onOpenSessionHistory && (
+          <div className="composer-message">
+            已完成的正文会保留在起草记录中，不必从头重写。
+            <button className="inline-link" type="button" onClick={onOpenSessionHistory}>查看记录并恢复正文</button>
+          </div>
+        )}
 
         {typeDecision && (
           <div className="type-confirmation-card" role="status">
@@ -498,15 +506,15 @@ export function WriteHome({
           </div>
         )}
 
-        {busy && draftText && (
+        {draftText && (busy || error) && (
           <div className="composer-progress" role="status" aria-live="polite">
             <div className="composer-progress-head">
-              <LoaderCircle size={15} className="is-spinning" />
-              <strong>正在写入正文</strong>
+              {busy && <LoaderCircle size={15} className="is-spinning" />}
+              <strong>{busy ? "正在写入正文" : "保留的生成正文"}</strong>
               <span>{completedStages.length} / {stageCount}</span>
             </div>
             <pre className="composer-stream">{draftText.slice(-2200)}</pre>
-            <span className="composer-progress-note">完成后会自动进入正文。</span>
+            <span className="composer-progress-note">{busy ? "完成后会自动进入正文。" : "后续步骤未完成，可从起草记录中另存已生成的正文。"}</span>
           </div>
         )}
 

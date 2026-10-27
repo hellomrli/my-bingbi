@@ -1,6 +1,8 @@
 mod error;
 mod pipeline;
+mod recipient;
 mod review;
+mod stage_run;
 mod types;
 
 pub use error::EngineError;
@@ -8,9 +10,9 @@ pub use pipeline::{DraftEngine, DraftJournal, NoopJournal, PipelineDefinition};
 pub use review::ReviewEngine;
 pub use types::{
     DraftEvent, DraftInput, DraftOutcome, FactExtraction, FactInput, LoopBackConfig,
-    LowConfidenceAction, PipelineKind, RerunOutcome, ReviewDimension, ReviewEvent, ReviewFinding,
-    ReviewInput, ReviewOutcome, ReviewReport, Score, ScoreDimension, StageConfig, StageKind,
-    StageOutput, StageStatus, StageSummary, TypeDecision,
+    LowConfidenceAction, PipelineKind, RecipientInference, RerunOutcome, ReviewDimension,
+    ReviewEvent, ReviewFinding, ReviewInput, ReviewOutcome, ReviewReport, Score, ScoreDimension,
+    StageConfig, StageFailure, StageKind, StageOutput, StageStatus, StageSummary, TypeDecision,
 };
 
 pub fn typescript_bindings() -> String {
@@ -26,6 +28,8 @@ pub fn typescript_bindings() -> String {
         TypeDecision::decl(),
         FactInput::decl(),
         FactExtraction::decl(),
+        RecipientInference::decl(),
+        StageFailure::decl(),
         ScoreDimension::decl(),
         Score::decl(),
         StageOutput::decl(),

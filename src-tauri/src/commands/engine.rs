@@ -10,7 +10,7 @@ use crate::util::{
 use odoc_engine::{
     DraftEngine, DraftEvent, DraftInput, DraftJournal, DraftOutcome, EngineError,
     PipelineDefinition, RerunOutcome, ReviewEngine, ReviewEvent, ReviewInput, ReviewOutcome,
-    StageOutput,
+    StageOutput, StageStatus,
 };
 use odoc_llm::LlmProvider;
 use odoc_model::ODoc;
@@ -76,14 +76,14 @@ pub(crate) async fn draft_start<R: tauri::Runtime>(
     loop {
         tokio::select! {
             result = &mut engine_run => {
-                let outcome = result.map_err(map_engine_error)?;
-                if !document_saved {
-                    save_draft_document(&state, &outcome.document, &document)?;
-                    document_saved = true;
-                }
+                event_receiver.close();
                 while let Some(event) = event_receiver.recv().await {
                     persist_completed_event(&state, &event, &document, &mut document_saved)?;
                     on_event.send(event).map_err(|_| map_engine_error(EngineError::Cancelled))?;
+                }
+                let outcome = result.map_err(map_engine_error)?;
+                if !document_saved {
+                    save_draft_document(&state, &outcome.document, &document)?;
                 }
                 return Ok(outcome);
             }
@@ -179,6 +179,11 @@ pub(crate) async fn rerun_stage<R: tauri::Runtime>(
     loop {
         tokio::select! {
             result = &mut engine_run => {
+                event_receiver.close();
+                while let Some(event) = event_receiver.recv().await {
+                    persist_completed_event(&state, &event, &document, &mut document_saved)?;
+                    on_event.send(event).map_err(|_| map_engine_error(EngineError::Cancelled))?;
+                }
                 let mut outcome = result.map_err(map_engine_error)?;
                 // The session lineage was checked before running. Advance that base, then
                 // retain the result even when the transactional save detects a later edit.
@@ -195,11 +200,6 @@ pub(crate) async fn rerun_stage<R: tauri::Runtime>(
                     .map_err(map_store_error)?;
                 if !document_saved {
                     save_draft_document(&state, &outcome.document, &document)?;
-                    document_saved = true;
-                }
-                while let Some(event) = event_receiver.recv().await {
-                    persist_completed_event(&state, &event, &document, &mut document_saved)?;
-                    on_event.send(event).map_err(|_| map_engine_error(EngineError::Cancelled))?;
                 }
                 return Ok(outcome);
             }
@@ -250,11 +250,11 @@ pub(crate) async fn review_start<R: tauri::Runtime>(
     loop {
         tokio::select! {
             result = &mut engine_run => {
-                let outcome = result.map_err(map_engine_error)?;
+                event_receiver.close();
                 while let Some(event) = event_receiver.recv().await {
                     on_event.send(event).map_err(|_| map_engine_error(EngineError::Cancelled))?;
                 }
-                return Ok(outcome);
+                return result.map_err(map_engine_error);
             }
             event = event_receiver.recv(), if events_open => match event {
                 Some(event) => {
@@ -272,6 +272,30 @@ struct StoreDraftJournal<'a> {
 }
 
 impl DraftJournal for StoreDraftJournal<'_> {
+    fn begin_stage(
+        &self,
+        session_id: &str,
+        input_json: &str,
+        stage_id: StageId,
+    ) -> Result<(), EngineError> {
+        self.record(
+            session_id,
+            input_json,
+            &StageOutput {
+                stage_id,
+                status: StageStatus::Running,
+                content: String::new(),
+                json: None,
+                usage: None,
+                duration_ms: 0,
+            },
+        )
+    }
+
+    fn checkpoint(&self, session_id: &str, state_json: &str) -> Result<(), EngineError> {
+        self.complete(session_id, state_json)
+    }
+
     fn start(
         &self,
         session_id: &str,

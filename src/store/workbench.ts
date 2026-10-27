@@ -45,6 +45,7 @@ interface WorkbenchState {
   updateHeader: (field: keyof Omit<Header, "id">, value: string) => void;
   updateTitle: (text: string) => void;
   updateRecipient: (value: string) => void;
+  updateRecipients: (values: string[]) => void;
   updateSigner: (authority: string) => void;
   updateDate: (value: string) => void;
   /** Replaces the text of a heading/paragraph/quote; list and table blocks are left untouched. */
@@ -138,6 +139,13 @@ export const useWorkbenchStore = create<WorkbenchState>()(
         set((state) => ({
           document: changed(state.document, (document) => {
             document.body.mainRecipients = value.trim() ? [value] : [];
+          }),
+          dirty: true,
+        })),
+      updateRecipients: (values) =>
+        set((state) => ({
+          document: changed(state.document, (document) => {
+            document.body.mainRecipients = [...new Set(values.map((value) => value.trim()).filter(Boolean))];
           }),
           dirty: true,
         })),

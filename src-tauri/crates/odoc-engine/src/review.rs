@@ -1,9 +1,10 @@
 use crate::error::EngineError;
 use crate::pipeline::{
-    DraftJournal, PipelineDefinition, elapsed_ms, emit, invalid_pipeline, invalid_text,
+    DraftJournal, PipelineDefinition, STAGE_TIMEOUT, emit, invalid_pipeline, invalid_text,
     invalid_texts, json_output, load_injections, truncate_utf8, validate_score,
     validate_type_decision,
 };
+use crate::stage_run::{StageRun, failure_output};
 use crate::types::{
     PipelineKind, ReviewEvent, ReviewInput, ReviewOutcome, ReviewReport, Score, StageConfig,
     StageOutput, StageStatus, StageSummary, TypeDecision,
@@ -14,7 +15,6 @@ use odoc_model::ODoc;
 use odoc_pack::{PackRegistry, StageId};
 use serde::de::DeserializeOwned;
 use std::collections::BTreeSet;
-use std::time::Instant;
 use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
 
@@ -113,16 +113,25 @@ impl<'a, J: DraftJournal, P: LlmProvider + ?Sized> ReviewEngine<'a, J, P> {
 
         let mut stages = Vec::new();
         for stage in &self.pipeline.stages {
+            let input_json = stage_input_json(stage.id, &context)?;
+            let mut run = StageRun::start(self.journal, &session_id, &input_json, stage.id, false)?;
             emit(
                 event_sender.as_ref(),
                 ReviewEvent::StageStarted { stage_id: stage.id },
             )
             .await?;
-            let input_json = stage_input_json(stage.id, &context)?;
-            let started = Instant::now();
-            let mut output = self.execute_stage(stage, &mut context).await?;
-            output.duration_ms = elapsed_ms(started);
-            self.journal.record(&session_id, &input_json, &output)?;
+            let result =
+                tokio::time::timeout(STAGE_TIMEOUT, self.execute_stage(stage, &mut context))
+                    .await
+                    .unwrap_or_else(|_| Err(odoc_llm::LlmError::Timeout.into()));
+            let mut output = match result {
+                Ok(output) => output,
+                Err(error) => {
+                    run.finish(&mut failure_output(stage.id, &error))?;
+                    return Err(error);
+                }
+            };
+            run.finish(&mut output)?;
             stages.push(StageSummary {
                 stage_id: output.stage_id,
                 status: output.status,

@@ -121,6 +121,34 @@ pub struct FactExtraction {
     pub facts: Vec<FactInput>,
     #[serde(default)]
     pub missing_information: Vec<String>,
+    #[serde(
+        default,
+        deserialize_with = "crate::recipient::deserialize_inference",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[ts(optional)]
+    pub recipient: Option<RecipientInference>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(rename_all = "camelCase")]
+pub struct RecipientInference {
+    #[serde(default)]
+    pub recipients: Vec<String>,
+    #[serde(default)]
+    pub evidence: Option<String>,
+    #[serde(default)]
+    pub question: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct StageFailure {
+    pub stage_id: StageId,
+    pub code: String,
+    pub message: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -252,12 +280,19 @@ pub struct DraftOutcome {
     #[serde(default)]
     #[ts(type = "number")]
     pub revision_iterations: u8,
+    #[serde(default)]
+    pub warnings: Vec<StageFailure>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 #[ts(tag = "type", rename_all = "snake_case")]
 pub enum DraftEvent {
+    SessionStarted {
+        #[serde(rename = "sessionId")]
+        #[ts(rename = "sessionId")]
+        session_id: String,
+    },
     StageStarted {
         #[serde(rename = "stageId")]
         #[ts(rename = "stageId")]
@@ -274,6 +309,10 @@ pub enum DraftEvent {
     },
     StageCompleted {
         output: StageOutput,
+    },
+    StageFailed {
+        output: StageOutput,
+        recoverable: bool,
     },
     Completed {
         outcome: Box<DraftOutcome>,

@@ -822,6 +822,67 @@
   flex: none;
 }
 
+.recipient-clarification,
+.generation-notice {
+  flex: none;
+  width: min(860px, calc(100% - 32px));
+  margin: 16px auto 0;
+  padding: 16px 20px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: var(--fs-sm);
+  overflow-wrap: anywhere;
+}
+
+.generation-notice {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  border-left-color: var(--warn);
+}
+
+.recipient-question,
+.recipient-clarification form {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.recipient-question svg {
+  flex: none;
+  color: var(--accent);
+}
+
+.recipient-clarification p {
+  margin: 10px 0;
+  color: var(--ink-2);
+}
+
+.recipient-clarification form {
+  flex-wrap: wrap;
+}
+
+.recipient-clarification input {
+  flex: 1 1 220px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  color: var(--ink);
+  font: inherit;
+}
+
+@media print {
+  .recipient-clarification,
+  .generation-notice {
+    display: none !important;
+  }
+}
+
 .document-workspace .structure-editor {
   width: min(860px, calc(100% - 48px));
   margin: 26px auto 64px;

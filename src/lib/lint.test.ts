@@ -22,6 +22,8 @@ describe("lintDocument", () => {
   it("reports required fields on an empty request", () => {
     const findings = lintDocument(createEmptyDocument());
     expect(findings.map((finding) => finding.id)).toEqual(expect.arrayContaining(["FMT-001", "FMT-004"]));
+    expect(findings.find((finding) => finding.id === "FMT-004")?.severity).toBe("warn");
+    expect(findings.find((finding) => finding.id === "FMT-004")?.message).toContain("不影响继续写作和导出");
   });
 
   it("accepts a correctly formatted document number", () => {

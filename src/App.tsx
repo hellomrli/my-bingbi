@@ -15,11 +15,13 @@ import { SettingsDialog } from "./features/settings/SettingsDialog";
 import { AppHeader } from "./features/workspace/AppHeader";
 import { DocumentInfoDialog } from "./features/workspace/DocumentInfoDialog";
 import { QualityDrawer } from "./features/workspace/QualityDrawer";
+import { RecipientClarification } from "./features/workspace/RecipientClarification";
 import { WriteHome } from "./features/workspace/WriteHome";
 import { CommandPalette, type CommandAction } from "./features/workbench/CommandPalette";
 import { UpdateBanner } from "./features/workbench/UpdateBanner";
 import { useDraftPipeline } from "./hooks/useDraftPipeline";
 import { countChineseCharacters } from "./lib/document";
+import { draftStageLabels } from "./lib/engine";
 import { isReviewStage, startReview, type ReviewStageId } from "./lib/review";
 import {
   backendVersion,
@@ -147,6 +149,7 @@ function App() {
   const [material, setMaterial] = useState("");
   const [references, setReferences] = useState<DraftReference[]>([]);
   const [startingDraft, setStartingDraft] = useState(false);
+  const [recipientQuestion, setRecipientQuestion] = useState<{ documentId: string; question: string } | null>(null);
   const startingDraftRef = useRef(false);
   const [engineLintReport, setEngineLintReport] = useState<RevisionedReport<LintReport> | null>(null);
   const [engineFactCheckReport, setEngineFactCheckReport] = useState<RevisionedReport<FactCheckReport> | null>(null);
@@ -604,6 +607,9 @@ function App() {
     setView("preview");
     setQualityOpen(false);
     setReferences([]);
+    setRecipientQuestion(outcome.facts.recipient?.question
+      ? { documentId: outcome.document.id, question: outcome.facts.recipient.question }
+      : null);
     setUnverifiedTokens(unverifiedTokenMap(outcome.factCheckReport?.findings ?? []));
     setEngineLintReport(
       outcome.lintReport
@@ -1074,6 +1080,7 @@ function App() {
             completedStages={draftPipeline.completedStages}
             draftText={draftPipeline.text}
             error={draftPipeline.error}
+            onOpenSessionHistory={draftPipeline.sessionId ? () => setSessionTarget({ id: document.id, title: document.body.title.text || "未命名公文" }) : undefined}
             typeDecision={draftPipeline.typeDecision}
             confirmedDocType={draftPipeline.confirmedDocType}
             onConfirmedDocTypeChange={draftPipeline.setConfirmedDocType}
@@ -1135,6 +1142,25 @@ function App() {
               </div>
             </div>
             <div className="document-canvas">
+              {draftPipeline.warnings.length > 0 && (
+                <div className="generation-notice" role="status">
+                  <strong>正文已生成并保存，以下辅助检查未完成：</strong>
+                  {draftPipeline.warnings.map((warning, index) => (
+                    <span key={`${warning.stageId}-${index}`}>{draftStageLabels[warning.stageId as keyof typeof draftStageLabels] ?? warning.stageId}：{warning.message}</span>
+                  ))}
+                  <span>已保留正文，请在正式使用前复核；可从质检面板重新检查。</span>
+                </div>
+              )}
+              {recipientQuestion?.documentId === document.id && document.body.mainRecipients.every((name) => !name.trim()) && (
+                <RecipientClarification
+                  key={`${document.id}:${recipientQuestion.question}`}
+                  question={recipientQuestion.question}
+                  document={document}
+                  providerId={providerId}
+                  saveDocument={saveBeforeDraft}
+                  onDismiss={() => setRecipientQuestion(null)}
+                />
+              )}
               {view === "preview" ? (
                 <DocumentPreview />
               ) : (

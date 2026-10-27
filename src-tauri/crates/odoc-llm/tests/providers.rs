@@ -500,6 +500,36 @@ async fn timeout_cancellation_and_security_checks_happen_safely() {
 }
 
 #[tokio::test]
+async fn streaming_header_wait_has_a_deadline_for_every_provider_kind() {
+    for kind in [
+        ProviderKind::OpenAiCompatible,
+        ProviderKind::Ollama,
+        ProviderKind::Anthropic,
+    ] {
+        let (base_url, _request_rx, task) = spawn_server(MockResponse {
+            status: "200 OK",
+            content_type: "text/event-stream",
+            chunks: vec![b"data: [DONE]\n\n".to_vec()],
+            initial_delay: Duration::from_millis(150),
+            chunk_delay: Duration::ZERO,
+        })
+        .await;
+        let client =
+            ProviderClient::with_timeout(profile(kind, base_url), None, Duration::from_millis(30))
+                .expect("client should build");
+        let (sender, _receiver) = tokio::sync::mpsc::channel(1);
+        let result = tokio::time::timeout(
+            Duration::from_secs(1),
+            client.chat_stream(chat_request(SecurityLevel::Internal), sender),
+        )
+        .await
+        .expect("a stalled header must time out rather than hang");
+        assert_eq!(result, Err(LlmError::Timeout));
+        task.await.expect("mock server should finish");
+    }
+}
+
+#[tokio::test]
 async fn anthropic_chat_uses_messages_endpoint_with_api_key_header() {
     let body = r#"{"id":"msg_01","type":"message","role":"assistant","model":"test-model","content":[{"type":"text","text":"收到"}],"stop_reason":"end_turn","stop_sequence":null,"usage":{"input_tokens":8,"output_tokens":2}}"#;
     let (base_url, request_rx, task) = spawn_server(MockResponse {

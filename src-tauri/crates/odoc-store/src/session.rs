@@ -91,7 +91,7 @@ impl DocumentStore {
         Ok(())
     }
 
-    /// Records one completed pipeline stage and updates the session token total.
+    /// Records a stage start, then updates that same row on completion/failure/cancellation.
     ///
     /// # Errors
     ///
@@ -131,11 +131,36 @@ impl DocumentStore {
         if !session_exists {
             return Err(StoreError::SessionNotFound(session_id.to_owned()));
         }
-        transaction.execute(
-            "INSERT INTO stage_runs(
+        let running = output_json.is_some_and(|output| {
+            serde_json::from_str::<serde_json::Value>(output).is_ok_and(|value| {
+                value.get("status").and_then(serde_json::Value::as_str) == Some("running")
+            })
+        });
+        let pending: Option<(i64, i64)> = if running {
+            None
+        } else {
+            transaction
+                .query_row(
+                    "SELECT id, tokens FROM stage_runs WHERE id = (
+                    SELECT id FROM stage_runs WHERE session_id = ?1 AND stage_id = ?2
+                    ORDER BY id DESC LIMIT 1
+                 ) AND json_extract(output_json, '$.status') = 'running'",
+                    params![session_id, stage_id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .optional()?
+        };
+        if let Some((run_id, _)) = pending {
+            transaction.execute(
+                "UPDATE stage_runs SET output_json = ?1, tokens = ?2, duration_ms = ?3 WHERE id = ?4",
+                params![output_json, tokens, duration_ms, run_id],
+            )?;
+        } else {
+            transaction.execute(
+                "INSERT INTO stage_runs(
                 session_id, stage_id, input_json, output_json, provider, tokens, duration_ms, created_at
              ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            params![
+                params![
                 session_id,
                 stage_id,
                 input_json,
@@ -144,13 +169,18 @@ impl DocumentStore {
                 tokens,
                 duration_ms,
                 now
-            ],
-        )?;
+                ],
+            )?;
+        }
         transaction.execute(
             "UPDATE sessions
              SET cost_tokens = cost_tokens + ?1, updated_at = ?2
              WHERE id = ?3",
-            params![tokens, now, session_id],
+            params![
+                tokens - pending.map_or(0, |(_, previous)| previous),
+                now,
+                session_id
+            ],
         )?;
         transaction.commit()?;
         Ok(())
@@ -325,9 +355,8 @@ impl DocumentStore {
             return Err(StoreError::SessionNotFound(session_id.to_owned()));
         };
         transaction.execute(
-            "UPDATE stage_runs SET output_json = ?1, tokens = ?2, duration_ms = ?3, created_at = ?4
-             WHERE id = ?5",
-            params![output_json, tokens, duration_ms, now, run_id],
+            "UPDATE stage_runs SET output_json = ?1, tokens = ?2, duration_ms = ?3 WHERE id = ?4",
+            params![output_json, tokens, duration_ms, run_id],
         )?;
         transaction.execute(
             "UPDATE sessions
@@ -339,7 +368,7 @@ impl DocumentStore {
         Ok(())
     }
 
-    /// Lists completed stage runs for a drafting session in execution order.
+    /// Lists all stage attempts, including running and interrupted stages, in execution order.
     ///
     /// # Errors
     ///
@@ -619,5 +648,71 @@ mod tests {
             store.replace_stage_run("session-1", "facts", "{}", 1, 1),
             Err(StoreError::SessionNotFound(_))
         ));
+    }
+
+    #[test]
+    fn stage_start_is_updated_in_place_and_interrupted_runs_remain_visible() {
+        let mut store = DocumentStore::open_in_memory().expect("store should open");
+        let document = ODoc::empty();
+        store
+            .save_document(&document, Some("initial"))
+            .expect("document should save");
+        store
+            .start_session("session-1", &document.id, "draft", "{}")
+            .expect("session should start");
+
+        store
+            .record_stage_run(
+                "session-1",
+                "correct",
+                "{\"document\":{}}",
+                Some("{\"status\":\"running\"}"),
+                Some("ollama"),
+                0,
+                0,
+            )
+            .expect("stage start should persist");
+        store
+            .record_stage_run(
+                "session-1",
+                "correct",
+                "{\"document\":{}}",
+                Some("{\"status\":\"failed\"}"),
+                Some("ollama"),
+                19,
+                180_000,
+            )
+            .expect("stage failure should update its start row");
+
+        store
+            .record_stage_run(
+                "session-1",
+                "score",
+                "{}",
+                Some("{\"status\":\"running\"}"),
+                Some("ollama"),
+                0,
+                0,
+            )
+            .expect("second stage start should persist");
+
+        let summary = store.get_session("session-1").expect("session should load");
+        assert_eq!(summary.cost_tokens, 19);
+        let runs = store
+            .list_stage_runs("session-1")
+            .expect("stage runs should load");
+        assert_eq!(runs.len(), 2);
+        assert_eq!(runs[0].stage_id, "correct");
+        assert_eq!(runs[0].tokens, 19);
+        assert_eq!(runs[0].duration_ms, 180_000);
+        assert_eq!(
+            runs[0].output_json.as_deref(),
+            Some("{\"status\":\"failed\"}")
+        );
+        assert_eq!(runs[1].stage_id, "score");
+        assert_eq!(
+            runs[1].output_json.as_deref(),
+            Some("{\"status\":\"running\"}")
+        );
     }
 }

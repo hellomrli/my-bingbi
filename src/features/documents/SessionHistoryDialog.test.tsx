@@ -190,4 +190,28 @@ describe("SessionHistoryDialog cost panel", () => {
 
     await waitFor(() => expect(onRecover).toHaveBeenCalledWith(generated));
   });
+
+  it("recovers legacy interrupted drafts from a later stage's input snapshot", async () => {
+    const generated = createEmptyDocument();
+    generated.body.blocks = [{ type: "paragraph", id: "saved-text", content: "校对前已经生成的正文。" }];
+    mockedInvoke.mockImplementation(async (command: string) => {
+      if (command === "list_sessions") return [{
+        id: "legacy-session", documentId: "doc-1", pipeline: "draft", stateJson: "{}",
+        costTokens: 25, createdAt: 1_000_000, updatedAt: 1_753_900_000_000,
+      }];
+      if (command === "list_stage_runs") return [{
+        id: 1, sessionId: "legacy-session", stageId: "lint",
+        inputJson: JSON.stringify({ document: generated }),
+        outputJson: JSON.stringify({ status: "completed" }),
+        provider: "deepseek", tokens: 0, durationMs: 0, createdAt: 1_753_900_000_000,
+      }];
+      throw new Error(`unexpected command ${command}`);
+    });
+    const onRecover = vi.fn(async () => undefined);
+    renderDialog(onRecover);
+    fireEvent.click(await screen.findByRole("button", { name: /展开 起草 记录的阶段明细/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "另存生成结果（不覆盖当前文档）" }));
+    await waitFor(() => expect(onRecover).toHaveBeenCalledWith(generated));
+    expect(screen.getByText("已完成")).toBeTruthy();
+  });
 });

@@ -21,7 +21,11 @@ export type TypeDecision = { value: DocumentType, confidence: number, alternativ
 
 export type FactInput = { kind: FactKind, value: string, unit: string | null, role: string | null, };
 
-export type FactExtraction = { facts: Array<FactInput>, missingInformation: Array<string>, };
+export type FactExtraction = { facts: Array<FactInput>, missingInformation: Array<string>, recipient?: RecipientInference, };
+
+export type RecipientInference = { recipients: Array<string>, evidence: string | null, question: string | null, };
+
+export type StageFailure = { stageId: StageId, code: string, message: string, };
 
 export type ScoreDimension = { score: number, maxScore: number, findings: Array<string>, };
 
@@ -44,9 +48,9 @@ modelText: string | null, initialDocument: ODoc | null, confirmedDocType: Docume
  */
 templateId: string | null, };
 
-export type DraftOutcome = { sessionId: string, document: ODoc, typeDecision: TypeDecision, facts: FactExtraction, stages: Array<StageSummary>, lintReport: LintReport | null, factCheckReport: FactCheckReport | null, score: Score | null, revisionIterations: number, };
+export type DraftOutcome = { sessionId: string, document: ODoc, typeDecision: TypeDecision, facts: FactExtraction, stages: Array<StageSummary>, lintReport: LintReport | null, factCheckReport: FactCheckReport | null, score: Score | null, revisionIterations: number, warnings: Array<StageFailure>, };
 
-export type DraftEvent = { "type": "stage_started", stageId: StageId, } | { "type": "token", stageId: StageId, content: string, } | { "type": "needs_document_type", decision: TypeDecision, } | { "type": "stage_completed", output: StageOutput, } | { "type": "completed", outcome: DraftOutcome, };
+export type DraftEvent = { "type": "session_started", sessionId: string, } | { "type": "stage_started", stageId: StageId, } | { "type": "token", stageId: StageId, content: string, } | { "type": "needs_document_type", decision: TypeDecision, } | { "type": "stage_completed", output: StageOutput, } | { "type": "stage_failed", output: StageOutput, recoverable: boolean, } | { "type": "completed", outcome: DraftOutcome, };
 
 export type ReviewDimension = "format" | "content" | "language" | "logic" | "detail";
 

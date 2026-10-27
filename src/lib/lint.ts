@@ -112,14 +112,15 @@ export function lintDocument(document: ODoc): Finding[] {
     });
   }
 
-  const needsRecipient = ["request", "notice", "report", "letter"].includes(document.meta.docType);
+  const needsRecipient = ["request", "notice", "report", "letter", "decision", "reply", "instruction", "proposal", "invitation"].includes(document.meta.docType);
   if (needsRecipient && document.body.mainRecipients.every((recipient) => !recipient.trim())) {
     findings.push({
       id: "FMT-004",
-      severity: "error",
+      severity: "warn",
       nodeId: document.body.id,
-      message: `${documentTypeLabels[document.meta.docType]}缺少主送机关。`,
+      message: "主送机关尚未明确，已暂留空，不影响继续写作和导出。",
       location: "主体 · 主送机关",
+      suggestion: "可通过补充说明确认收文对象，正式发送前再核对。",
     });
   }
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { DraftEvent, DraftOutcome, RerunOutcome, TypeDecision } from "../lib/generated/engine";
+import type { DraftEvent, DraftOutcome, RerunOutcome, StageFailure, TypeDecision } from "../lib/generated/engine";
 import {
   draftStageLabels,
   draftStages,
@@ -51,6 +51,7 @@ export interface DraftPipeline {
   /** Streamed token text for the draft/deai stages. */
   text: string;
   error: string | null;
+  warnings: StageFailure[];
   typeDecision: TypeDecision | null;
   confirmedDocType: DocumentType | null;
   setConfirmedDocType: (value: DocumentType | null) => void;
@@ -107,6 +108,7 @@ export function useDraftPipeline({
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [warnings, setWarnings] = useState<StageFailure[]>([]);
   const [typeDecision, setTypeDecision] = useState<TypeDecision | null>(null);
   const [confirmedDocType, setConfirmedDocType] = useState<DocumentType | null>(null);
   // Catch blocks read the stage a failure died on; the render-time value would still be the
@@ -118,6 +120,11 @@ export function useDraftPipeline({
   const runBaseRef = useRef<ODoc | null>(null);
   const runningRef = useRef(false);
   const appliedRef = useRef(false);
+  const kindRef = useRef<DraftPipelineKind>("draft");
+  const sessionRef = useRef<string | null>(null);
+  const warningsRef = useRef<StageFailure[]>([]);
+  const lastBodyTextRef = useRef("");
+  const failureLoggedRef = useRef(false);
   // Async runs compare against the document they started from.
   const documentId = document.id;
 
@@ -135,8 +142,24 @@ export function useDraftPipeline({
   useEffect(() => {
     setCompletedStages([]);
     setSessionId(null);
+    sessionRef.current = null;
+    setWarnings([]);
     resetTransientState();
   }, [documentId, resetTransientState]);
+
+  useEffect(() => {
+    const onPageHide = () => {
+      if (!runningRef.current) return;
+      appendGenerationLog({
+        level: "error", event: "error", code: "view_unloaded",
+        message: "写作页面已关闭或重新加载；已生成正文可从起草记录中恢复。",
+        stage: stageRef.current, sessionId: sessionRef.current,
+        documentId: runBaseRef.current?.id, pipeline: kindRef.current, providerId,
+      });
+    };
+    window.addEventListener("pagehide", onPageHide);
+    return () => window.removeEventListener("pagehide", onPageHide);
+  }, [providerId]);
 
   function providerRejection(): string | null {
     const selected = providers.find((provider) => provider.id === providerId);
@@ -167,7 +190,8 @@ export function useDraftPipeline({
         event: "blocked",
         message,
         providerId,
-        pipeline: kind,
+        pipeline: kindRef.current,
+        sessionId: sessionRef.current,
       });
     }
     return false;
@@ -176,12 +200,17 @@ export function useDraftPipeline({
   function applyOutcome(outcome: DraftOutcome) {
     appliedRef.current = true;
     setSessionId(outcome.sessionId);
+    sessionRef.current = outcome.sessionId;
     resetTransientState();
+    setWarnings(outcome.warnings ?? warningsRef.current);
     appendGenerationLog({
       level: "info",
       event: "complete",
-      message: "起草完成，结果已写入正文",
-      pipeline: kind,
+      message: (outcome.warnings?.length ?? warningsRef.current.length) > 0
+        ? "正文已生成并保存，部分辅助检查未完成，请按提示复核"
+        : "起草完成，结果已写入正文",
+      pipeline: kindRef.current,
+      sessionId: outcome.sessionId,
       providerId,
       documentId: outcome.document.id,
     });
@@ -189,11 +218,19 @@ export function useDraftPipeline({
   }
 
   function handleEvent(event: DraftEvent) {
+    if (appliedRef.current) return;
+    if (runBaseRef.current && useWorkbenchStore.getState().document.id !== runBaseRef.current.id) return;
+    if (event.type === "session_started") {
+      sessionRef.current = event.sessionId;
+      setSessionId(event.sessionId);
+      return;
+    }
     if (event.type === "stage_started") {
       if (isDraftStage(event.stageId)) {
         stageRef.current = event.stageId;
         setStage(event.stageId);
         setFailedStage(null);
+        failureLoggedRef.current = false;
         if (event.stageId === "draft" || event.stageId === "deai") setText("");
         appendGenerationLog({
           level: "info",
@@ -201,7 +238,9 @@ export function useDraftPipeline({
           stage: event.stageId,
           message: `开始${draftStageLabels[event.stageId]}阶段`,
           providerId,
-          pipeline: kind,
+          pipeline: kindRef.current,
+          sessionId: sessionRef.current,
+          documentId: runBaseRef.current?.id,
         });
       }
       return;
@@ -222,6 +261,7 @@ export function useDraftPipeline({
         setStage(stageId);
         if ((stageId === "draft" || stageId === "deai") && event.output.content) {
           setText(event.output.content);
+          lastBodyTextRef.current = event.output.content;
         }
         appendGenerationLog({
           level: "info",
@@ -229,8 +269,35 @@ export function useDraftPipeline({
           stage: stageId,
           message: `${draftStageLabels[stageId]}阶段完成`,
           providerId,
-          pipeline: kind,
+          pipeline: kindRef.current,
+          sessionId: sessionRef.current,
+          documentId: runBaseRef.current?.id,
         });
+      }
+      return;
+    }
+    if (event.type === "stage_failed") {
+      const stageId = event.output.stageId;
+      if (!isDraftStage(stageId)) return;
+      let code: string | null = null;
+      try {
+        const parsed = JSON.parse(event.output.json ?? "null")?.code;
+        if (typeof parsed === "string") code = parsed;
+      } catch { /* Older runtimes may not attach a structured failure code. */ }
+      if (code === "document_type_confirmation_required") return;
+      const message = `${draftStageLabels[stageId]}阶段${event.output.status === "cancelled" ? "已取消" : "未完成"}：${event.output.content}`;
+      failureLoggedRef.current = true;
+      appendGenerationLog({
+        level: "error", event: "error", message, code, stage: stageId,
+        providerId, pipeline: kindRef.current, sessionId: sessionRef.current, documentId: runBaseRef.current?.id,
+      });
+      if (event.recoverable) {
+        warningsRef.current = [...warningsRef.current, { stageId, code: code ?? "stage_failed", message: event.output.content }];
+        setWarnings(warningsRef.current);
+        setText(lastBodyTextRef.current);
+      } else {
+        setFailedStage(stageId);
+        setError(message);
       }
       return;
     }
@@ -332,6 +399,12 @@ export function useDraftPipeline({
     });
     runningRef.current = true;
     appliedRef.current = false;
+    kindRef.current = nextKind;
+    sessionRef.current = null;
+    warningsRef.current = [];
+    lastBodyTextRef.current = "";
+    failureLoggedRef.current = false;
+    setWarnings([]);
     setDrafting(true);
     setKind(nextKind);
     setStage(null);
@@ -346,6 +419,8 @@ export function useDraftPipeline({
       setConfirmedDocType(null);
     }
 
+    const targetDocumentId = useWorkbenchStore.getState().document.id;
+    let acceptingEvents = true;
     try {
       const expected = JSON.stringify(useWorkbenchStore.getState().document);
       await saveBeforeDraft();
@@ -366,7 +441,7 @@ export function useDraftPipeline({
           templateId: (options.templateIdOverride ?? templateId) || null,
           ...(options.requiresModelText ? { modelText: modelText.trim() } : {}),
         },
-        handleEvent,
+        (event) => { if (acceptingEvents) handleEvent(event); },
       );
       // Older runtimes may return the outcome without delivering the final channel event.
       const current = useWorkbenchStore.getState().document;
@@ -374,8 +449,9 @@ export function useDraftPipeline({
         applyOutcome(outcome);
       }
     } catch (runError) {
+      const stillCurrent = useWorkbenchStore.getState().document.id === targetDocumentId;
       if (errorCode(runError) === "document_type_confirmation_required") {
-        setError(null);
+        if (stillCurrent) setError(null);
         appendGenerationLog({
           level: "info",
           event: "blocked",
@@ -385,9 +461,11 @@ export function useDraftPipeline({
         });
       } else {
         const message = ipcErrorMessage(runError);
-        setError(message);
-        if (isDraftStage(stageRef.current ?? "")) setFailedStage(stageRef.current);
-        appendGenerationLog({
+        if (stillCurrent) {
+          setError(message);
+          if (isDraftStage(stageRef.current ?? "")) setFailedStage(stageRef.current);
+        }
+        if (!failureLoggedRef.current) appendGenerationLog({
           level: "error",
           event: "error",
           message,
@@ -396,9 +474,11 @@ export function useDraftPipeline({
           providerId,
           pipeline: nextKind,
           documentId: document.id,
+          sessionId: sessionRef.current,
         });
       }
     } finally {
+      acceptingEvents = false;
       runBaseRef.current = null;
       runningRef.current = false;
       setDrafting(false);
@@ -436,13 +516,18 @@ export function useDraftPipeline({
       return;
     }
     runningRef.current = true;
+    appliedRef.current = false;
+    failureLoggedRef.current = false;
     setDrafting(true);
     setStage(stageId);
     stageRef.current = stageId;
     setFailedStage(null);
     setError(null);
+    appendGenerationLog({ level: "info", event: "start", message: `重跑${draftStageLabels[stageId]}阶段`, stage: stageId, sessionId, providerId, pipeline: kindRef.current });
     if (stageId === "draft" || stageId === "deai") setText("");
 
+    const targetDocumentId = useWorkbenchStore.getState().document.id;
+    let acceptingEvents = true;
     try {
       const expected = JSON.stringify(useWorkbenchStore.getState().document);
       await saveBeforeDraft();
@@ -451,7 +536,7 @@ export function useDraftPipeline({
         throw new IpcError("document_conflict", "准备运行时文档已变更，请基于最新内容重新发起。");
       }
       runBaseRef.current = structuredClone(snapshot);
-      const outcome = await rerunStage(sessionId, stageId, handleEvent);
+      const outcome = await rerunStage(sessionId, stageId, (event) => { if (acceptingEvents) handleEvent(event); });
       // The rerun streams only stage events, so the returned document is applied here; the
       // content guard keeps this idempotent if a future runtime also delivers a final event.
       const current = useWorkbenchStore.getState().document;
@@ -466,13 +551,19 @@ export function useDraftPipeline({
         resetTransientState();
       }
     } catch (runError) {
+      const stillCurrent = useWorkbenchStore.getState().document.id === targetDocumentId;
       if (errorCode(runError) === "document_type_confirmation_required") {
-        setError(null);
+        if (stillCurrent) setError(null);
       } else {
-        setError(ipcErrorMessage(runError));
-        if (isDraftStage(stageRef.current ?? "")) setFailedStage(stageRef.current);
+        const message = ipcErrorMessage(runError);
+        if (stillCurrent) {
+          setError(message);
+          if (isDraftStage(stageRef.current ?? "")) setFailedStage(stageRef.current);
+        }
+        if (!failureLoggedRef.current) appendGenerationLog({ level: "error", event: "error", message, code: errorCode(runError), stage: stageRef.current, sessionId, providerId, pipeline: kindRef.current });
       }
     } finally {
+      acceptingEvents = false;
       runBaseRef.current = null;
       runningRef.current = false;
       setDrafting(false);
@@ -488,6 +579,7 @@ export function useDraftPipeline({
     sessionId,
     text,
     error,
+    warnings,
     typeDecision,
     confirmedDocType,
     setConfirmedDocType,

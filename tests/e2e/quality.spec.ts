@@ -1,5 +1,19 @@
 import { expect, test } from "@playwright/test";
-import { enterWorkspace } from "./helpers";
+import { enterWorkspace, openMenuItem } from "./helpers";
+
+test("an unspecified main recipient does not block export", async ({ page }) => {
+  await page.goto("/");
+  await enterWorkspace(page);
+  await openMenuItem(page, "文档信息");
+  const info = page.getByRole("dialog", { name: "文档信息" });
+  await info.getByLabel("主送机关").fill("");
+  await info.getByRole("button", { name: "完成" }).click();
+  const downloading = page.waitForEvent("download");
+  await page.getByRole("button", { name: "导出", exact: true }).click();
+  const download = await downloading;
+  expect(download.suggestedFilename()).toMatch(/\.odoc\.json$/);
+  await expect(page.getByRole("dialog", { name: "质检结果" })).toBeHidden();
+});
 
 test("blocked export opens quality checks and facts can be confirmed and corrected", async ({ page }) => {
   await page.goto("/");
