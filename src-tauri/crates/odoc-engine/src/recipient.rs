@@ -213,7 +213,7 @@ mod tests {
         ] {
             let mut document = ODoc::empty();
             let result = apply_recipient_inference(&mut document, material, Some(candidate));
-            assert!(document.body.main_recipients.is_empty());
+            assert_eq!(document.body.main_recipients.len(), 0);
             assert!(result.question.is_some());
         }
     }
@@ -241,7 +241,7 @@ mod tests {
         let mut document = ODoc::empty();
         document.meta.doc_type = DocumentType::WorkReport;
         let result = apply_recipient_inference(&mut document, "写住建工作汇报", None);
-        assert!(result.recipients.is_empty());
+        assert_eq!(result.recipients.len(), 0);
         assert_eq!(result.question, None);
     }
 
@@ -271,7 +271,7 @@ mod tests {
                 question: None,
             }),
         );
-        assert!(document.body.main_recipients.is_empty());
+        assert_eq!(document.body.main_recipients.len(), 0);
         assert!(result.question.is_some());
         let result = apply_recipient_inference(
             &mut document,
@@ -281,7 +281,7 @@ mod tests {
                 ..inference("市政府", "市政府")
             }),
         );
-        assert!(document.body.main_recipients.is_empty());
+        assert_eq!(document.body.main_recipients.len(), 0);
         assert_eq!(result.question.as_deref(), Some("是报送市政府吗？"));
     }
 }

@@ -2182,7 +2182,7 @@ mod tests {
                 .expect("optional metadata must not block drafting");
             assert_eq!(outcome.document.body.main_recipients, expected);
             assert_eq!(outcome.revision_iterations, 0);
-            assert!(outcome.warnings.is_empty());
+            assert_eq!(outcome.warnings.len(), 0);
             assert_eq!(
                 outcome
                     .stages
