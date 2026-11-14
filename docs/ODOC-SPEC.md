@@ -1,5 +1,7 @@
 # ODoc 0.1 规范
 
+[返回文档入口](index.md)
+
 ODoc（Official Document Model）是秉笔内部唯一的公文数据模型。编辑器、质检、流水线、知识库引用和导出器都读写同一棵 JSON AST；Markdown、纯文本和 docx 只是导入导出格式。
 
 本规范对应 Rust crate `src-tauri/crates/odoc-model`，当前 schema 版本为 `0.1.0`。

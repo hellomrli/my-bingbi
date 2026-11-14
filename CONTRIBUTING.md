@@ -20,14 +20,14 @@
    cargo clippy --workspace --exclude my-bingbi --all-targets -- -D warnings
    cargo fmt --all -- --check
    ```
-   壳 crate `my-bingbi` 需要 Tauri 2 的桌面系统依赖(见 README「本地开发」),本地可排除,CI 会做完整编译检查;
-3. 修改 Rust 公共类型后,重新生成前端声明(见 README「本地开发」的绑定生成命令);
+   壳 crate `my-bingbi` 需要 Tauri 2 的桌面系统依赖(见 [开发指南](docs/development.md)),本地可排除,CI 会做完整编译检查;
+3. 修改 Rust 公共类型后,重新生成前端声明(见 [开发指南](docs/development.md)的绑定生成命令);
 4. 提交信息采用 [Conventional Commits](https://www.conventionalcommits.org/) 风格(`feat` / `fix` / `docs` / `style` / `chore` 等);
 5. 发起 Pull Request,说明改动动机与影响范围。
 
 ## 代码结构
 
-见 README「架构一览」。核心约定:
+见 [架构说明](docs/architecture.md)。核心约定:
 
 - 文档模型以 `odoc-model` 的 ODoc AST 为唯一真相源;
 - 导出排版集中在 `odoc-export`:DOCX 走 Word 模板,PDF 走内置 Typst 引擎(零外部依赖);
